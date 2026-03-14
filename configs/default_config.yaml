@@ -1,0 +1,106 @@
+# Default configuration for Zero-Trust Projection Federated Learning experiments
+
+# Global settings
+global:
+  seed: 42
+  device: "auto"  # Options: "cpu", "cuda", "mps", "auto" (auto-selects best available)
+  results_dir: "./results"
+  data_dir: "./data"
+
+# Model configuration
+model:
+  type: "cifar_cnn"
+  kwargs:
+    num_classes: 10
+
+# Data configuration
+data:
+  dataset: "cifar10"
+  num_clients: 100
+  data_distribution: "dirichlet"
+  alpha: 0.5  # Dirichlet concentration parameter (lower = more non-IID)
+
+# Federated learning settings
+federated_learning:
+  num_rounds: 50
+  local_epochs: 5
+  batch_size: 32
+  learning_rate: 0.01
+  fraction_fit: 1.0
+  fraction_evaluate: 1.0
+
+# Projection settings
+projection:
+  k_ratio: 0.1
+  structured: true
+  ephemeral: true  # Generate new projection matrix each round
+
+# Byzantine detection settings
+detection:
+  method: "isomorphic_verification"
+  threshold: 1.5
+  min_consensus: 0.6
+
+# Attack configurations
+attacks:
+  null_space:
+    enabled: true
+    num_attackers: 2
+    intensity: 1.0
+  layerwise_backdoor:
+    enabled: true
+    num_attackers: 3
+    target_layers: ["conv1", "conv2"]
+    intensity: 1.0
+  distributed_poison:
+    enabled: true
+    num_attackers: 2
+    intensity: 0.1
+
+# Experiment-specific configurations
+experiments:
+  E1:  # Clean accuracy preservation
+    num_clients: 20
+    alpha: 0.1  # Very non-IID for tail class emphasis
+    k_values: [50, 100, 200]
+    rare_class_threshold: 20
+    num_trials: 3
+
+  E3:  # Scalability comparison
+    parameter_counts: [1000, 5000, 10000, 50000, 100000]
+    k_values: [50, 100, 200]
+    client_counts: [10, 50, 100, 200]
+    projection_dims: [50, 100, 200]
+    num_clients: 100
+    num_rounds: 3
+    num_trials: 3
+
+  E4:  # Optimal k selection
+    num_clients: 100
+    k_values: [50, 100, 200]
+    attack_ratios: [0.0, 0.1, 0.2, 0.3]
+    num_trials: 3
+
+  E5:  # Structured vs Unstructured
+    num_honest_clients: 15
+    num_attackers: 5
+    k_ratio: 0.1
+    target_layers: ["conv1", "conv2"]
+
+  attack_resistance:
+    num_honest_clients: 8
+    num_attackers: 2
+    num_rounds: 10
+
+# Logging configuration
+logging:
+  level: "INFO"
+  format: "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
+  file: "zero_trust_fl.log"
+
+# Visualization settings
+visualization:
+  save_plots: true
+  plot_format: "png"
+  dpi: 300
+  style: "seaborn"
