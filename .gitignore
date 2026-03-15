@@ -1,6 +1,8 @@
 .venv
-data/*
-data
 .idea
 .DS_Store
 src/.DS_Store
+data/cifar-10-batches-py/*
+data/cifar-10-python.tar.gz
+tavs_esp_logs
+tavs_esp_results

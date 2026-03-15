@@ -171,11 +171,34 @@ class SimpleTransformer(nn.Module):
             idx += param_size
 
 
+class FederatedModel(nn.Module):
+    """Base class for federated learning models with TAVS-ESP support."""
+
+    def get_weights_flat(self) -> torch.Tensor:
+        """Get all model parameters as a flat tensor."""
+        params = []
+        for param in self.parameters():
+            params.append(param.flatten())
+        return torch.cat(params)
+
+    def set_weights_flat(self, params_flat: torch.Tensor):
+        """Set all model parameters from a flat tensor."""
+        idx = 0
+        for param in self.parameters():
+            param_size = param.numel()
+            param.data = params_flat[idx:idx + param_size].reshape(param.shape)
+            idx += param_size
+
+
 def get_model(model_type: str, **kwargs) -> nn.Module:
     """Factory function to create models."""
     if model_type == 'cifar_cnn':
         return CIFARCNN(**kwargs)
     elif model_type == 'simple_transformer':
         return SimpleTransformer(**kwargs)
+    elif model_type == 'gpt2' or model_type == 'gpt2_small':
+        # Import GPT-2 model here to avoid circular imports
+        from .gpt2_model import get_gpt2_model
+        return get_gpt2_model(**kwargs)
     else:
         raise ValueError(f"Unknown model type: {model_type}")

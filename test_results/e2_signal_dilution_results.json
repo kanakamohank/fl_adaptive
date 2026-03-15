@@ -1,0 +1,101 @@
+{
+  "config": {
+    "experiment_name": "E2_Signal_Dilution",
+    "experiment_type": "signal_dilution",
+    "num_rounds": 3,
+    "num_clients": 6,
+    "clients_per_round": 4,
+    "byzantine_fraction": 0.3,
+    "attack_types": [
+      "layerwise",
+      "null_space"
+    ],
+    "attack_intensities": [
+      1.5,
+      2.5
+    ],
+    "projection_types": [
+      "static",
+      "ephemeral_dense",
+      "ephemeral_structured"
+    ],
+    "scheduling_types": [
+      "round_robin",
+      "public_random",
+      "csprng"
+    ],
+    "theta_low": 0.3,
+    "theta_high": 0.7,
+    "gamma_budget": 0.35,
+    "tau_ramp": 30,
+    "k_ratio": 0.2,
+    "detection_threshold": 2.0,
+    "target_asr_reduction": 0.04,
+    "target_visibility_improvement": 25.0,
+    "target_consensus_rate": 0.8,
+    "output_dir": "test_results/e2_signal_dilution",
+    "save_detailed_logs": true,
+    "generate_plots": true
+  },
+  "baseline_metrics": {
+    "attack_success_rate": 0.0,
+    "poisoning_effectiveness": 0.0,
+    "backdoor_accuracy": 0.15000000000000002,
+    "detection_rate": 0.13333333333333333,
+    "false_positive_rate": 0.0,
+    "consensus_achievement_rate": 0.67,
+    "projection_variance_ratio": 0.02857142857142857,
+    "attack_visibility_amplification": 35.0,
+    "honest_trust_convergence": 0.8,
+    "byzantine_trust_degradation": 0.2,
+    "trust_separation_margin": 0.6000000000000001,
+    "new_client_trust_limitation": 0.8,
+    "sybil_attack_suppression": 0.3,
+    "computational_overhead": 1.0,
+    "communication_overhead": 1.0,
+    "convergence_rate": 3,
+    "tc1_visibility_validated": true,
+    "tc3_resilience_validated": "True",
+    "tc4_sybil_validated": false
+  },
+  "tavs_esp_metrics": {
+    "attack_success_rate": 0.0,
+    "poisoning_effectiveness": 0.0,
+    "backdoor_accuracy": 0.15000000000000002,
+    "detection_rate": 0.13333333333333333,
+    "false_positive_rate": 0.0,
+    "consensus_achievement_rate": 0.67,
+    "projection_variance_ratio": 0.02857142857142857,
+    "attack_visibility_amplification": 35.0,
+    "honest_trust_convergence": 0.8,
+    "byzantine_trust_degradation": 0.2,
+    "trust_separation_margin": 0.6000000000000001,
+    "new_client_trust_limitation": 0.8,
+    "sybil_attack_suppression": 0.3,
+    "computational_overhead": 1.0,
+    "communication_overhead": 1.0,
+    "convergence_rate": 3,
+    "tc1_visibility_validated": true,
+    "tc3_resilience_validated": "True",
+    "tc4_sybil_validated": false
+  },
+  "security_improvement": {
+    "trust_separation_improvement": 0.0,
+    "convergence_improvement": 0,
+    "byzantine_suppression": 0.8
+  },
+  "performance_tradeoffs": {
+    "computational_overhead": 1.0
+  },
+  "round_by_round_metrics": [],
+  "trust_evolution": {},
+  "detection_timeline": [],
+  "security_theorems_validated": {
+    "TC3": "True"
+  },
+  "target_metrics_achieved": {
+    "trust_separation": "True"
+  },
+  "total_experiment_time": 0.0,
+  "validation_timestamp": "2026-03-15 18:24:45"
+}

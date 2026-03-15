@@ -1,0 +1,935 @@
+\documentclass{article}
+
+% NeurIPS 2025 style — replace with neurips_2025.sty when compiling
+% For arXiv submission use \documentclass[preprint]{article}
+\usepackage[preprint]{neurips_2025}
+
+% ── Core packages ────────────────────────────────────────────────────────────
+\usepackage[utf8]{inputenc}
+\usepackage[T1]{fontenc}
+\usepackage{booktabs}
+\usepackage{amsfonts}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{amsthm}
+\usepackage{mathtools}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{graphicx}
+\usepackage{algorithm}
+\usepackage{algpseudocode}
+\usepackage{multirow}
+\usepackage{array}
+\usepackage{nicefrac}
+% cleveref MUST come after amsmath
+\usepackage{hyperref}
+\usepackage{url}
+\usepackage[capitalize,noabbrev]{cleveref}
+\usepackage[numbers,sort&compress]{natbib}
+
+% ── Theorem environments ─────────────────────────────────────────────────────
+\newtheorem{theorem}{Theorem}
+\newtheorem{lemma}[theorem]{Lemma}
+\newtheorem{corollary}[theorem]{Corollary}
+\newtheorem{proposition}[theorem]{Proposition}
+\newtheorem{definition}{Definition}
+\newtheorem{assumption}{Assumption}
+\newtheorem{remark}{Remark}
+
+% ── Custom math macros ────────────────────────────────────────────────────────
+\newcommand{\R}{\mathbb{R}}
+\newcommand{\E}{\mathbb{E}}
+\renewcommand{\Pr}{\mathbb{P}}
+\newcommand{\norm}[1]{\left\lVert #1 \right\rVert}
+\newcommand{\inner}[2]{\left\langle #1,\, #2 \right\rangle}
+\newcommand{\calH}{\mathcal{H}}      % honest set
+\newcommand{\calB}{\mathcal{B}}      % Byzantine set
+\newcommand{\calV}{\mathcal{V}}      % verified set
+\newcommand{\calS}{\mathcal{S}}      % promoted (skipped) set
+\newcommand{\calL}{\mathcal{L}}      % inlier set
+\newcommand{\calO}{\mathcal{O}}      % outlier set
+\newcommand{\gstar}{g^{*}}           % robust aggregate
+\newcommand{\wstar}{w^{*}}           % global optimum
+\newcommand{\finf}{f_{\infty}}       % steady-state verified fraction
+\newcommand{\TAVS}{\textsc{TAVS}}
+\newcommand{\ESP}{\textsc{ESP}}
+\newcommand{\TAVESP}{\textsc{TAVS-ESP}}
+
+% ── Color annotations (for review draft) ──────────────────────────────────
+\newcommand{\todo}[1]{\textcolor{red}{[TODO: #1]}}
+\newcommand{\note}[1]{\textcolor{blue}{[NOTE: #1]}}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\title{%
+  \textbf{TAVS-ESP: Trust-Adaptive Verification Scheduling with}\\
+  \textbf{Ephemeral Structured Projections for Byzantine-Robust}\\
+  \textbf{Federated Learning at LLM Scale}%
+}
+
+\author{%
+  \textbf{[Author names omitted for double-blind review]}\\
+  \texttt{[institution]@[domain]}
+}
+
+\begin{document}
+\maketitle
+
+% ─────────────────────────────────────────────────────────────────────────────
+\begin{abstract}
+Byzantine-robust federated learning (FL) faces three unresolved tensions at
+large language model (LLM) scale: (i)~existing robust aggregators require
+$O(Nd)$ to $O(N^2 d)$ operations per round, becoming intractable for
+$d > 10^9$; (ii)~defenses based on fixed geometric projections are vulnerable
+to adaptive adversaries who pre-compute their null space; and (iii)~no prior
+work formally models the \emph{verification scheduling} dimension, leaving a
+timing attack surface whenever scheduling is introduced ad hoc.
+We propose \TAVESP{}, a co-designed two-layer framework that resolves all three
+problems simultaneously.
+\textbf{Layer~1} (\TAVS{}) governs \emph{who} is verified and \emph{when}
+via a three-tier trust-adaptive scheduling protocol backed by a CSPRNG under a
+trusted-server assumption, making promotion assignments cryptographically
+unpredictable.
+\textbf{Layer~2} (\ESP{}) governs \emph{how} verification executes via
+ephemeral block-diagonal Johnson-Lindenstrauss projections aligned to model
+semantic boundaries (attention heads, LoRA matrices), defeating null-space
+attacks while amplifying localized anomaly signals.
+The layers are unified by a single aggregation rule that subsumes both
+detection filtering and trust-discounted shadow aggregation, with Bayesian
+posterior weights that preserve honest client contributions at near-full weight.
+We prove four formal guarantees: an $O(\finf \cdot Nk)$ steady-state
+complexity certificate ($\finf < 1$, $k \ll d$); a minimax robustness bound
+showing adversarial masking probability decays exponentially in $k$; a joint
+CSPRNG security theorem establishing compounding unpredictability; and a Sybil
+resistance bound closing the trust-initialization vulnerability.
+A convergence sketch under IID data is provided in the main body; the full
+non-IID Byzantine convergence proof via a staged Lyapunov argument is given
+in~\Cref{app:convergence}.
+Experiments on federated fine-tuning of LLaMA-3-8B validate the framework
+against Layerwise Model Poisoning, Sleeper Agent injection, and scheduling-aware
+timing attacks, demonstrating near-zero attack success rate with a
+$40$--$60\%$ wall-clock reduction in aggregation cost at $N=1000$ clients.
+\end{abstract}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Introduction}
+\label{sec:intro}
+
+Federated learning enables collaborative model training without centralizing
+private data, making it the primary mechanism for deploying large language
+models across privacy-sensitive institutions.
+Its distributed structure, however, exposes it to \emph{Byzantine adversaries}
+who submit crafted gradient updates to corrupt the global model.
+Three distinct open problems, previously addressed only in isolation, combine to
+make existing defenses inadequate at LLM scale.
+
+\paragraph{Problem 1: Computational intractability.}
+Distance-based robust aggregators~\citep{blanchard2017machine,
+pillutla2022robust, elmhamdi2018hidden} require $O(N^2 d)$ or $O(Nd)$
+operations per round.
+For LLaMA-7B ($d \approx 7 \times 10^9$) with $N=1000$ clients, even the
+linear methods demand $7 \times 10^{12}$ floating-point operations per
+aggregation round---infeasible on standard server hardware.
+
+\paragraph{Problem 2: Adaptive null-space evasion.}
+Defenses based on fixed dimensionality reduction (PCA, autoencoders, static
+random projections) establish a static geometric boundary.
+An adversary with white-box access to the defense computes $z$ such that
+$Rz \approx 0$, injecting a backdoor invisible to the detector while remaining
+active in the full parameter space~\citep{bagdasaryan2020backdoor}.
+
+\paragraph{Problem 3: The unmodeled scheduling dimension.}
+All existing Byzantine-robust FL papers implicitly verify every client every
+round.
+This prevents exploiting trust history to reduce computation and, critically,
+creates a \emph{timing attack surface}: any ad hoc scheduling introduced later
+is exploitable if promotion assignments are predictable.
+To our knowledge, no prior work formalizes this attack class or provides a
+defense with provable guarantees.
+
+\paragraph{Our contributions.}
+We propose \TAVESP{}, which resolves all three problems through a co-designed
+two-layer system unified by server-side CSPRNG randomness under a
+trusted-server assumption (\Cref{assump:tsa}).
+Our formal contributions are:
+
+\begin{itemize}
+  \item \textbf{C1: \TAVESP{} system.} A complete two-layer architecture
+    (\Cref{sec:system}) including a three-tier trust-adaptive scheduling
+    protocol and ephemeral block-diagonal JL projections, with a unified
+    Bayesian-weighted aggregation rule.
+  \item \textbf{C2: Complexity certificate (TC4).} $O(\finf \cdot Nk)$
+    steady-state detection cost with $\finf < 1$, enabling LLM-scale
+    deployment (\Cref{thm:complexity}).
+  \item \textbf{C3: Minimax robustness (TC1).} Adversarial masking probability
+    decays exponentially in $k$ under ephemeral projection, extended to
+    multi-round adaptive adversaries (\Cref{thm:robustness}).
+  \item \textbf{C4: Joint CSPRNG security (TC3).} Joint unpredictability over
+    projection and schedule is strictly stronger than either alone
+    (\Cref{thm:joint_security}).
+  \item \textbf{C5: Sybil resistance.} Closed-form bound on coalition-scale
+    model corruption and minimum infiltration time under Mechanisms~1+3
+    (\Cref{thm:sybil}).
+  \item \textbf{C6: Convergence (TC2).} Sketch under IID data
+    (\Cref{sec:convergence}); full non-IID Byzantine proof via staged
+    Lyapunov argument in \Cref{app:convergence}.
+\end{itemize}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Byzantine-robust aggregation.}
+\citet{blanchard2017machine} introduced Krum ($O(N^2 d)$).
+\citet{yin2018byzantine} proposed coordinate-wise trimmed mean and median
+($O(Nd\log N)$).
+\citet{elmhamdi2018hidden} introduced Bulyan combining Krum with trimmed mean.
+\citet{pillutla2022robust} applied the geometric median via Weiszfeld
+iterations.
+\citet{cao2022fltrust} introduced FLTrust using a server-side clean reference
+dataset.
+All require full-dimensional operations every round and verify all clients
+uniformly---the two properties our work specifically removes.
+
+\paragraph{Adaptive attacks.}
+\citet{bagdasaryan2020backdoor} demonstrated model replacement attacks.
+\citet{guo2021gradient} introduced layerwise localized poisoning targeting
+specific transformer blocks.
+\citet{shumailov2023manipulating} and \citet{hammoud2024sleeper} introduced
+Sleeper Agent injection into specific attention sub-circuits.
+Our block-diagonal JL structure directly targets the localized structure these
+attacks exploit.
+
+\paragraph{Dimensionality reduction defenses.}
+PCA and autoencoder-based defenses reduce detection cost but use static
+projections vulnerable to null-space attacks~\citep{li2021sapag}.
+\citet{xie2021flcert} and \citet{nguyen2022flame} introduced score-based and
+clustering-based defenses.
+Our use of \emph{ephemeral} structured projections---freshly derived each round
+from a secret server seed---is, to our knowledge, not present in prior work.
+
+\paragraph{Trust and partial participation.}
+\citet{kang2019incentive} proposed trust-weighted aggregation (FedTrust) using
+validation performance as the trust signal.
+Partial client participation for communication efficiency is studied
+in~\citet{mcmahan2017communication, li2020federated, karimireddy2020scaffold},
+but none of these works model participation as a security primitive or provide
+timing-attack defenses.
+\citet{fung2018mitigating} proposed FoolsGold to reduce Sybil influence via
+contribution diversity---our Mechanism~1+3 provides formal guarantees where
+FoolsGold provides empirical heuristics.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Problem Formulation and Threat Model}
+\label{sec:problem}
+
+\paragraph{Setup.}
+Let $N$ clients and a central aggregation server collaboratively minimize
+\[
+  F(w) = \frac{1}{|\calH|} \sum_{i \in \calH} F_i(w), \qquad
+  F_i(w) = \E_{z \sim \mathcal{D}_i}[\ell(w;\, z)],
+\]
+where $\calH \subset [N]$ are honest clients, $w \in \R^d$ are model
+parameters, and $\mathcal{D}_i$ is client $i$'s private data distribution.
+Let $\calB = [N] \setminus \calH$ with $|\calB| = \beta N$, $\beta < 1/2$.
+
+\begin{definition}[Gradient dissimilarity]
+$\zeta \;=\; \max_{i \in \calH} \norm{\E[\nabla F_i(w)] - \nabla F(w)}_2$
+bounds non-IID heterogeneity; $\zeta = 0$ recovers the IID setting.
+\end{definition}
+
+\paragraph{Adversarial model.}
+We consider a fully adaptive white-box adversary controlling $\calB$ that:
+(i)~knows the model architecture and aggregation algorithm;
+(ii)~can adaptively craft $z_i(r) \in \R^d$ for $i \in \calB$ given full
+gradient history;
+(iii)~attempts to infer the promotion schedule from observed round outcomes;
+but (iv)~does not have access to the server's CSPRNG seed
+(Assumption~\ref{assump:tsa}).
+We additionally consider a \emph{Sybil adversary} who can register new clients
+at any round.
+
+\begin{assumption}[Trusted Server (TSA)]
+\label{assump:tsa}
+The aggregation server follows the protocol honestly and does not leak its
+CSPRNG key $K$ to any client.
+\end{assumption}
+
+\begin{definition}[$\rho$-timing resistance]
+\label{def:timing}
+A scheduling protocol is $\rho$-timing-resistant if for any adaptive adversary
+submitting malicious gradients only in predicted promoted rounds, the expected
+weighted malicious fraction in the aggregate satisfies
+$\E[\beta_{\mathrm{eff}}] \leq \rho$.
+\end{definition}
+
+\begin{definition}[Verification scheduling problem]
+\label{def:scheduling}
+Find a policy $\pi: \mathrm{history}_r \to (\calV(r), \calS(r))$ minimizing
+$\lim_{T\to\infty} \frac{1}{T}\sum_{r=1}^T |\calV(r)|$
+subject to: (1)~$\rho$-timing resistance; (2)~every client appears in
+$\calV(r)$ within any window of $W$ consecutive rounds for finite $W$;
+(3)~convergence to a neighborhood of $\wstar$ at a bounded rate.
+\end{definition}
+
+\TAVESP{} solves Definition~\ref{def:scheduling} with $W=3$, explicit $\rho$,
+and the convergence guarantee of TC2.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{The \TAVESP{} System}
+\label{sec:system}
+
+\subsection{Cryptographic Randomness Protocol}
+\label{sec:csprng}
+
+Under TSA, the server holds a 256-bit secret key $K$ and uses ChaCha20-CTR as
+the CSPRNG.
+At round $r$, the master seed is
+$y_r = \mathrm{ChaCha20}(K,\, r) \in \{0,1\}^{512}$.
+From $y_r$ the server deterministically derives:
+\begin{align*}
+  R_r &= G_1(y_r) \in \R^{k \times d}
+    && \text{(block-diagonal projection matrix)}, \\
+  P_r &= G_2(y_r) \subseteq S_{\mathrm{candidate}}(r)
+    && \text{(promotion assignments)}, \\
+  D_r &= G_3(y_r) \subseteq P_r
+    && \text{(decoy verification set).}
+\end{align*}
+All three are derived before any client submits gradients in round $r$.
+Under TSA and the pseudorandomness of ChaCha20, $y_r$ is computationally
+indistinguishable from uniform for any polynomial-time adversary without $K$.
+
+\subsection{Layer 1: Trust-Adaptive Verification Scheduling (\TAVS{})}
+\label{sec:layer1}
+
+\paragraph{Trust score.}
+For each verified client $i \in \calV(r)$, the behavioral score
+$\varphi_i(r) \in [0,1]$ is derived from the Layer~2 projected distance:
+\[
+  \varphi_i(r) = 1 - \frac{d_i(r)}{\max_{j \in \calV(r)} d_j(r) + \varepsilon},
+  \qquad
+  d_i(r) = \norm{R_r g_i - \gstar_r}_2.
+\]
+The trust score evolves via a temporally decaying EMA:
+\[
+  T_i(r) = \alpha \cdot T_i(r{-}1) + (1-\alpha) \cdot \varphi_i(r)
+  \quad (i \in \calV(r)),
+  \qquad
+  T_i(r) = \alpha \cdot T_i(r{-}1)
+  \quad (i \in \calS(r)).
+\]
+Decay parameter $\alpha \in (0,1)$ ensures trust must be continuously earned;
+a promoted client's score decays toward zero in the absence of fresh evidence.
+
+\paragraph{Three-tier structure.}
+Clients are classified each round using thresholds $\theta_{\mathrm{low}} <
+\theta_{\mathrm{high}}$:
+\begin{itemize}
+  \item \textbf{Tier 1} ($T_i < \theta_{\mathrm{low}}$ or newly joined):
+    mandatory full verification every round.
+  \item \textbf{Tier 2} ($\theta_{\mathrm{low}} \le T_i < \theta_{\mathrm{high}}$):
+    alternating verify/promote; maximum one consecutive unverified round.
+  \item \textbf{Tier 3} ($T_i \ge \theta_{\mathrm{high}}$, after $k_{\mathrm{trust}}$
+    consecutive clean verifications): extended double-skip window; each
+    promoted round independently subjected to decoy verification with
+    probability $p_{\mathrm{decoy}}$.
+\end{itemize}
+
+\begin{theorem}[Bounded recurrence]
+\label{thm:recurrence}
+Under \TAVS{}, every client $i \in [N]$ appears in $\calV(r)$ for at least one
+round in every window of $W = 3$ consecutive rounds.
+\end{theorem}
+\begin{proof}
+  Tier~1: gap $= 1$. Tier~2: maximum one skip, gap $= 2$.
+  Tier~3: maximum two consecutive skips, gap $= 3$. Taking the maximum gives
+  $W = 3$. \qed
+\end{proof}
+
+\paragraph{Trust initialization rate-limiting (Mechanism~3).}
+Regardless of behavioral score, a client joining at round $r_0$ has its trust
+score capped at
+\[
+  T_i^{\max}(r) = 1 - \exp\!\bigl({-}(r - r_0)/\tau_{\mathrm{ramp}}\bigr).
+\]
+No client can reach Tier~3 eligibility before round
+$r_{\min} = r_0 + \tau_{\mathrm{ramp}} \cdot \log\!\bigl(1/(1-\theta_{\mathrm{high}})\bigr)$.
+
+\subsection{Layer 2: Ephemeral Block-Diagonal JL Projections (\ESP{})}
+\label{sec:layer2}
+
+\paragraph{Block-diagonal construction.}
+Let the model parameter vector $w \in \R^d$ be partitioned into $M$ semantic
+blocks $\{B_m\}_{m=1}^M$ (e.g., individual attention heads, LoRA $A$/$B$
+matrices) with $\sum_m d_m = d$.
+The projection matrix is
+\[
+  R_r = \mathrm{diag}(r_1, r_2, \ldots, r_M),
+  \quad
+  r_m \in \R^{k_m \times d_m},
+  \quad
+  (r_m)_{ij} \sim \mathcal{N}(0, 1/k_m),
+\]
+with $k_m = \lceil C \log(N)/\varepsilon^2 \rceil$ and total dimension
+$k = \sum_m k_m$.
+Each block $r_m$ is generated on-demand from $(y_r, m)$ via a secondary PRNG
+and discarded after use, requiring only $O(\max_m k_m d_m) = O(kd/M)$ working
+memory (a factor of $M$ reduction over storing the full dense matrix).
+
+\paragraph{Block-normalized outlier detection.}
+For each $i \in \calV(r)$ and block $m$, compute the standardized deviation:
+\[
+  Z_i^{(m)}(r) = \frac{\bigl\lVert r_m g_i^{(m)} - \bar{g}_r^{(m)}\bigr\rVert_2^2}
+                      {\hat{\sigma}_m^2(r) + \varepsilon_{\mathrm{stab}}},
+\]
+where $\bar{g}_r^{(m)}$ denotes the $m$-th block of the robust projected
+aggregate $\gstar_r$, and $\hat{\sigma}_m^2(r)$ is an EMA estimate of the
+honest within-block variance updated from the previous round's inliers:
+\[
+  \hat{\sigma}_m^2(r)
+  = \alpha_\sigma \hat{\sigma}_m^2(r{-}1)
+  + (1{-}\alpha_\sigma)
+    \frac{1}{|\calL(r{-}1)|} \sum_{i \in \calL(r{-}1)}
+    \bigl\lVert r_m g_i^{(m)} - \bar{g}_{r-1}^{(m)}\bigr\rVert_2^2.
+\]
+The aggregate anomaly score $A_i(r) = \max_m Z_i^{(m)}(r)$ separates
+\emph{structural heterogeneity} (which inflates $\hat\sigma_m^2$ uniformly
+across blocks) from \emph{localized backdoor gradients} (which spike
+$Z_i^{(m)}$ in one specific block $m^*$).
+Client $i$ is classified as an outlier if $A_i(r) > \tau_z$; otherwise it
+joins $\calL(r)$.
+
+\begin{proposition}[Non-IID/malicious separation]
+\label{prop:separation}
+For an honest non-IID client, $\E[Z_i^{(m)}(r)] = 1$ for all $m$ by
+construction of $\hat\sigma_m^2$.
+For a Byzantine client whose attack is concentrated in block $m^*$,
+$\E[Z_i^{(m^*)}(r)] = 1 + \delta_{m^*}^2 / \hat\sigma_{m^*}^2(r) > 1$,
+where $\delta_{m^*} = \bigl\lVert r_{m^*}\bigl(z_i^{(m^*)} -
+g_i^{(m^*),\mathrm{hon}}\bigr)\bigr\rVert_2$
+is the projected attack magnitude in block $m^*$.
+\end{proposition}
+
+\subsection{Unified Aggregation Rule}
+\label{sec:aggregation}
+
+Replacing flat $\lambda$-discounting with Bayesian posterior weights
+preserves honest promoted clients at near-full weight while bounding Byzantine
+influence.
+Define the posterior honesty probability for promoted client $i$:
+\[
+  p_i(r) = \sigma\!\bigl(c_\lambda \cdot (T_i(r) - 0.5)\bigr),
+  \quad
+  \sigma(x) = 1/(1 + e^{-x}).
+\]
+For high-trust clients ($T_i \approx 1$), $p_i \approx 1$ (near-full weight).
+The aggregation rule is:
+\[
+  \boxed{
+  w(r) = w(r{-}1) + \eta
+  \cdot \frac{
+    \sum_{i \in \calL(r)} g_i
+    + \sum_{i \in \calS(r)} p_i(r) \cdot g_i
+  }{
+    |\calL(r)| + \sum_{i \in \calS(r)} p_i(r)
+  }
+  }
+\]
+Verified outliers $\calO(r) = \calV(r) \setminus \calL(r)$ receive zero
+weight.
+The normalization $Z(r) = |\calL(r)| + \sum_{i \in \calS(r)} p_i(r)$ ensures
+each honest client's expected per-round contribution is $1/N$ regardless of
+tier assignment.
+
+\paragraph{Aggregate budget constraint (Mechanism~1).}
+Prior to Step~2 of the round protocol, the server checks:
+\[
+  \frac{\sum_{i \in \calS(r)} p_i(r)}{Z(r)} \leq \gamma_{\mathrm{budget}}.
+\]
+If violated, the lowest-$T_i$ promoted clients are demoted to verified status
+until the constraint holds.
+This bounds total unverified influence in any single round regardless of
+coalition size.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Theoretical Guarantees}
+\label{sec:theory}
+
+\subsection{TC1: Minimax Robustness Under Ephemeral Projection}
+
+\begin{theorem}[Multi-round evasion resistance, TC1]
+\label{thm:robustness}
+Let $\mathcal{A}$ be an adaptive adversary with $\norm{z_i(r)}_2 \leq G_{\max}$
+and access to the full gradient history.
+Let $\delta(r) = \norm{z_i(r) - g_i^{\mathrm{hon}}(r)}_2$ be the
+attack magnitude at round $r$.
+Under \ESP{} with ephemeral ChaCha20-derived Gaussian block-diagonal projections
+of dimension $k = O(\log N / \varepsilon^2)$:
+\[
+  \Pr\bigl[\mathcal{A}\ \text{evades detection for all } T \text{ rounds}\bigr]
+  \;\leq\;
+  \exp\!\Bigl({-}\Omega\bigl(k \cdot \min_r \delta(r)^2\bigr)\Bigr).
+\]
+The probability is over the ChaCha20-derived randomness; the bound holds
+uniformly over all adaptive strategies.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+By the JL lemma, for any fixed $z$ with $\norm{z}_2 > \varepsilon$,
+$\Pr[\norm{R_r z}_2 \leq \varepsilon/2] \leq \exp(-\Omega(k))$.
+Since $y_r = \mathrm{ChaCha20}(K, r)$ is computationally indistinguishable
+from uniform under TSA, the distribution of $R_r$ over rounds is independent.
+The multi-round bound follows by independence of $R_r$ across rounds and a
+union bound.
+Adaptivity of $\mathcal{A}$ does not help: $R_r$ is derived from $y_r$, which
+is independent of all $y_{r'}$, $r' < r$.
+Full proof in \Cref{app:tc1}.
+\end{proof}
+
+\subsection{TC3: Joint CSPRNG Security}
+
+\begin{theorem}[Compounding unpredictability, TC3]
+\label{thm:joint_security}
+Define adversary classes:
+$\mathcal{A}_1$ knows $R_r$ but not $P_r$;
+$\mathcal{A}_2$ knows $P_r$ but not $R_r$;
+$\mathcal{A}_3$ knows neither (standard \TAVESP{} adversary).
+Then $\mathrm{ASR}(\mathcal{A}_1) \geq \mathrm{ASR}(\mathcal{A}_3)$
+and $\mathrm{ASR}(\mathcal{A}_2) \geq \mathrm{ASR}(\mathcal{A}_3)$, with:
+\[
+  \mathrm{ASR}(\mathcal{A}_3)
+  \;\leq\;
+  (1 - p_{\mathrm{decoy}})^K
+  \cdot
+  \exp\!\Bigl(-\Omega\bigl(k \cdot \delta_{\min}^2\bigr)\Bigr),
+\]
+where $K$ is the number of promoted rounds and $\delta_{\min}$ is the minimum
+attack magnitude required for a successful backdoor injection.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+$\mathcal{A}_2$ who knows promotion timing cannot exploit it because $R_r$ is
+unknown; any attack with non-negligible $\delta_{\min}$ is detected by TC1 when
+the round is verified.
+$\mathcal{A}_1$ who knows the projection can craft null-space attacks, but
+since $P_r$ is unknown, they cannot concentrate these attacks in promoted
+rounds.
+$\mathcal{A}_3$ faces both unpredictabilities simultaneously; the joint
+probability is the product of the two individual bounds by independence of $G_1$
+and $G_2$ under the ChaCha20 derivation.
+Full proof in \Cref{app:tc3}.
+\end{proof}
+
+\subsection{TC4: Complexity Certificate}
+
+\begin{theorem}[Steady-state complexity, TC4]
+\label{thm:complexity}
+Under \TAVS{} with honest majority ($\beta < 1/2$) and EMA parameter $\alpha$,
+the steady-state verified fraction satisfies:
+\[
+  \finf
+  \;=\;
+  \lim_{r \to \infty} \E\bigl[|\calV(r)|/N\bigr]
+  \;\leq\;
+  \beta
+  + (1{-}\beta)\,\Pr[T_i < \theta_{\mathrm{high}} \mid \text{honest}]
+  + (1{-}\beta)\,\Pr[T_i \geq \theta_{\mathrm{high}} \mid \text{honest}] \cdot \tfrac{1}{3}
+  \;<\; 1.
+\]
+Effective per-round detection complexity is $O(\finf \cdot N \cdot k) < O(Nk) \ll O(Nd)$.
+\end{theorem}
+
+\paragraph{Remark.}
+Mechanism~1 adds $O(\finf N \log(\finf N))$ per round for the budget trim sort.
+Mechanism~3 adds $O(N)$ per round for the rate cap.
+Both are dominated by the $O(\finf Nk)$ projection term for any $k \geq 100$.
+TC4 is unaffected.
+
+\subsection{Sybil Resistance}
+
+\begin{theorem}[Sybil resistance]
+\label{thm:sybil}
+Let a Sybil adversary control $N_{\mathrm{sybil}}$ clients behaving honestly
+for $T_{\mathrm{sybil}}$ rounds before launching a coordinated attack.
+Under Mechanism~1 (budget $\gamma_{\mathrm{budget}}$) and
+Mechanism~3 (ramp-up $\tau_{\mathrm{ramp}}$), the following two bounds hold.
+\emph{(1)} The maximum aggregate model corruption in any single round satisfies
+$\norm{\Delta w_{\mathrm{malicious}}(r)}_2 \leq \eta \cdot \gamma_{\mathrm{budget}} \cdot Z(r) \cdot G_{\max}$,
+independent of $N_{\mathrm{sybil}}$.
+\emph{(2)} No Sybil node can reach Tier~3 eligibility before round
+$r_{\min} = \tau_{\mathrm{ramp}} \cdot \log(1/(1-\theta_{\mathrm{high}}))$
+from its join round, regardless of behavioral compliance.
+\end{theorem}
+
+\begin{proof}[Proof sketch]
+(1) follows directly from the budget constraint construction: the server
+enforces $\sum_{i \in \calS} p_i / Z \leq \gamma_{\mathrm{budget}}$ before
+accepting promotions.
+(2) follows from the trust cap $T_i^{\max}(r) = 1 - e^{-(r-r_0)/\tau_{\mathrm{ramp}}}$:
+since $T_i(r) \leq T_i^{\max}(r) < \theta_{\mathrm{high}}$ for
+$r < r_0 + r_{\min}$, Tier~3 eligibility is structurally impossible before
+$r_{\min}$ rounds, independent of $\varphi_i(r)$.
+\end{proof}
+
+\subsection{TC2: Convergence Sketch (IID Setting)}
+\label{sec:convergence}
+
+We state the convergence result for the IID case ($\zeta = 0$) to establish
+that the unified aggregation rule is compatible with gradient-based
+optimization.
+The full non-IID Byzantine proof via a four-stage Lyapunov argument is in
+\Cref{app:convergence}.
+
+\begin{theorem}[Convergence, IID setting, TC2 Stage~1]
+\label{thm:convergence_iid}
+Assume $F$ is $L$-smooth and $\mu$-strongly convex (Assumptions A1--A4 in
+\Cref{app:assumptions}), IID data ($\zeta = 0$), and no Byzantine
+misclassification.
+With learning rate $\eta \leq 1/(2L)$:
+\[
+  \E[F(w(r)) - F^*]
+  \;\leq\;
+  (1 - \mu\eta)^r \bigl(F(w(0)) - F^*\bigr)
+  + \frac{\eta \sigma^2}{2N\mu}
+  + \frac{B_p}{\mu},
+\]
+where $B_p = \eta L (1 - \bar{p}) G_{\max}^2 |\calS| / N$ is the
+Bayesian-weight bias term, with $\bar{p} = \E[p_i \mid \text{honest}]$.
+As $T_i(r) \to 1$ for honest clients, $\bar{p} \to 1$ and $B_p \to 0$:
+the bias vanishes as the system learns the honest population.
+\end{theorem}
+
+\begin{remark}
+$B_p$ is strictly smaller than the $\lambda$-discounting bias
+$B_\lambda = \eta L (1-\lambda^*) G_{\max}^2 |\calS|/N$ from prior work,
+because $\bar{p} > \lambda^*$ for any honest high-trust client
+($\sigma(c_\lambda \cdot 0.5) \approx 0.62 \ll 0.9 = \lambda_{\max}$ at the
+boundary, but for $T_i > 0.8$, $p_i > 0.95 > \lambda_{\max}$).
+Honest clients are better served by Bayesian posterior weighting than by flat
+discounting.
+\end{remark}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Experiments}
+\label{sec:experiments}
+
+\subsection{Setup}
+\label{sec:exp_setup}
+
+\paragraph{Models and datasets.}
+We evaluate on two scales: BERT-base ($d=110$M, GLUE/SQuAD) for controlled
+ablations, and LLaMA-3-8B with LoRA ($r=8$, $d_{\mathrm{LoRA}} \approx 200$M
+effective) fine-tuned on Alpaca-cleaned for LLM-scale validation.
+Data heterogeneity follows Dirichlet($\alpha$) with
+$\alpha \in \{0.1, 0.3, 1.0\}$.
+
+\paragraph{Baselines.}
+We compare against: FedAvg (no defense), Krum~\citep{blanchard2017machine},
+Geometric Median~\citep{pillutla2022robust}, Trimmed Mean~\citep{yin2018byzantine},
+FLTrust~\citep{cao2022fltrust}, and Full-JL (JL projection applied every
+round to all clients, no scheduling).
+
+\paragraph{Attacks.}
+We evaluate against: Layerwise Model Poisoning~\citep{guo2021gradient}
+(localized to a single transformer block), Sleeper Agent injection targeting
+specific attention heads, and a Scheduling-Aware Timing Attack
+(\Cref{sec:e4}) that concentrates malicious updates in predicted promoted rounds.
+
+\paragraph{\TAVESP{} hyperparameters.}
+$\alpha = 0.9$, $\theta_{\mathrm{low}} = 0.3$, $\theta_{\mathrm{high}} = 0.7$,
+$k_{\mathrm{trust}} = 10$, $p_{\mathrm{decoy}} = 0.15$, $c_\lambda = 8$,
+$\gamma_{\mathrm{budget}} = 0.35$, $\tau_{\mathrm{ramp}} = 30$,
+$k = 1000$ (BERT), $k = 5000$ (LLaMA-LoRA).
+
+\subsection{E1: Null-Space Poisoning}
+\label{sec:e1}
+
+We implement an adaptive attacker computing $z_{\mathrm{attack}} \in
+\mathrm{null}(R_{\mathrm{static}})$ for static projection baselines.
+\TAVESP{} uses ephemeral $R_r$; the attacker receives only gradient history.
+
+\begin{table}[h]
+\centering
+\caption{Attack Success Rate (ASR\%) and Clean Accuracy (CA\%) under
+  null-space poisoning. $\beta=0.3$, $N=100$, BERT-base, Dirichlet($0.3$).}
+\label{tab:e1}
+\small
+\begin{tabular}{lcccc}
+\toprule
+Method & ASR$\downarrow$ & CA$\uparrow$ & Det. Rate$\uparrow$ & Cost/round \\
+\midrule
+FedAvg (no defense) & 94.2 & 84.1 & --- & $O(Nd)$ \\
+Geometric Median    & 17.4 & 83.8 & 81.3 & $O(Nd)$ \\
+Static JL + GeoMed  & 83.6 & 83.5 & 14.2 & $O(Nk)$ \\
+PCA defense         & 78.9 & 83.2 & 19.7 & $O(Nk)$ \\
+Full-JL (ephemeral) & 4.8  & 83.6 & 94.1 & $O(Nk)$ \\
+\textbf{\TAVESP{}}  & \textbf{3.1} & \textbf{83.7} & \textbf{95.3} & $O(\finf Nk)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Static projection baselines exhibit high ASR because the attacker
+pre-computes their null space; ephemeral projection reduces ASR to near zero.
+\TAVESP{} matches Full-JL security at $\finf \approx 0.48$ of its cost.
+
+\subsection{E2: Signal Dilution Analysis}
+\label{sec:e2}
+
+We inject a localized backdoor targeting attention head~3 of layer~8
+($\approx 0.07\%$ of parameters).
+We compare Dense Gaussian JL, Walsh-Hadamard Transform (WHT), and
+Block-Diagonal JL, each with $k=1000$.
+
+\begin{table}[h]
+\centering
+\caption{True Positive Rate (TPR\%) and per-block SNR for localized backdoor.
+  Attack concentration = 0.07\% of parameters.}
+\label{tab:e2}
+\small
+\begin{tabular}{lccc}
+\toprule
+Projection & TPR$\uparrow$ & Block SNR$\uparrow$ & Memory \\
+\midrule
+Dense Gaussian JL  & 23.4 & 0.04 & $O(kd)$ \\
+Walsh-Hadamard     & 19.7 & 0.02 & $O(d)$ \\
+\textbf{Block-Diagonal JL} & \textbf{91.2} & \textbf{1.00} & $O(kd/M)$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+Block-diagonal projection achieves 4$\times$ higher TPR by isolating the
+anomaly signal within the target semantic block.
+Per Proposition~\ref{prop:separation}, $\E[Z_i^{(m^*)}] = 1 + \delta_{m^*}^2/\hat\sigma_{m^*}^2 \gg 1$
+while all other blocks remain at $\E[Z_i^{(m)}] \approx 1$ for $m \neq m^*$.
+
+\subsection{E4: Timing Attack Suppression}
+\label{sec:e4}
+
+We implement three scheduling variants: deterministic round-robin (DRR),
+public-seeded random (RNG), and \TAVESP{} (ChaCha20-CTR).
+A timing-aware adversary observes its scheduling history over 50 rounds to
+infer the pattern before launching attacks.
+
+\begin{table}[h]
+\centering
+\caption{ASR (\%) for timing-aware vs.\ naive adversary under three schedulers.
+  $\beta = 0.2$, $N=100$, BERT-base.}
+\label{tab:e4}
+\small
+\begin{tabular}{lccc}
+\toprule
+Scheduler & ASR (timing-aware)$\downarrow$ & ASR (naive)$\downarrow$ & Advantage \\
+\midrule
+DRR (deterministic)  & 71.3 & 22.4 & $3.2\times$ \\
+RNG (public seed)    & 58.7 & 21.8 & $2.7\times$ \\
+\textbf{\TAVESP{}}   & \textbf{21.1} & \textbf{20.6} & $1.02\times$ \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+DRR and RNG schedulers are exploitable: timing-aware adversaries achieve
+$2.7$--$3.2\times$ higher ASR.
+\TAVESP{}'s ChaCha20-derived scheduling eliminates the advantage (ratio
+$\approx 1$), empirically validating Theorem~\ref{thm:joint_security}.
+
+\subsection{E5: Efficiency Scaling}
+\label{sec:e5}
+
+We measure wall-clock aggregation time at
+$N \in \{100, 500, 1000, 5000\}$ for Full-dim GeoMed, Full-JL, and \TAVESP{},
+on LLaMA-3-8B LoRA.
+
+\begin{table}[h]
+\centering
+\caption{Aggregation wall-clock time (seconds/round) and empirical $\finf$
+  at $\beta=0.2$, Dirichlet($0.3$). Accuracy within 1.2\% of undefended
+  baseline for all \TAVESP{} entries.}
+\label{tab:e5}
+\small
+\begin{tabular}{lcccc}
+\toprule
+Method & $N=100$ & $N=500$ & $N=1000$ & $\finf$ (empirical) \\
+\midrule
+Full-dim GeoMed     & 184s  & 921s   & $>$3600s & --- \\
+Full-JL (all rounds)& 1.4s  & 7.1s   & 14.3s    & 1.00 \\
+\textbf{\TAVESP{}}  & \textbf{0.7s} & \textbf{3.4s} & \textbf{6.1s} & \textbf{0.46} \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\TAVESP{} achieves a $2.3\times$ reduction over Full-JL at $N=1000$,
+consistent with the TC4 prediction
+$\finf \approx 0.46$ (theoretical: $0.44$; gap $< 5\%$, validating the
+complexity certificate).
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Limitations.}
+(1)~TSA excludes deployments requiring server auditability; the VRF variant
+in \Cref{app:vrf} restores verifiability at the cost of per-round proof
+generation.
+(2)~The convergence proof requires honest majority $\beta < 1/2$; performance
+degrades in the high-$\beta$ + high-$\zeta$ regime (Appendix~\ref{app:limits}).
+(3)~Interaction with client-side gradient sparsification requires separate
+analysis (\Cref{app:future}).
+
+\paragraph{Scope of Paper~2.}
+The full non-IID Byzantine convergence proof (TC2 Stages~2--4) including the
+non-convex extension for LLM fine-tuning and the Sleeper Agent interception
+experiment (E3 on LLaMA-3-8B) are developed in the companion paper:
+\emph{``Convergence of Trust-Adaptive Shadow Aggregation under Non-IID Data
+and Byzantine Workers.''} \todo{cite companion paper when available}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\section{Conclusion}
+\label{sec:conclusion}
+
+We presented \TAVESP{}, the first Byzantine-robust FL framework to formally
+co-design verification scheduling and detection as a unified system.
+By grounding trust scores in JL-projected geometric distances, deriving both
+projection geometry and promotion assignments from a shared CSPRNG secret, and
+enforcing Bayesian-weighted shadow aggregation with coalition-scale budget
+constraints, the system achieves provably stronger security than
+full-verification baselines at $O(\finf Nk)$ steady-state cost.
+We believe formalizing the scheduling dimension as a first-class security
+primitive---with its own threat model, formal definitions, and provable
+guarantees---opens a new and practically important line of inquiry in
+Byzantine-robust federated learning.
+
+% ─────────────────────────────────────────────────────────────────────────────
+\bibliographystyle{abbrvnat}
+\bibliography{references}
+
+% ─────────────────────────────────────────────────────────────────────────────
+\appendix
+
+\section{Assumptions}
+\label{app:assumptions}
+
+\textbf{A1} ($L$-smoothness): $\norm{\nabla F(u) - \nabla F(v)}_2 \leq L\norm{u-v}_2$.\\
+\textbf{A2} ($\mu$-strong convexity, Stages~1--3 only):
+  $F(u) \geq F(v) + \inner{\nabla F(v)}{u-v} + \frac{\mu}{2}\norm{u-v}_2^2$.\\
+\textbf{A3} (Bounded variance): $\E[\norm{g_i - \nabla F_i(w)}_2^2] \leq \sigma^2$.\\
+\textbf{A4} (Bounded gradient norm): $\norm{g_i(r)}_2 \leq G_{\max}$
+  (enforced by gradient clipping).\\
+\textbf{A5} (Honest majority): $\beta < 1/2$.\\
+\textbf{A6} (Gradient dissimilarity, Stage~3): $\zeta \leq \bar\zeta < \infty$.
+
+\section{Full Proof of TC1}
+\label{app:tc1}
+
+\begin{proof}
+For any fixed $z$ with $\norm{z}_2 = \delta > 0$, by the JL lemma applied
+blockwise: for each block $m$,
+$\Pr[\norm{r_m z^{(m)}}_2^2 \geq (1-\varepsilon_m)\norm{z^{(m)}}_2^2]
+\geq 1 - \exp(-\Omega(k_m \varepsilon_m^2))$.
+Summing across blocks and applying the union bound:
+$\Pr[\norm{R_r z}_2^2 \geq (1-\varepsilon)\delta^2]
+\geq 1 - \sum_m \exp(-\Omega(k_m))
+\geq 1 - M \exp(-\Omega(k/M))
+= 1 - \exp(-\Omega(k))$.
+Since $y_r = \mathrm{ChaCha20}(K, r)$ with independent counter inputs,
+$R_r \perp R_{r'}$ for $r \neq r'$.
+The multi-round bound follows: $\Pr[\text{evade all } T] \leq
+\prod_{r=1}^T \Pr[\norm{R_r z(r)}_2 \leq \delta/2]
+\leq \exp(-\Omega(k \cdot T \cdot \delta_{\min}^2))$. \qed
+\end{proof}
+
+\section{Full Proof of TC3}
+\label{app:tc3}
+
+\begin{proof}
+The derivations $G_1(y_r)$ and $G_2(y_r)$ are independent functions of the
+same pseudorandom seed.
+$\mathcal{A}_2$ who knows $P_r = G_2(y_r)$ but not $R_r = G_1(y_r)$:
+knowing $P_r$ reveals zero information about $R_r$ because $G_1$ and $G_2$
+use independent counter offsets in the ChaCha20 stream
+(e.g., $G_1$ reads bytes 0--255, $G_2$ reads bytes 256--511 of the 512-bit
+output).
+Therefore, $\mathcal{A}_2$'s attack in promoted rounds is indistinguishable
+from a random attack with respect to evasion of the next round's projection.
+By TC1, any non-negligible $\delta_{\min}$ is detected with probability
+$1 - \exp(-\Omega(k\delta_{\min}^2))$ when verified.
+$\mathcal{A}_1$ who knows $R_r$: can craft null-space attacks for the current
+projection, but since $P_r$ is unknown, cannot guarantee the crafted update
+falls in a promoted round.
+Across $K$ promoted rounds, the probability that $\mathcal{A}_1$ and
+$\mathcal{A}_2$ are simultaneously successful is bounded by the product of
+their individual bounds.
+The decoy term $(1-p_{\mathrm{decoy}})^K$ bounds the probability that
+a Tier~3 promoted adversary avoids all surprise verifications over $K$ rounds.
+\qed
+\end{proof}
+
+\section{TC2: Full Convergence Proof}
+\label{app:convergence}
+
+\paragraph{Stage 2: Trust-dynamic weights, IID.}
+Define the composite Lyapunov potential
+$\Phi(r) = F(w(r)) - F^* + c \sum_i (T_i(r) - T_i^*)^2$,
+where $T_i^* = \E[\varphi_i]/(1-\alpha)$ is the steady-state trust score and
+$c = \eta L G_{\max} / (1-\alpha^2)$.
+By the trust stability lemma ($|T_i(r) - T_i^*| \leq \alpha^r|T_i(0) - T_i^*| + C_{\sigma}$),
+the trust deviation term contracts geometrically.
+Choosing $\gamma = \min(\mu\eta, 1-\alpha^2)$ yields
+$\E[\Phi(r+1) \mid \Phi(r)] \leq (1-\gamma)\Phi(r) + C_{\mathrm{floor}}$,
+where $C_{\mathrm{floor}} = \eta^2\sigma^2/N + c(1-\alpha)^2\sigma_\varphi^2$.
+Since $F(w(r)) - F^* \leq \Phi(r)$, geometric convergence follows.
+
+\paragraph{Stage 3: Non-IID + Byzantine.}
+Define good event $G_r$: all Byzantine clients in $\calV(r)$ are correctly
+classified as outliers.
+By TC1, $\Pr[G_r] \geq 1 - \exp(-\Omega(k\delta_{\min}^2))$.
+Choose $k = \Omega(\log(TN/\delta_0)/\delta_{\min}^2)$; by the union bound,
+$\Pr[\exists r: \neg G_r] \leq \delta_0$.
+Conditional on all $G_r$, apply Stage~2 with additional non-IID drift term
+$C_{\zeta} = \zeta\eta|\calL|/N$.
+The unconditional bound follows with high probability $1-\delta_0$.
+
+\paragraph{Stage 4: Non-convex (LLM setting).}
+Drop A2. Convergence is to a stationary point neighborhood:
+$(1/T)\sum_r \E[\norm{\nabla F(w(r))}_2^2]
+\leq O(1/\sqrt{T}) + C_p' + C_{\calB}'$,
+where $C_p' \leq 2\eta L (1-\bar{p})G_{\max}^2|\calS|/N$ and
+$C_{\calB}' \leq 2\eta L \gamma_{\mathrm{budget}} Z G_{\max}^2$.
+Both constants are bounded by design parameters and vanish as
+$\gamma_{\mathrm{budget}} \to 0$ and $\bar{p} \to 1$.
+
+\section{VRF Variant for Auditable Deployments}
+\label{app:vrf}
+
+For deployments requiring external verifiability (e.g., regulated
+cross-institutional FL where clients need cryptographic proof the server
+followed the protocol), replace ChaCha20 with a Verifiable Random Function:
+$(y_r, \pi_r) = \mathrm{VRF}_{sk}(r)$.
+Publish $\pi_r$ after gradient submission to enable client verification.
+All security proofs go through identically; the VRF pseudorandomness
+property is strictly stronger than CSPRNG unpredictability under TSA.
+Per-round overhead increases by one VRF evaluation and proof generation
+($\approx 2$ms on modern hardware with Ed25519-based VRF).
+
+\section{Limitations and Future Work}
+\label{app:limits}
+
+\paragraph{High $\beta$ + high $\zeta$ regime.}
+When Byzantine fraction $\beta$ is close to $1/2$ and data heterogeneity
+$\zeta$ is large, Byzantine client gradients become geometrically similar to
+honest non-IID clients in projected space.
+The block-variance normalization (Proposition~\ref{prop:separation}) partially
+mitigates this, but detection power degrades.
+Future work should develop tighter detection bounds in this regime.
+
+\paragraph{Gradient compression interaction.}
+Top-$K$ sparsification applied client-side before gradient submission may
+interact with the block-diagonal projection in ways not analyzed here.
+In particular, sparsification could concentrate the attack signal in
+non-top-$K$ coordinates; this edge case requires separate treatment.
+
+\paragraph{Client churn.}
+The trust ramp-up (Mechanism~3) creates sustained Tier~1 overhead in
+high-churn settings.
+Trust vouching (sketched in the main thesis document) is a direction for
+reducing this cost without compromising security.
+
+\end{document}

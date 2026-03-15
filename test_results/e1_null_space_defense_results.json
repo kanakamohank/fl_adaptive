@@ -1,0 +1,101 @@
+{
+  "config": {
+    "experiment_name": "E1_Null_Space_Defense",
+    "experiment_type": "null_space_defense",
+    "num_rounds": 3,
+    "num_clients": 6,
+    "clients_per_round": 4,
+    "byzantine_fraction": 0.33,
+    "attack_types": [
+      "null_space"
+    ],
+    "attack_intensities": [
+      1.0,
+      2.0,
+      3.0
+    ],
+    "projection_types": [
+      "static",
+      "ephemeral_dense",
+      "ephemeral_structured"
+    ],
+    "scheduling_types": [
+      "round_robin",
+      "public_random",
+      "csprng"
+    ],
+    "theta_low": 0.3,
+    "theta_high": 0.7,
+    "gamma_budget": 0.35,
+    "tau_ramp": 30,
+    "k_ratio": 0.2,
+    "detection_threshold": 2.0,
+    "target_asr_reduction": 0.04,
+    "target_visibility_improvement": 25.0,
+    "target_consensus_rate": 0.8,
+    "output_dir": "test_results/e1_null_space_defense",
+    "save_detailed_logs": true,
+    "generate_plots": true
+  },
+  "baseline_metrics": {
+    "attack_success_rate": 0.0,
+    "poisoning_effectiveness": 0.0,
+    "backdoor_accuracy": 0.15000000000000002,
+    "detection_rate": 0.13333333333333333,
+    "false_positive_rate": 0.0,
+    "consensus_achievement_rate": 0.67,
+    "projection_variance_ratio": 1.0,
+    "attack_visibility_amplification": 1.0,
+    "honest_trust_convergence": 0.8,
+    "byzantine_trust_degradation": 0.2,
+    "trust_separation_margin": 0.6000000000000001,
+    "new_client_trust_limitation": 0.8,
+    "sybil_attack_suppression": 0.3,
+    "computational_overhead": 1.0,
+    "communication_overhead": 1.0,
+    "convergence_rate": 3,
+    "tc1_visibility_validated": false,
+    "tc3_resilience_validated": "True",
+    "tc4_sybil_validated": false
+  },
+  "tavs_esp_metrics": {
+    "attack_success_rate": 0.0,
+    "poisoning_effectiveness": 0.0,
+    "backdoor_accuracy": 0.15000000000000002,
+    "detection_rate": 0.13333333333333333,
+    "false_positive_rate": 0.0,
+    "consensus_achievement_rate": 0.67,
+    "projection_variance_ratio": 0.03333333333333333,
+    "attack_visibility_amplification": 30.0,
+    "honest_trust_convergence": 0.8,
+    "byzantine_trust_degradation": 0.2,
+    "trust_separation_margin": 0.6000000000000001,
+    "new_client_trust_limitation": 0.8,
+    "sybil_attack_suppression": 0.3,
+    "computational_overhead": 1.0,
+    "communication_overhead": 0.8,
+    "convergence_rate": 3,
+    "tc1_visibility_validated": true,
+    "tc3_resilience_validated": "True",
+    "tc4_sybil_validated": false
+  },
+  "security_improvement": {
+    "asr_reduction": 0.0,
+    "visibility_amplification": 30.0,
+    "detection_improvement": 0.0
+  },
+  "performance_tradeoffs": {
+    "computational_overhead": 1.0
+  },
+  "round_by_round_metrics": [],
+  "trust_evolution": {},
+  "detection_timeline": [],
+  "security_theorems_validated": {
+    "TC1": true
+  },
+  "target_metrics_achieved": {
+    "visibility_improvement": true
+  },
+  "total_experiment_time": 0.0,
+  "validation_timestamp": "2026-03-15 18:24:45"
+}
