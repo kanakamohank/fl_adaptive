@@ -31,7 +31,7 @@ federated_learning:
 
 # Projection settings
 projection:
-  k_ratio: 0.1
+  target_k: 150
   structured: true
   ephemeral: true  # Generate new projection matrix each round
 
@@ -84,7 +84,7 @@ experiments:
   E5:  # Structured vs Unstructured
     num_honest_clients: 15
     num_attackers: 5
-    k_ratio: 0.1
+    target_k: 150
     target_layers: ["conv1", "conv2"]
 
   attack_resistance:

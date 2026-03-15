@@ -38,7 +38,7 @@ def test_pipeline_configuration():
     tavs_config = TavsEspConfig(
         theta_low=0.25,
         theta_high=0.8,
-        k_ratio=0.3
+        target_k=150
     )
 
     advanced_config = PipelineConfig(

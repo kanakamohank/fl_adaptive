@@ -113,9 +113,9 @@ class ZeroTrustProjectionEvaluator:
             }
 
             for k in k_values:
-                k_ratio = k / model_structure.total_params
+                target_k = k
 
-                logger.info(f"Testing {method} with k={k} (ratio={k_ratio:.4f})")
+                logger.info(f"Testing {method} with target_k={target_k}")
 
                 # Simulate client updates
                 client_updates = []
@@ -129,11 +129,12 @@ class ZeroTrustProjectionEvaluator:
 
                 # Project updates based on method
                 if method == 'structured_jl':
-                    projection = StructuredJLProjection(model_structure, k_ratio, self.device)
+                    projection = StructuredJLProjection(model_structure, target_k, self.device)
                     proj_matrices = projection.generate_ephemeral_projection_matrix(0)
                     projected_updates = projection.project_multiple_updates(client_updates, proj_matrices)
 
                 elif method == 'dense_jl':
+                    k_ratio = target_k / model_structure.total_params
                     projection = DenseJLProjection(model_structure.total_params, k_ratio, self.device)
                     proj_matrix = projection.generate_projection_matrix(0)
                     projected_updates = [projection.project_update(update, proj_matrix)
@@ -287,8 +288,8 @@ class ZeroTrustProjectionEvaluator:
         k_performance = {}
 
         for k in k_values:
-            logger.info(f"Testing k={k}")
-            k_ratio = k / model_structure.total_params
+            logger.info(f"Testing target_k={k}")
+            target_k = k
 
             attack_performance = {}
 
@@ -312,7 +313,7 @@ class ZeroTrustProjectionEvaluator:
                     ground_truth_attackers = list(range(num_clients - num_attackers, num_clients))
 
                     # Test structured projection
-                    structured_proj = StructuredJLProjection(model_structure, k_ratio, self.device)
+                    structured_proj = StructuredJLProjection(model_structure, target_k, self.device)
                     proj_matrices = structured_proj.generate_ephemeral_projection_matrix(trial)
                     projected_updates = structured_proj.project_multiple_updates(all_updates, proj_matrices)
 
@@ -392,7 +393,7 @@ class ZeroTrustProjectionEvaluator:
         model = get_model(model_type, **model_kwargs)
         model_structure = model.structure
 
-        k_ratio = config.get('k_ratio', 0.1)
+        target_k = config.get('target_k', 150)
 
         # Generate honest updates
         honest_updates = [torch.randn(model_structure.total_params, device=self.device)
@@ -418,11 +419,12 @@ class ZeroTrustProjectionEvaluator:
         all_updates = honest_updates + layerwise_attacks
 
         # Structured projection
-        structured_proj = StructuredJLProjection(model_structure, k_ratio, self.device)
+        structured_proj = StructuredJLProjection(model_structure, target_k, self.device)
         proj_matrices = structured_proj.generate_ephemeral_projection_matrix(0)
         structured_projections = structured_proj.project_multiple_updates(all_updates, proj_matrices)
 
         # Dense projection
+        k_ratio = target_k / model_structure.total_params
         dense_proj = DenseJLProjection(model_structure.total_params, k_ratio, self.device)
         dense_matrix = dense_proj.generate_projection_matrix(0)
         dense_projections = [dense_proj.project_update(update, dense_matrix) for update in all_updates]
@@ -501,7 +503,7 @@ class ZeroTrustProjectionEvaluator:
             null_attackers.append(f"attacker_{i}")
 
         # Test with static projection (vulnerable)
-        static_proj = DenseJLProjection(model.structure.total_params, k_ratio=0.1, device=self.device)
+        static_proj = DenseJLProjection(model.structure.total_params, k_ratio=150/model.structure.total_params, device=self.device)
 
         # Simulate attack effectiveness demonstration
         attack_demo_results = {

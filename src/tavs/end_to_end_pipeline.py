@@ -518,7 +518,7 @@ def create_example_configs() -> Dict[str, PipelineConfig]:
         clients_per_round=15,
         byzantine_fraction=0.2,
         tavs_config=TavsEspConfig(
-            k_ratio=0.25,
+            target_k=150,
             projection_type="structured",
             detection_threshold=2.0
         ),

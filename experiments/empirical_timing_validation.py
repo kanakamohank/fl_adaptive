@@ -226,7 +226,7 @@ class EmpiricalTimingValidator:
         # TAVS-ESP Strategy
         tavs_config = TavsEspConfig(
             projection_type="structured",
-            k_ratio=0.05,  # OPTIMIZED: 5% compression instead of 30%
+            target_k=150,  # JL Lemma: k=O(log N / ε²) for ~100 clients
             detection_threshold=2.0,
             theta_low=0.3,
             theta_high=0.7,
@@ -457,7 +457,7 @@ class EmpiricalTimingValidator:
         if model_structure:
             projection = StructuredJLProjection(
                 model_structure=model_structure,
-                k_ratio=0.05,  # OPTIMIZED: 5% compression for faster validation
+                target_k=150,  # JL Lemma: k=O(log N / ε²) ≈ 150 for ~100 clients
                 device=str(self.device)
             )
             # Generate projection matrices
@@ -732,8 +732,8 @@ def run_empirical_timing_validation(device: str = "auto") -> EmpiricalTimingResu
     validator = EmpiricalTimingValidator(model_type="cifar_cnn", device=device)
 
     # Run scalability analysis
-    client_populations = [5, 10, 15]  # OPTIMIZED: Smaller populations for faster testing
-    results = validator.run_scalability_timing_analysis(client_populations, num_rounds=2)
+    client_populations = [20, 50, 100]  # Original client populations
+    results = validator.run_scalability_timing_analysis(client_populations, num_rounds=10)
 
     # Save results
     validator.save_results(results, "experiments/empirical_timing_results.json")

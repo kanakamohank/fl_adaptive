@@ -58,7 +58,7 @@ class TavsEspConfig:
     c_lambda: float = 4.0               # Sigmoid slope for Bayesian weights
 
     # ESP Layer 2 Configuration
-    k_ratio: float = 0.2                # Projection compression ratio
+    target_k: int = 150                 # JL projection target dimension (independent of parameter count)
     detection_threshold: float = 2.0    # Byzantine detection threshold
     min_consensus: float = 0.6          # Minimum consensus for detection
     projection_type: str = "structured" # "structured" or "dense"
@@ -540,17 +540,19 @@ class TavsEspStrategy(Strategy):
         if self.config.projection_type == "structured" and self.model_structure is not None:
             self.projection = StructuredJLProjection(
                 model_structure=self.model_structure,
-                k_ratio=self.config.k_ratio,
+                target_k=self.config.target_k,
                 device="cpu"
             )
             logger.info(f"Initialized structured projection with {len(self.model_structure.blocks)} blocks")
         else:
+            # For dense projections, use target_k but convert to ratio for compatibility
+            k_ratio = min(1.0, self.config.target_k / parameter_dim)
             self.projection = DenseJLProjection(
                 original_dim=parameter_dim,
-                k_ratio=self.config.k_ratio,
+                k_ratio=k_ratio,
                 device="cpu"
             )
-            logger.info(f"Initialized dense projection: {parameter_dim} → {int(parameter_dim * self.config.k_ratio)}")
+            logger.info(f"Initialized dense projection: {parameter_dim} → {int(parameter_dim * k_ratio)}")
 
     def _save_round_analytics(self, analytics: RoundAnalytics):
         """Save round analytics to disk for analysis."""

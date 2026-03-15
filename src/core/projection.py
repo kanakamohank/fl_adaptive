@@ -21,31 +21,31 @@ class StructuredJLProjection:
     - Fast generation and projection operations
     """
 
-    def __init__(self, model_structure: ModelStructure, k_ratio: float = 0.1,
+    def __init__(self, model_structure: ModelStructure, target_k: int = 150,
                  device: str = "cpu", seed: Optional[int] = None):
         """
         Initialize structured JL projection.
 
         Args:
             model_structure: Model structure defining blocks
-            k_ratio: Compression ratio (projected dim = k_ratio * original dim)
+            target_k: Absolute projection dimension per block (derived from JL Lemma: ~ O(log N / eps^2))
             device: Device for computations
-            seed: Random seed (None for random)
+            seed: Random seed
         """
         self.model_structure = model_structure
-        self.k_ratio = k_ratio
+        self.target_k = target_k
         self.device = torch.device(device)
         self.seed = seed
-
-        # Block-wise projection dimensions
         self.block_projections = {}
         self.total_projected_dim = 0
 
-        # Calculate projection dimensions for each block
         for block in model_structure.blocks:
             block_name = block['name']
             d_block = block['num_params']
-            k_block = max(1, int(k_ratio * d_block))  # At least 1 dimension
+
+            # The JL Magic: k is independent of d_block!
+            # We only cap it at d_block in case of very small layers (e.g., biases)
+            k_block = min(d_block, self.target_k)
 
             self.block_projections[block_name] = {
                 'original_dim': d_block,
@@ -59,7 +59,7 @@ class StructuredJLProjection:
 
         logger.info(f"Structured JL projection initialized: "
                    f"{model_structure.total_params} -> {self.total_projected_dim} "
-                   f"(compression ratio: {self.total_projected_dim/model_structure.total_params:.3f})")
+                   f"(Absolute target_k per block: {self.target_k})")
 
     def generate_ephemeral_projection_matrix(self, round_number: int) -> Dict[str, torch.Tensor]:
         """
@@ -249,7 +249,7 @@ class ProjectionAnalyzer:
         structured_block_norms = np.zeros((num_clients, num_blocks))
 
         # For structured projection, we can directly analyze block contributions
-        structured_proj = StructuredJLProjection(model_structure, k_ratio=0.1)
+        structured_proj = StructuredJLProjection(model_structure, target_k=150)
 
         for client_idx, proj_update in enumerate(structured_projections):
             block_idx = 0

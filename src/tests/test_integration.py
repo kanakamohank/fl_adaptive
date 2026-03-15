@@ -116,7 +116,7 @@ def test_projection_integration():
     # Test with StructuredJLProjection
     projection = StructuredJLProjection(
         model_structure=model_structure,
-        k_ratio=0.2,
+        target_k=150,
         device="cpu"
     )
 

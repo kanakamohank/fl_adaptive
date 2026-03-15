@@ -97,7 +97,7 @@ class ScalabilityExperimentConfig:
         if self.tavs_config is None:
             self.tavs_config = TavsEspConfig(
                 projection_type="structured",
-                k_ratio=0.3,  # Higher compression for scalability
+                target_k=150,  # Fixed dimension for scalability
                 detection_threshold=2.0
             )
 

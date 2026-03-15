@@ -284,7 +284,7 @@ class ConfigManager:
         print(f"  Distribution: {self.get('data.data_distribution')} (α={self.get('data.alpha')})")
 
         print(f"\nProjection Settings:")
-        print(f"  k_ratio: {self.get('projection.k_ratio')}")
+        print(f"  target_k: {self.get('projection.target_k')}")
         print(f"  Structured: {self.get('projection.structured')}")
         print(f"  Ephemeral: {self.get('projection.ephemeral')}")
 

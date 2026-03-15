@@ -61,7 +61,7 @@ class ScalabilityBenchmark:
 
                 # Benchmark structured projection generation
                 structured_proj = StructuredJLProjection(
-                    dummy_structure, k_ratio=k/d, device=self.device
+                    dummy_structure, target_k=k, device=self.device
                 )
 
                 structured_trial_times = []
@@ -74,7 +74,8 @@ class ScalabilityBenchmark:
                 structured_times.append(np.mean(structured_trial_times))
 
                 # Benchmark dense projection generation
-                dense_proj = DenseJLProjection(d, k_ratio=k/d, device=self.device)
+                k_ratio = k / d
+                dense_proj = DenseJLProjection(d, k_ratio=k_ratio, device=self.device)
 
                 dense_trial_times = []
                 for trial in range(num_trials):
@@ -178,7 +179,7 @@ class ScalabilityBenchmark:
             'total_times_dense': []
         }
 
-        k_ratio = 0.1  # Fixed compression ratio
+        target_k = 150  # Fixed projection dimension based on JL Lemma
 
         for model_type, model_kwargs in model_sizes:
             logger.info(f"Benchmarking model: {model_type} with {model_kwargs}")
@@ -195,8 +196,8 @@ class ScalabilityBenchmark:
             logger.info(f"Model has {total_params} parameters")
 
             # Setup projections
-            k = max(1, int(k_ratio * total_params))
-            structured_proj = StructuredJLProjection(model_structure, k_ratio, self.device)
+            structured_proj = StructuredJLProjection(model_structure, target_k, self.device)
+            k_ratio = target_k / total_params  # For dense projection compatibility
             dense_proj = DenseJLProjection(total_params, k_ratio, self.device)
 
             # Benchmark over multiple rounds
@@ -247,7 +248,7 @@ class ScalabilityBenchmark:
                 'model_type': model_type,
                 'model_kwargs': model_kwargs,
                 'total_params': total_params,
-                'projected_dim': k
+                'projected_dim': target_k
             })
 
             results['structured_projection_times'].append(np.mean(structured_times))

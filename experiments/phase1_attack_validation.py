@@ -200,10 +200,10 @@ class Phase1AttackValidator:
 
         # Create static dense projection (vulnerable baseline)
         total_params = sum(p.numel() for p in self.model.parameters())
-        k_ratio = 0.2  # 20% compression
+        target_k = 150  # JL Lemma dimension
         projection = DenseJLProjection(
             original_dim=total_params,
-            k_ratio=k_ratio,
+            k_ratio=target_k/total_params,
             device=self.device
         )
 
@@ -324,7 +324,7 @@ class Phase1AttackValidator:
             attack_type="null_space",
             defense_type="static_dense_projection",
             attack_parameters={"intensity": attack_intensity},
-            defense_parameters={"k_ratio": k_ratio, "projection_type": "static"},
+            defense_parameters={"target_k": target_k, "projection_type": "static"},
             attack_success_rate=asr,
             projected_visibility=mean_projected_visibility,
             detection_rate=detection_rate,
@@ -347,10 +347,10 @@ class Phase1AttackValidator:
 
         # Create ephemeral projection for this test (should resist null-space attacks)
         total_params = sum(p.numel() for p in self.model.parameters())
-        k_ratio = 0.2  # 20% compression
+        target_k = 150  # JL Lemma dimension
         projection = DenseJLProjection(
             original_dim=total_params,
-            k_ratio=k_ratio,
+            k_ratio=target_k/total_params,
             device=self.device
         )
 
@@ -521,10 +521,10 @@ class Phase1AttackValidator:
 
         # Create structured projection (should detect concentrated attacks better)
         total_params = sum(p.numel() for p in self.model.parameters())
-        k_ratio = 0.2
+        target_k = 150
         projection = StructuredJLProjection(
             model_structure=self.model_structure,
-            k_ratio=k_ratio,
+            target_k=target_k,
             device=self.device
         )
 
@@ -626,7 +626,7 @@ class Phase1AttackValidator:
             attack_type="layerwise_backdoor",
             defense_type="structured_projection",
             attack_parameters={"target_fraction": target_fraction},
-            defense_parameters={"projection_type": "block_diagonal", "k_ratio": k_ratio},
+            defense_parameters={"projection_type": "block_diagonal", "target_k": target_k},
             attack_success_rate=asr,
             projected_visibility=mean_projected_visibility,
             detection_rate=detection_rate,
@@ -643,10 +643,10 @@ class Phase1AttackValidator:
 
         # Create dense projection (should miss concentrated attacks due to signal dilution)
         total_params = sum(p.numel() for p in self.model.parameters())
-        k_ratio = 0.2
+        target_k = 150
         projection = DenseJLProjection(
             original_dim=total_params,
-            k_ratio=k_ratio,
+            k_ratio=target_k/total_params,
             device=self.device
         )
 
@@ -748,7 +748,7 @@ class Phase1AttackValidator:
             attack_type="layerwise_backdoor",
             defense_type="dense_projection",
             attack_parameters={"target_fraction": target_fraction},
-            defense_parameters={"projection_type": "dense", "k_ratio": k_ratio},
+            defense_parameters={"projection_type": "dense", "target_k": target_k},
             attack_success_rate=asr,
             projected_visibility=mean_projected_visibility,  # Should be lower due to dilution
             detection_rate=detection_rate,
@@ -1318,7 +1318,7 @@ def test_basic_components():
         # Test 4: Can we create projections?
         from src.core.projection import DenseJLProjection
         total_params = sum(p.numel() for p in model.parameters())
-        projection = DenseJLProjection(original_dim=total_params, k_ratio=0.2, device="cpu")
+        projection = DenseJLProjection(original_dim=total_params, k_ratio=150/total_params, device="cpu")
         proj_matrix = projection.generate_projection_matrix(round_number=0)
         print(f"✓ Dense projection created: {proj_matrix.shape}")
 

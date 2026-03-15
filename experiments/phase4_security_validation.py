@@ -74,7 +74,7 @@ class SecurityExperimentConfig:
     theta_high: float = 0.7
     gamma_budget: float = 0.35
     tau_ramp: int = 30
-    k_ratio: float = 0.2
+    target_k: int = 150
     detection_threshold: float = 2.0
 
     # Validation Metrics
@@ -449,7 +449,7 @@ class Phase4SecurityValidator:
         baseline_tavs_config = TavsEspConfig(
             projection_type="none",  # No projections for baseline
             detection_threshold=float('inf'),  # No detection for baseline
-            k_ratio=1.0,  # No compression for baseline
+            target_k=model_structure.total_params,  # No compression for baseline
             theta_low=0.0,  # No trust tiers for baseline
             theta_high=1.0,
             gamma_budget=1.0  # No budget constraint for baseline
@@ -474,7 +474,7 @@ class Phase4SecurityValidator:
             theta_high=exp_config.theta_high,
             gamma_budget=exp_config.gamma_budget,
             tau_ramp=exp_config.tau_ramp,
-            k_ratio=exp_config.k_ratio,
+            target_k=exp_config.target_k,
             detection_threshold=exp_config.detection_threshold,
             projection_type="structured" if "structured" in proj_type else "dense"
         )

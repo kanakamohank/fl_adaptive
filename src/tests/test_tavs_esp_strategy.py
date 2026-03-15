@@ -108,7 +108,7 @@ def test_tavs_esp_strategy_initialization():
     config = TavsEspConfig(
         theta_low=0.3,
         theta_high=0.7,
-        k_ratio=0.2,
+        target_k=150,
         min_fit_clients=3
     )
 
@@ -122,11 +122,11 @@ def test_tavs_esp_strategy_initialization():
     )
 
     print(f"Config theta_low: {strategy.config.theta_low}, expected: 0.3")
-    print(f"Config k_ratio: {strategy.config.k_ratio}, expected: 0.2")
+    print(f"Config target_k: {strategy.config.target_k}, expected: 150")
     print(f"Round number: {strategy.round_number}, expected: 0")
 
     assert abs(strategy.config.theta_low - 0.3) < 1e-6
-    assert abs(strategy.config.k_ratio - 0.2) < 1e-6
+    assert strategy.config.target_k == 150
     assert strategy.round_number == 0
     print("✓ Strategy initialization successful")
 
@@ -208,7 +208,7 @@ def test_aggregate_fit_esp_layer():
     print("\nTesting ESP Layer 2 aggregation...")
 
     config = TavsEspConfig(
-        k_ratio=0.3,
+        target_k=150,
         projection_type="dense",  # Use dense for simpler testing
         detection_threshold=1.5
     )
@@ -364,7 +364,7 @@ def test_end_to_end_fl_simulation():
     with tempfile.TemporaryDirectory() as temp_dir:
         config = TavsEspConfig(
             min_fit_clients=5,
-            k_ratio=0.25,
+            target_k=150,
             save_round_decisions=True,
             output_dir=temp_dir
         )
