@@ -57,6 +57,11 @@ class HonestClient(NumPyClient):
                         new_param = np.array(new_param)
                     logger.debug(f"Converted parameter {idx} to numpy: shape={new_param.shape}, dtype={new_param.dtype}")
 
+                # Sanitize NaN/Inf values to prevent corrupted model weights
+                if np.any(np.isnan(new_param)) or np.any(np.isinf(new_param)):
+                    logger.warning(f"Client {self.client_id}: NaN/Inf detected in parameter {idx}, sanitizing")
+                    new_param = np.nan_to_num(new_param, nan=0.0, posinf=1e6, neginf=-1e6)
+
                 # Convert to tensor with proper type and device
                 logger.debug(f"Converting parameter {idx} to tensor: target_dtype={param.dtype}, device={self.device}")
                 tensor_param = torch.tensor(new_param, dtype=param.dtype)
@@ -161,13 +166,22 @@ class HonestClient(NumPyClient):
                 output = self.model(data)
                 loss = self.criterion(output, target)
 
-                total_loss += loss.item()
+                batch_loss = loss.item()
+                if not (np.isnan(batch_loss) or np.isinf(batch_loss)):
+                    total_loss += batch_loss
+                else:
+                    logger.warning(f"Client {self.client_id}: NaN/Inf batch loss in evaluation, skipping batch")
                 _, predicted = torch.max(output.data, 1)
                 total += target.size(0)
                 correct += (predicted == target).sum().item()
 
         accuracy = correct / total if total > 0 else 0.0
         avg_loss = total_loss / len(self.test_loader) if len(self.test_loader) > 0 else 0.0
+
+        # Safety check on final loss
+        if np.isnan(avg_loss) or np.isinf(avg_loss):
+            logger.warning(f"Client {self.client_id}: avg_loss is NaN/Inf, resetting to 0.0")
+            avg_loss = 0.0
 
         metrics = {
             "client_id": self.client_id,

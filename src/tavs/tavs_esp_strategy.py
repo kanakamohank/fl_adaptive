@@ -531,7 +531,9 @@ class TavsEspStrategy(Strategy):
 
     def num_fit_clients(self, num_available_clients: int) -> Tuple[int, int]:
         """Determine number of clients to sample for training."""
-        sample_size = max(self.config.min_fit_clients, min(num_available_clients, 10))
+        # Use min_available_clients from config instead of hardcoded 10
+        target_clients = self.config.min_available_clients if hasattr(self.config, 'min_available_clients') else 10
+        sample_size = max(self.config.min_fit_clients, min(num_available_clients, target_clients))
         min_clients = max(1, self.config.min_fit_clients)
         return sample_size, min_clients
 
@@ -584,3 +586,22 @@ class TavsEspStrategy(Strategy):
             "csprng_stats": self.csprng_manager.get_security_stats(),
             "round_analytics": [asdict(analytics) for analytics in self.round_analytics]
         }
+
+    def _unflatten_parameters(self, flat_params: np.ndarray, template_weights: List[np.ndarray]) -> List[np.ndarray]:
+        """
+        Unflattens a 1D numpy array back into a list of NDArrays matching the template shapes.
+        """
+        unflattened = []
+        start_idx = 0
+
+        for template_layer in template_weights:
+            layer_size = template_layer.size
+            # Slice the flat array for this specific layer
+            layer_flat = flat_params[start_idx : start_idx + layer_size]
+            # Reshape it to match the original layer structure
+            layer_reshaped = layer_flat.reshape(template_layer.shape)
+
+            unflattened.append(layer_reshaped)
+            start_idx += layer_size
+
+        return unflattened

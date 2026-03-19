@@ -6,3 +6,10 @@ data/cifar-10-batches-py/*
 data/cifar-10-python.tar.gz
 tavs_esp_logs
 tavs_esp_results
+venv
+data
+results
+results_quick_test
+test_results
+test_results_phase5
+test_temp
