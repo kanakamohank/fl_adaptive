@@ -285,7 +285,7 @@ class TavsEspStrategy(Strategy):
 
         if self.config.projection_type == "structured" and self.model_structure is not None:
             # Use structured block-diagonal projection
-            projection_matrices = self.projection.generate_projection_matrices(
+            projection_matrices = self.projection.generate_ephemeral_projection_matrix(
                 round_number=server_round
             )
             # Project each update through structured projection

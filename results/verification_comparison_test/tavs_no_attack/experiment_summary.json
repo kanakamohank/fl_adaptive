@@ -1,0 +1,72 @@
+{
+  "experiment_config": {
+    "num_rounds": 3,
+    "num_clients": 6,
+    "clients_per_round": 4,
+    "byzantine_fraction": 0.0,
+    "model_type": "cifar_cnn",
+    "dataset": "cifar10",
+    "data_alpha": 0.3,
+    "tavs_config": {
+      "theta_low": 0.3,
+      "theta_high": 0.7,
+      "alpha": 0.9,
+      "gamma_budget": 0.35,
+      "tau_ramp": 30,
+      "decoy_probability": 0.15,
+      "c_lambda": 4.0,
+      "target_k": 150,
+      "detection_threshold": 2.0,
+      "min_consensus": 0.6,
+      "projection_type": "structured",
+      "min_fit_clients": 4,
+      "min_available_clients": 4,
+      "evaluate_fn": null,
+      "master_key": null,
+      "key_rotation_rounds": 10000,
+      "save_trust_trajectory": true,
+      "save_round_decisions": true,
+      "output_dir": "tavs_esp_logs"
+    },
+    "client_epochs": 1,
+    "client_batch_size": 32,
+    "client_learning_rate": 0.01,
+    "attack_types": [
+      "null_space",
+      "layerwise"
+    ],
+    "attack_intensities": [
+      1.0,
+      2.0
+    ],
+    "simulation_backend": "ray",
+    "ray_init_args": {
+      "ignore_reinit_error": true,
+      "include_dashboard": false
+    },
+    "output_dir": "results/verification_comparison_test/tavs_no_attack",
+    "save_client_data": false
+  },
+  "final_metrics": {
+    "loss": null,
+    "accuracy": null,
+    "total_time": 73.82120966911316,
+    "avg_round_time": 1996.857484181722
+  },
+  "trust_summary": {
+    "final_trust_distribution": {
+      "17922145766083368768": 0.0327838995179941,
+      "13416795271071206891": 0.0327838995179941,
+      "13162213350404423101": 0.0327838995179941,
+      "5374883835683905118": 0.0327838995179941,
+      "13535920547880262938": 0.0327838995179941,
+      "4994603130331779123": 0.0327838995179941
+    },
+    "trust_convergence": "analyzed"
+  },
+  "security_summary": {
+    "total_byzantine_detections": 0,
+    "consensus_rate": 1.0,
+    "avg_detections_per_round": 0.0
+  }
+}

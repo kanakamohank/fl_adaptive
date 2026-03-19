@@ -1,0 +1,284 @@
+{
+  "config": {
+    "num_rounds": 2,
+    "num_clients": 4,
+    "clients_per_round": 3,
+    "byzantine_fraction": 0.25,
+    "model_type": "cifar_cnn",
+    "dataset": "cifar10",
+    "data_alpha": 0.3,
+    "tavs_config": {
+      "theta_low": 0.3,
+      "theta_high": 0.7,
+      "alpha": 0.9,
+      "gamma_budget": 0.35,
+      "tau_ramp": 30,
+      "decoy_probability": 0.15,
+      "c_lambda": 4.0,
+      "target_k": 50,
+      "detection_threshold": 2.0,
+      "min_consensus": 0.6,
+      "projection_type": "structured",
+      "min_fit_clients": 3,
+      "min_available_clients": 3,
+      "evaluate_fn": null,
+      "master_key": null,
+      "key_rotation_rounds": 10000,
+      "save_trust_trajectory": true,
+      "save_round_decisions": true,
+      "output_dir": "tavs_esp_logs"
+    },
+    "client_epochs": 1,
+    "client_batch_size": 32,
+    "client_learning_rate": 0.01,
+    "attack_types": [
+      "null_space",
+      "layerwise"
+    ],
+    "attack_intensities": [
+      1.0,
+      2.0
+    ],
+    "simulation_backend": "ray",
+    "ray_init_args": {
+      "ignore_reinit_error": true,
+      "include_dashboard": false
+    },
+    "output_dir": "test_results",
+    "save_client_data": false
+  },
+  "server_metrics": [],
+  "server_losses": [],
+  "server_accuracies": [],
+  "final_trust_state": {
+    "config": {
+      "theta_low": 0.3,
+      "theta_high": 0.7,
+      "alpha": 0.9,
+      "gamma_budget": 0.35,
+      "tau_ramp": 30,
+      "decoy_probability": 0.15,
+      "c_lambda": 4.0,
+      "target_k": 50,
+      "detection_threshold": 2.0,
+      "min_consensus": 0.6,
+      "projection_type": "structured",
+      "min_fit_clients": 3,
+      "min_available_clients": 3,
+      "evaluate_fn": null,
+      "master_key": null,
+      "key_rotation_rounds": 10000,
+      "save_trust_trajectory": true,
+      "save_round_decisions": true,
+      "output_dir": "tavs_esp_logs"
+    },
+    "round_number": 2,
+    "trust_state": {
+      "client_states": {
+        "512353784272834043": {
+          "trust_score": 0.0327838995179941,
+          "tier": 1,
+          "registration_round": 1,
+          "rounds_since_verification": 0,
+          "last_behavioral_score": 0.8,
+          "total_verifications": 2,
+          "total_promotions": 0
+        },
+        "3186173109566946459": {
+          "trust_score": 0.0327838995179941,
+          "tier": 1,
+          "registration_round": 1,
+          "rounds_since_verification": 0,
+          "last_behavioral_score": 0.8,
+          "total_verifications": 2,
+          "total_promotions": 0
+        },
+        "6435730966185566330": {
+          "trust_score": 0.0327838995179941,
+          "tier": 1,
+          "registration_round": 1,
+          "rounds_since_verification": 0,
+          "last_behavioral_score": 0.8,
+          "total_verifications": 2,
+          "total_promotions": 0
+        },
+        "2375756402866347029": {
+          "trust_score": 0.0327838995179941,
+          "tier": 1,
+          "registration_round": 1,
+          "rounds_since_verification": 0,
+          "last_behavioral_score": 0.8,
+          "total_verifications": 2,
+          "total_promotions": 0
+        }
+      },
+      "scheduler_config": {
+        "theta_low": 0.3,
+        "theta_high": 0.7,
+        "alpha": 0.9,
+        "gamma_budget": 0.35,
+        "tau_ramp": 30,
+        "decoy_probability": 0.15
+      },
+      "statistics": {
+        "total_rounds": 2,
+        "total_verifications": 8,
+        "total_promotions": 0,
+        "budget_violations": 0,
+        "trust_updates": 8
+      }
+    },
+    "csprng_stats": {
+      "current_key_epoch": 0,
+      "total_rounds_processed": 2,
+      "average_derivation_time_ms": 0.020623207092285156,
+      "cache_size": 2,
+      "key_rotation_rounds": 10000
+    },
+    "round_analytics": [
+      {
+        "round_number": 1,
+        "scheduling_decision": {
+          "round_number": 1,
+          "verified_clients": [
+            "2375756402866347029",
+            "512353784272834043",
+            "6435730966185566330",
+            "3186173109566946459"
+          ],
+          "promoted_clients": [],
+          "decoy_clients": [],
+          "tier_assignments": {
+            "512353784272834043": 1,
+            "3186173109566946459": 1,
+            "6435730966185566330": 1,
+            "2375756402866347029": 1
+          },
+          "trust_scores": {
+            "512353784272834043": 0.0327838995179941,
+            "3186173109566946459": 0.0327838995179941,
+            "6435730966185566330": 0.0327838995179941,
+            "2375756402866347029": 0.0327838995179941
+          },
+          "budget_utilization": 0.0
+        },
+        "projection_time_ms": 633.2616806030273,
+        "detection_time_ms": 22.37105369567871,
+        "aggregation_time_ms": 5.009889602661133,
+        "trust_updates": {
+          "512353784272834043": 0.0,
+          "6435730966185566330": 0.0,
+          "2375756402866347029": 0.0,
+          "3186173109566946459": 0.0
+        },
+        "byzantine_detected": [],
+        "consensus_achieved": true,
+        "model_accuracy": 0.0
+      },
+      {
+        "round_number": 2,
+        "scheduling_decision": {
+          "round_number": 2,
+          "verified_clients": [
+            "3186173109566946459",
+            "2375756402866347029",
+            "512353784272834043",
+            "6435730966185566330"
+          ],
+          "promoted_clients": [],
+          "decoy_clients": [],
+          "tier_assignments": {
+            "6435730966185566330": 1,
+            "512353784272834043": 1,
+            "2375756402866347029": 1,
+            "3186173109566946459": 1
+          },
+          "trust_scores": {
+            "6435730966185566330": 0.0,
+            "512353784272834043": 0.0,
+            "2375756402866347029": 0.0,
+            "3186173109566946459": 0.0
+          },
+          "budget_utilization": 0.0
+        },
+        "projection_time_ms": 617.9170608520508,
+        "detection_time_ms": 22.593021392822266,
+        "aggregation_time_ms": 4.176855087280273,
+        "trust_updates": {
+          "2375756402866347029": 0.0327838995179941,
+          "512353784272834043": 0.0327838995179941,
+          "3186173109566946459": 0.0327838995179941,
+          "6435730966185566330": 0.0327838995179941
+        },
+        "byzantine_detected": [],
+        "consensus_achieved": true,
+        "model_accuracy": 0.0
+      }
+    ]
+  },
+  "trust_evolution": {
+    "512353784272834043": [
+      0.0327838995179941,
+      0.0
+    ],
+    "3186173109566946459": [
+      0.0327838995179941,
+      0.0
+    ],
+    "6435730966185566330": [
+      0.0327838995179941,
+      0.0
+    ],
+    "2375756402866347029": [
+      0.0327838995179941,
+      0.0
+    ]
+  },
+  "tier_evolution": {
+    "512353784272834043": [
+      1,
+      1
+    ],
+    "3186173109566946459": [
+      1,
+      1
+    ],
+    "6435730966185566330": [
+      1,
+      1
+    ],
+    "2375756402866347029": [
+      1,
+      1
+    ]
+  },
+  "byzantine_detection_history": [
+    {
+      "round": 1,
+      "detected": [],
+      "consensus": true
+    },
+    {
+      "round": 2,
+      "detected": [],
+      "consensus": true
+    }
+  ],
+  "attack_success_rates": {},
+  "total_time_seconds": 57.054041147232056,
+  "round_times": [
+    660.6426239013672,
+    644.6869373321533
+  ],
+  "convergence_metrics": {
+    "final_loss": 0.0,
+    "final_accuracy": 0.0,
+    "loss_improvement": 0.0,
+    "accuracy_improvement": 0.0
+  },
+  "security_metrics": {
+    "total_byzantine_detections": 0,
+    "consensus_rate": 1.0,
+    "avg_detections_per_round": 0.0
+  }
+}

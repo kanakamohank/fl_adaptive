@@ -362,9 +362,23 @@ class TAVSESPPipeline:
         """Extract and analyze results from simulation."""
         logger.info("Extracting simulation results...")
 
-        # Server metrics
-        server_losses = [loss for loss, _ in history.losses_distributed]
-        server_accuracies = [metrics.get("accuracy", 0.0) for _, metrics in history.metrics_distributed["accuracy"]]
+        # Server metrics - handle different history structures
+        server_losses = []
+        server_accuracies = []
+
+        # Extract losses if available
+        if hasattr(history, 'losses_distributed') and history.losses_distributed:
+            server_losses = [loss for loss, _ in history.losses_distributed]
+        elif hasattr(history, 'losses_centralized') and history.losses_centralized:
+            server_losses = [loss for loss, _ in history.losses_centralized]
+
+        # Extract accuracies if available
+        if hasattr(history, 'metrics_distributed') and history.metrics_distributed:
+            if "accuracy" in history.metrics_distributed:
+                server_accuracies = [metrics.get("accuracy", 0.0) for _, metrics in history.metrics_distributed["accuracy"]]
+        elif hasattr(history, 'metrics_centralized') and history.metrics_centralized:
+            if "accuracy" in history.metrics_centralized:
+                server_accuracies = [metrics.get("accuracy", 0.0) for _, metrics in history.metrics_centralized["accuracy"]]
 
         # Trust dynamics
         trust_state = strategy.export_complete_state()
