@@ -48,6 +48,10 @@ class MockClientManager:
     def sample(self, num_clients: int, min_num_clients: int):
         return self.clients[:min(num_clients, len(self.clients))]
 
+    def all(self) -> dict:
+        """Return all available clients (required by Flower API)."""
+        return self.clients
+
 # Mock Flower functions
 def mock_parameters_to_ndarrays(params):
     if hasattr(params, 'tensors'):

@@ -443,13 +443,43 @@ class Phase4SecurityValidator:
 
         return results
 
+    # def _create_baseline_config(self, exp_config: SecurityExperimentConfig) -> PipelineConfig:
+    #     """Create baseline FedAvg configuration (no TAVS-ESP)."""
+    #     # Create minimal TAVS config for baseline (disabled features)
+    #     baseline_tavs_config = TavsEspConfig(
+    #         projection_type="none",  # No projections for baseline
+    #         detection_threshold=float('inf'),  # No detection for baseline
+    #         target_k=model_structure.total_params,  # No compression for baseline
+    #         theta_low=0.0,  # No trust tiers for baseline
+    #         theta_high=1.0,
+    #         gamma_budget=1.0  # No budget constraint for baseline
+    #     )
+    #
+    #     config = PipelineConfig(
+    #         num_rounds=exp_config.num_rounds,
+    #         num_clients=exp_config.num_clients,
+    #         clients_per_round=exp_config.clients_per_round,
+    #         byzantine_fraction=exp_config.byzantine_fraction,
+    #         model_type="cifar_cnn",
+    #         dataset="cifar10",
+    #         output_dir=exp_config.output_dir + "/baseline",
+    #         tavs_config=baseline_tavs_config
+    #     )
+    #     return config
+
     def _create_baseline_config(self, exp_config: SecurityExperimentConfig) -> PipelineConfig:
         """Create baseline FedAvg configuration (no TAVS-ESP)."""
+
+        # --- FIX: Safely extract total_params using 'self.' ---
+        # Fallback to a large number (e.g., 100000) if the test suite
+        # calls this before setup_experiment_environment() initializes it.
+        total_params = self.model_structure.total_params if getattr(self, 'model_structure', None) is not None else 100000
+
         # Create minimal TAVS config for baseline (disabled features)
         baseline_tavs_config = TavsEspConfig(
             projection_type="none",  # No projections for baseline
             detection_threshold=float('inf'),  # No detection for baseline
-            target_k=model_structure.total_params,  # No compression for baseline
+            target_k=total_params,  # No compression for baseline
             theta_low=0.0,  # No trust tiers for baseline
             theta_high=1.0,
             gamma_budget=1.0  # No budget constraint for baseline

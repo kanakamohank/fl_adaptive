@@ -13,3 +13,6 @@ results_quick_test
 test_results
 test_results_phase5
 test_temp
+*/__pycache__/*
+experiments/__pycache__/*
+src/tavs/__pycache__/*

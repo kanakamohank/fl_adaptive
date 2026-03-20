@@ -39,6 +39,22 @@ class ModelStructure:
         block = next(b for b in self.blocks if b['name'] == block_name)
         params_flat[block['start_idx']:block['end_idx']] = block_params.flatten()
 
+    @classmethod
+    def from_model(cls, model: torch.nn.Module) -> 'ModelStructure':
+        """
+        Automatically builds block structure from a PyTorch model.
+        CRITICAL FOR PEFT/LoRA: Explicitly ignores frozen parameters!
+        """
+        structure = cls()
+        for name, param in model.named_parameters():
+            if param.requires_grad:  # This perfectly isolates LoRA adapters
+                structure.add_block(
+                    name=name,
+                    shape=param.shape,
+                    num_params=param.numel()
+                )
+        return structure
+
 
 class CIFARCNN(nn.Module):
     """CNN for CIFAR-10/100 with explicit block structure tracking."""
@@ -175,19 +191,25 @@ class FederatedModel(nn.Module):
     """Base class for federated learning models with TAVS-ESP support."""
 
     def get_weights_flat(self) -> torch.Tensor:
-        """Get all model parameters as a flat tensor."""
+        """Get all TRAINABLE model parameters as a flat tensor."""
         params = []
         for param in self.parameters():
-            params.append(param.flatten())
+            if param.requires_grad:
+                params.append(param.flatten())
+
+        if not params:
+            return torch.tensor([])
+
         return torch.cat(params)
 
     def set_weights_flat(self, params_flat: torch.Tensor):
-        """Set all model parameters from a flat tensor."""
+        """Set all TRAINABLE model parameters from a flat tensor."""
         idx = 0
         for param in self.parameters():
-            param_size = param.numel()
-            param.data = params_flat[idx:idx + param_size].reshape(param.shape)
-            idx += param_size
+            if param.requires_grad:
+                param_size = param.numel()
+                param.data = params_flat[idx:idx + param_size].reshape(param.shape)
+                idx += param_size
 
 
 def get_model(model_type: str, **kwargs) -> nn.Module:

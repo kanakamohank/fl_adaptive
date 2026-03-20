@@ -76,33 +76,191 @@ class GeometricMedian:
         return distances
 
 
+# class IsomorphicVerification:
+#     """
+#     Isomorphic verification for Byzantine detection using geometric topology.
+#
+#     Key insight: We detect Byzantine clients based on topological inconsistency
+#     in the projected space, not just distance-based outliers.
+#     """
+#
+#     def __init__(self, detection_threshold: float = 1.5, min_consensus: float = 0.6):
+#         """
+#         Initialize isomorphic verification.
+#
+#         Args:
+#             detection_threshold: Multiplier for median distance threshold
+#             min_consensus: Minimum fraction of clients needed for consensus
+#         """
+#         self.detection_threshold = detection_threshold
+#         self.min_consensus = min_consensus
+#
+#     def detect_byzantine_clients(self, projected_updates: List[torch.Tensor],
+#                                client_ids: Optional[List[str]] = None) -> Dict:
+#         """
+#         Detect Byzantine clients using isomorphic verification.
+#
+#         Args:
+#             projected_updates: List of projected parameter updates
+#             client_ids: Optional client identifiers
+#
+#         Returns:
+#             Detection results with trust scores and Byzantine indices
+#         """
+#         start_time = time.time()
+#
+#         if client_ids is None:
+#             client_ids = [f"client_{i}" for i in range(len(projected_updates))]
+#
+#         n_clients = len(projected_updates)
+#         if n_clients < 2:
+#             logger.warning("Need at least 2 clients for Byzantine detection")
+#             return {
+#                 'byzantine_indices': [],
+#                 'trust_scores': [1.0] * n_clients,
+#                 'geometric_median': projected_updates[0] if projected_updates else None,
+#                 'detection_time': time.time() - start_time
+#             }
+#
+#         # Step 1: Compute geometric median
+#         geometric_median = GeometricMedian.compute(projected_updates)
+#
+#         # Step 2: Compute distances to geometric median
+#         distances = GeometricMedian.compute_distances_to_median(projected_updates, geometric_median)
+#
+#         # Step 3: Determine outlier threshold
+#         median_distance = np.median(distances)
+#         threshold = median_distance * self.detection_threshold
+#
+#         # Step 4: Identify Byzantine clients
+#         byzantine_indices = []
+#         trust_scores = []
+#
+#         for i, distance in enumerate(distances):
+#             if distance > threshold:
+#                 byzantine_indices.append(i)
+#                 # Trust score inversely related to distance (normalized)
+#                 trust_score = max(0.0, 1.0 - (distance - median_distance) / median_distance)
+#             else:
+#                 trust_score = 1.0 - (distance / (median_distance + 1e-8))
+#
+#             trust_scores.append(trust_score)
+#
+#         # Step 5: Consensus check
+#         honest_fraction = (n_clients - len(byzantine_indices)) / n_clients
+#         consensus_achieved = honest_fraction >= self.min_consensus
+#
+#         detection_time = time.time() - start_time
+#
+#         results = {
+#             'byzantine_indices': byzantine_indices,
+#             'byzantine_client_ids': [client_ids[i] for i in byzantine_indices],
+#             'trust_scores': trust_scores,
+#             'geometric_median': geometric_median,
+#             'distances_to_median': distances,
+#             'detection_threshold': threshold,
+#             'median_distance': median_distance,
+#             'consensus_achieved': consensus_achieved,
+#             'honest_fraction': honest_fraction,
+#             'detection_time': detection_time
+#         }
+#
+#         logger.info(f"Byzantine detection completed: {len(byzantine_indices)}/{n_clients} "
+#                    f"Byzantine clients detected in {detection_time:.4f}s")
+#
+#         return results
+#
+#     def compute_topology_consistency(self, projected_updates: List[torch.Tensor]) -> Dict:
+#         """
+#         Compute topological consistency metrics.
+#         This helps distinguish between honest edge-case clients and Byzantine attackers.
+#
+#         Args:
+#             projected_updates: List of projected parameter updates
+#
+#         Returns:
+#             Topology consistency analysis
+#         """
+#         if len(projected_updates) < 3:
+#             return {'consistency_score': 1.0, 'analysis': 'insufficient_data'}
+#
+#         # Convert to numpy for distance computations
+#         vectors = [update.cpu().numpy() for update in projected_updates]
+#         X = np.array(vectors)
+#
+#         # Compute pairwise distances
+#         distances = squareform(pdist(X, metric='euclidean'))
+#
+#         # Analyze local neighborhoods
+#         n_neighbors = min(3, len(projected_updates) - 1)
+#         nbrs = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
+#         nbrs.fit(X)
+#
+#         # For each point, check if its local neighborhood is consistent
+#         consistency_scores = []
+#         for i in range(len(X)):
+#             neighbors_distances, neighbors_indices = nbrs.kneighbors([X[i]])
+#             neighbors_distances = neighbors_distances[0]
+#
+#             # Consistency based on smoothness of local distances
+#             if len(neighbors_distances) > 1:
+#                 distance_variance = np.var(neighbors_distances[1:])  # Exclude self (distance 0)
+#                 consistency = 1.0 / (1.0 + distance_variance)
+#             else:
+#                 consistency = 1.0
+#
+#             consistency_scores.append(consistency)
+#
+#         return {
+#             'consistency_scores': consistency_scores,
+#             'mean_consistency': np.mean(consistency_scores),
+#             'pairwise_distances': distances,
+#             'analysis': 'topology_computed'
+#         }
+
 class IsomorphicVerification:
     """
     Isomorphic verification for Byzantine detection using geometric topology.
 
-    Key insight: We detect Byzantine clients based on topological inconsistency
-    in the projected space, not just distance-based outliers.
+    Upgraded to support Block-Variance-Normalized Detection (BVD) as defined
+    in TAVS-ESP Paper 2.
     """
 
-    def __init__(self, detection_threshold: float = 1.5, min_consensus: float = 0.6):
+    def __init__(self,
+                 detection_threshold: float = 1.5,
+                 min_consensus: float = 0.6,
+                 use_bvd: bool = True,
+                 bvd_threshold: float = 5.0,
+                 variance_ema_alpha: float = 0.9):
         """
         Initialize isomorphic verification.
 
         Args:
             detection_threshold: Multiplier for median distance threshold
             min_consensus: Minimum fraction of clients needed for consensus
+            use_bvd: Whether to enable Block-Variance-Normalized Detection (Paper 2)
+            bvd_threshold: Z-score threshold for BVD
+            variance_ema_alpha: EMA decay factor for block variance tracking
         """
         self.detection_threshold = detection_threshold
         self.min_consensus = min_consensus
 
+        # New BVD parameters
+        self.use_bvd = use_bvd
+        self.bvd_threshold = bvd_threshold
+        self.variance_ema_alpha = variance_ema_alpha
+        self.block_variances: Dict[int, float] = {}
+
     def detect_byzantine_clients(self, projected_updates: List[torch.Tensor],
-                               client_ids: Optional[List[str]] = None) -> Dict:
+                                 client_ids: Optional[List[str]] = None,
+                                 block_sizes: Optional[List[int]] = None) -> Dict:
         """
         Detect Byzantine clients using isomorphic verification.
 
         Args:
             projected_updates: List of projected parameter updates
             client_ids: Optional client identifiers
+            block_sizes: Sizes of semantic blocks (triggers BVD if provided)
 
         Returns:
             Detection results with trust scores and Byzantine indices
@@ -125,26 +283,70 @@ class IsomorphicVerification:
         # Step 1: Compute geometric median
         geometric_median = GeometricMedian.compute(projected_updates)
 
-        # Step 2: Compute distances to geometric median
-        distances = GeometricMedian.compute_distances_to_median(projected_updates, geometric_median)
-
-        # Step 3: Determine outlier threshold
-        median_distance = np.median(distances)
-        threshold = median_distance * self.detection_threshold
-
-        # Step 4: Identify Byzantine clients
         byzantine_indices = []
         trust_scores = []
 
-        for i, distance in enumerate(distances):
-            if distance > threshold:
-                byzantine_indices.append(i)
-                # Trust score inversely related to distance (normalized)
-                trust_score = max(0.0, 1.0 - (distance - median_distance) / median_distance)
-            else:
-                trust_score = 1.0 - (distance / (median_distance + 1e-8))
+        # Step 2: Choose Detection Path (BVD vs STD)
+        if self.use_bvd and block_sizes is not None:
+            # --- NEW PATH: Block-Variance-Normalized Detection (Paper 2) ---
+            num_blocks = len(block_sizes)
 
-            trust_scores.append(trust_score)
+            # Stack and split
+            X = torch.stack(projected_updates)
+            median_blocks = torch.split(geometric_median, block_sizes)
+            client_blocks = torch.split(X, block_sizes, dim=1)
+
+            A_scores = np.zeros(n_clients)
+
+            for m in range(num_blocks):
+                # Distance per block
+                diff = client_blocks[m] - median_blocks[m].unsqueeze(0)
+                d_im = torch.norm(diff, dim=1, p=2).pow(2).cpu().numpy()
+
+                # Current block variance estimate
+                current_var_estimate = np.median(d_im) + 1e-6
+
+                if m not in self.block_variances:
+                    self.block_variances[m] = current_var_estimate
+                else:
+                    self.block_variances[m] = (self.variance_ema_alpha * self.block_variances[m] +
+                                               (1 - self.variance_ema_alpha) * current_var_estimate)
+
+                # Z-scores
+                Z_m = d_im / self.block_variances[m]
+                A_scores = np.maximum(A_scores, Z_m)
+
+            distances = A_scores.tolist()
+            median_distance = np.median(distances)
+            threshold = self.bvd_threshold
+
+            for i, a_score in enumerate(A_scores):
+                if a_score > threshold:
+                    byzantine_indices.append(i)
+                    trust_score = max(0.0, 1.0 - (a_score / threshold))
+                else:
+                    trust_score = 1.0 - (a_score / (threshold * 2))
+                trust_scores.append(trust_score)
+
+        else:
+            # --- ORIGINAL PATH: Scalar-Threshold Detection (Preserves Tests) ---
+            # Step 2: Compute distances to geometric median
+            distances = GeometricMedian.compute_distances_to_median(projected_updates, geometric_median)
+
+            # Step 3: Determine outlier threshold
+            median_distance = np.median(distances)
+            threshold = median_distance * self.detection_threshold
+
+            # Step 4: Identify Byzantine clients
+            for i, distance in enumerate(distances):
+                if distance > threshold:
+                    byzantine_indices.append(i)
+                    # Trust score inversely related to distance (normalized)
+                    trust_score = max(0.0, 1.0 - (distance - median_distance) / median_distance)
+                else:
+                    trust_score = 1.0 - (distance / (median_distance + 1e-8))
+
+                trust_scores.append(trust_score)
 
         # Step 5: Consensus check
         honest_fraction = (n_clients - len(byzantine_indices)) / n_clients
@@ -162,62 +364,14 @@ class IsomorphicVerification:
             'median_distance': median_distance,
             'consensus_achieved': consensus_achieved,
             'honest_fraction': honest_fraction,
-            'detection_time': detection_time
+            'detection_time': detection_time,
+            'method': 'BVD' if (self.use_bvd and block_sizes is not None) else 'STD'
         }
 
-        logger.info(f"Byzantine detection completed: {len(byzantine_indices)}/{n_clients} "
-                   f"Byzantine clients detected in {detection_time:.4f}s")
+        logger.info(f"Byzantine detection ({results['method']}) completed: {len(byzantine_indices)}/{n_clients} "
+                    f"Byzantine clients detected in {detection_time:.4f}s")
 
         return results
-
-    def compute_topology_consistency(self, projected_updates: List[torch.Tensor]) -> Dict:
-        """
-        Compute topological consistency metrics.
-        This helps distinguish between honest edge-case clients and Byzantine attackers.
-
-        Args:
-            projected_updates: List of projected parameter updates
-
-        Returns:
-            Topology consistency analysis
-        """
-        if len(projected_updates) < 3:
-            return {'consistency_score': 1.0, 'analysis': 'insufficient_data'}
-
-        # Convert to numpy for distance computations
-        vectors = [update.cpu().numpy() for update in projected_updates]
-        X = np.array(vectors)
-
-        # Compute pairwise distances
-        distances = squareform(pdist(X, metric='euclidean'))
-
-        # Analyze local neighborhoods
-        n_neighbors = min(3, len(projected_updates) - 1)
-        nbrs = NearestNeighbors(n_neighbors=n_neighbors, metric='euclidean')
-        nbrs.fit(X)
-
-        # For each point, check if its local neighborhood is consistent
-        consistency_scores = []
-        for i in range(len(X)):
-            neighbors_distances, neighbors_indices = nbrs.kneighbors([X[i]])
-            neighbors_distances = neighbors_distances[0]
-
-            # Consistency based on smoothness of local distances
-            if len(neighbors_distances) > 1:
-                distance_variance = np.var(neighbors_distances[1:])  # Exclude self (distance 0)
-                consistency = 1.0 / (1.0 + distance_variance)
-            else:
-                consistency = 1.0
-
-            consistency_scores.append(consistency)
-
-        return {
-            'consistency_scores': consistency_scores,
-            'mean_consistency': np.mean(consistency_scores),
-            'pairwise_distances': distances,
-            'analysis': 'topology_computed'
-        }
-
 
 class AdaptiveThreshold:
     """Adaptive threshold for Byzantine detection that evolves over rounds."""
