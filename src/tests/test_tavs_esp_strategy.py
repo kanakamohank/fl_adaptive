@@ -1,21 +1,20 @@
 #!/usr/bin/env python3
 """
-Test TAVS-ESP Strategy Implementation
+Test V2 TAVS-ESP Strategy Implementation (The Bridge)
 
 Tests the complete federated learning strategy including:
 1. Flower integration (configure_fit, aggregate_fit)
-2. Layer 1 (TAVS) + Layer 2 (ESP) coordination
-3. Trust dynamics and Byzantine detection
-4. End-to-end federated learning simulation
+2. Delegation to V2 Layer 1 (TAVS) + Layer 2 (ESP) coordination
+3. Trust dynamics update verification
+4. End-to-end federated learning simulation loop
 """
 
 import sys
 import numpy as np
 import torch
 from typing import List, Dict, Tuple
-from unittest.mock import MagicMock, Mock
+from unittest.mock import MagicMock
 import tempfile
-import json
 
 # Mock Flower imports for testing
 class MockClientProxy:
@@ -50,13 +49,13 @@ class MockClientManager:
 
     def all(self) -> dict:
         """Return all available clients (required by Flower API)."""
-        return self.clients
+        return {c.cid: c for c in self.clients}
 
 # Mock Flower functions
 def mock_parameters_to_ndarrays(params):
     if hasattr(params, 'tensors'):
         return params.tensors
-    return [np.random.randn(100), np.random.randn(50)]
+    return [np.random.randn(150000)] # Match the default 'full_model' fallback dim
 
 def mock_ndarrays_to_parameters(arrays):
     return MockParameters(arrays)
@@ -77,7 +76,7 @@ class MockEvaluateIns:
         self.parameters = parameters
         self.config = config
 
-# Monkey patch for testing - be more selective
+# Monkey patch for testing
 sys.modules['flwr'] = MagicMock()
 sys.modules['flwr.server'] = MagicMock()
 sys.modules['flwr.server.strategy'] = MagicMock()
@@ -85,7 +84,6 @@ sys.modules['flwr.server.strategy'].Strategy = MockStrategy
 sys.modules['flwr.server.client_proxy'] = MagicMock()
 sys.modules['flwr.server.client_manager'] = MagicMock()
 
-# Create a mock common module with our classes
 class MockCommon:
     def __init__(self):
         self.parameters_to_ndarrays = mock_parameters_to_ndarrays
@@ -95,160 +93,104 @@ class MockCommon:
         self.FitRes = MockFitRes
         self.EvaluateRes = MockEvaluateRes
         self.Parameters = MockParameters
-        self.Scalar = float  # Simple scalar type
-        self.NDArrays = list  # List of numpy arrays
+        self.Scalar = float  
+        self.NDArrays = list  
 
 sys.modules['flwr.common'] = MockCommon()
 
+# Import the actual Strategy AFTER patching flwr
+from src.tavs.tavs_esp_strategy import TavsEspStrategy
+
+# Dummy Config to mimic PipelineConfig
+class DummyConfig:
+    def __init__(self):
+        self.theta_low = 0.3
+        self.theta_high = 0.7
+        self.target_k = 150
+        self.gamma_budget = 0.35
+        self.alpha_trust = 0.9
+        self.tau_ramp = 30.0
+        self.k_trust = 10
+        self.p_decoy = 0.15
+        self.detection_threshold = 5.0
+        self.master_key = b'test_bridge_key'
 
 def test_tavs_esp_strategy_initialization():
-    """Test TAVS-ESP strategy initialization and configuration."""
-    from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
-    from src.core.models import ModelStructure
+    """Test V2 TAVS-ESP bridge initialization."""
+    print("Testing V2 TAVS-ESP Strategy initialization...")
 
-    print("Testing TAVS-ESP Strategy initialization...")
-
-    # Test 1: Basic initialization
-    config = TavsEspConfig(
-        theta_low=0.3,
-        theta_high=0.7,
-        target_k=150,
-        min_fit_clients=3
-    )
-
-    model_structure = ModelStructure()
-    model_structure.add_block('conv1', (32, 3, 3, 3), 864)
-    model_structure.add_block('fc1', (10, 32), 320)
-
-    strategy = TavsEspStrategy(
-        config=config,
-        model_structure=model_structure
-    )
-
-    print(f"Config theta_low: {strategy.config.theta_low}, expected: 0.3")
-    print(f"Config target_k: {strategy.config.target_k}, expected: 150")
-    print(f"Round number: {strategy.round_number}, expected: 0")
-
-    assert abs(strategy.config.theta_low - 0.3) < 1e-6
-    assert strategy.config.target_k == 150
-    assert strategy.round_number == 0
-    print("✓ Strategy initialization successful")
-
-    # Test 2: Component integration
-    assert strategy.csprng_manager is not None
-    assert strategy.scheduler is not None
-    assert strategy.verification is not None
-    print("✓ All core components initialized")
-
-    # Test 3: Configuration validation
-    assert len(strategy.round_analytics) == 0
-    assert strategy.projection is None  # Should be lazy-initialized
-    print("✓ Configuration validation passed")
-
-    return True
-
-
-def test_configure_fit_scheduling():
-    """Test TAVS Layer 1 scheduling in configure_fit."""
-    from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
-
-    print("\nTesting TAVS Layer 1 scheduling...")
-
-    config = TavsEspConfig(min_fit_clients=4)
+    config = DummyConfig()
     strategy = TavsEspStrategy(config=config)
 
-    # Create mock client manager
+    # Test 1: Component integration
+    assert strategy.scheduler is not None, "V2 Scheduler not initialized"
+    assert strategy.projector is not None, "V2 Projector not initialized"
+    assert strategy.detector is not None, "V2 Detector not initialized"
+    
+    # Test 2: Fallback parameters
+    assert "full_model" in strategy.model_blocks, "Model blocks fallback failed"
+    print("✓ Strategy initialization successful and V2 components linked.")
+    return True
+
+def test_configure_fit_scheduling():
+    """Test TAVS Layer 1 scheduling bridge in configure_fit."""
+    print("\nTesting TAVS Layer 1 scheduling bridge...")
+
+    config = DummyConfig()
+    strategy = TavsEspStrategy(config=config)
     client_manager = MockClientManager(num_clients=8)
+    initial_params = MockParameters([np.random.randn(150000)])
 
-    # Create initial parameters
-    initial_params = MockParameters([np.random.randn(100), np.random.randn(50)])
-
-    # Test 1: First round scheduling
+    # Run scheduling
     fit_configs = strategy.configure_fit(
         server_round=1,
         parameters=initial_params,
         client_manager=client_manager
     )
 
-    assert len(fit_configs) >= config.min_fit_clients
-    print(f"✓ Configured {len(fit_configs)} clients for training")
-
-    # Test 2: Verify TAVS assignments
+    assert len(fit_configs) == 8, "Did not configure all available clients"
+    
     verified_count = 0
     promoted_count = 0
 
     for i, (proxy, fit_ins) in enumerate(fit_configs):
         config_dict = fit_ins.config
-        print(f"    Client {i} ({proxy.cid}): config = {config_dict}")
-
-        assert "tavs_assignment" in config_dict, f"Missing tavs_assignment in config: {config_dict}"
-        assert "trust_score" in config_dict
-        assert "tier" in config_dict
-
-        if config_dict["tavs_assignment"] == "verified":
+        assert "is_verified" in config_dict, "Missing V2 is_verified flag"
+        if config_dict["is_verified"]:
             verified_count += 1
         else:
             promoted_count += 1
 
-    print(f"✓ TAVS assignments: {verified_count} verified, {promoted_count} promoted")
-
-    # Test 3: Round progression
-    fit_configs_2 = strategy.configure_fit(
-        server_round=2,
-        parameters=initial_params,
-        client_manager=client_manager
-    )
-
-    assert len(fit_configs_2) >= config.min_fit_clients
-    print("✓ Multi-round scheduling successful")
-
+    print(f"✓ V2 Assignments: {verified_count} verified, {promoted_count} promoted")
     return True
 
-
 def test_aggregate_fit_esp_layer():
-    """Test ESP Layer 2 processing in aggregate_fit."""
-    from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
+    """Test ESP Layer 2 processing and Unified Aggregation bridge."""
+    print("\nTesting ESP Layer 2 aggregation bridge...")
 
-    print("\nTesting ESP Layer 2 aggregation...")
-
-    config = TavsEspConfig(
-        target_k=150,
-        projection_type="dense",  # Use dense for simpler testing
-        detection_threshold=1.5
-    )
+    config = DummyConfig()
     strategy = TavsEspStrategy(config=config)
-
-    # Set initial parameters
-    strategy.current_parameters = MockParameters([np.random.randn(100), np.random.randn(50)])
-
-    # Test 1: Create mock client results
     client_proxies = [MockClientProxy(f"client_{i}") for i in range(6)]
-
-    # Register clients first
-    for proxy in client_proxies:
-        strategy.scheduler.register_client(proxy.cid, round_number=1)
+    
+    # Bypass Mech 3 so they aren't stuck in Tier 1 for the test
+    for c in client_proxies:
+        strategy.scheduler.join_rounds[c.cid] = -100
 
     client_results = []
     for i, proxy in enumerate(client_proxies):
-        # Create client parameters (initial + update)
-        base_params = [np.random.randn(100) * 0.1, np.random.randn(50) * 0.1]
-
-        # Add Byzantine behavior to first 2 clients
-        if i < 2:  # Byzantine clients
-            byzantine_noise = [np.random.randn(100) * 2.0, np.random.randn(50) * 2.0]
-            client_params = [bp + bn for bp, bn in zip(base_params, byzantine_noise)]
-        else:  # Honest clients
-            client_params = base_params
+        # Clients return ndarrays; mock_parameters_to_ndarrays will unpack them
+        # Let's make client_0 and client_1 massive outliers to test the BVD bridge
+        if i < 2:  
+            client_params = [np.random.randn(150000) * 50.0]
+        else:
+            client_params = [np.random.randn(150000) * 0.1]
 
         fit_res = MockFitRes(
             parameters=MockParameters(client_params),
-            metrics={"tavs_assignment": "verified"}
+            metrics={"is_verified": True} # Assume all were verified for this test
         )
         client_results.append((proxy, fit_res))
 
-    print(f"✓ Created {len(client_results)} mock client results")
-
-    # Test 2: Run aggregation
     aggregated_params, metrics = strategy.aggregate_fit(
         server_round=1,
         results=client_results,
@@ -256,248 +198,79 @@ def test_aggregate_fit_esp_layer():
     )
 
     assert aggregated_params is not None
-    assert "num_verified" in metrics
-    assert "num_byzantine_detected" in metrics
-    assert "projection_time_ms" in metrics
+    assert "inliers" in metrics, "Missing inliers count from V2 bridge"
+    assert "outliers" in metrics, "Missing outliers count from V2 bridge"
 
-    print(f"✓ Aggregation successful: {metrics['num_byzantine_detected']} Byzantine detected")
-
-    # Test 3: Verify analytics
-    assert len(strategy.round_analytics) == 1
-    analytics = strategy.round_analytics[0]
-    assert analytics.round_number == 1
-    assert analytics.projection_time_ms > 0
-    assert analytics.detection_time_ms > 0
-
-    print("✓ Round analytics recorded")
-
+    print(f"✓ Aggregation successful: {metrics['inliers']} Inliers, {metrics['outliers']} Outliers")
     return True
 
-
 def test_trust_dynamics_integration():
-    """Test trust score evolution over multiple rounds."""
-    from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
-
+    """Test trust score evolution through the strategy bridge."""
     print("\nTesting trust dynamics integration...")
 
-    config = TavsEspConfig(
-        alpha=0.9,
-        theta_low=0.3,
-        theta_high=0.7,
-        projection_type="dense"
-    )
+    config = DummyConfig()
     strategy = TavsEspStrategy(config=config)
-    strategy.current_parameters = MockParameters([np.random.randn(150)])
-
     client_manager = MockClientManager(num_clients=8)
+    initial_params = MockParameters([np.random.randn(150000)])
 
-    # Simulate multiple rounds
-    trust_evolution = {}
+    # Simulate 3 rounds
+    for round_num in range(1, 4):
+        fit_configs = strategy.configure_fit(round_num, initial_params, client_manager)
 
-    for round_num in range(1, 6):
-        print(f"  Round {round_num}:")
-
-        # Configure clients
-        fit_configs = strategy.configure_fit(
-            server_round=round_num,
-            parameters=strategy.current_parameters,
-            client_manager=client_manager
-        )
-
-        # Create client results with behavioral patterns
         client_results = []
         for i, (proxy, fit_ins) in enumerate(fit_configs):
-            # Byzantine clients (first 2) have poor behavior
-            if i < 2:  # Byzantine
-                client_params = [np.random.randn(150) * 3.0]  # Large malicious update
-            else:  # Honest
-                client_params = [np.random.randn(150) * 0.1]  # Small honest update
-
+            is_verified = fit_ins.config.get("is_verified", True)
+            
+            # Inject noise for client_0 to test penalization
+            noise = 50.0 if proxy.cid == "client_0" else 0.1
+            
             fit_res = MockFitRes(
-                parameters=MockParameters(client_params),
-                metrics={"tavs_assignment": fit_ins.config["tavs_assignment"]}
+                parameters=MockParameters([np.random.randn(150000) * noise]),
+                metrics={"is_verified": is_verified}
             )
             client_results.append((proxy, fit_res))
 
-        # Aggregate results
-        aggregated_params, metrics = strategy.aggregate_fit(
-            server_round=round_num,
-            results=client_results,
-            failures=[]
-        )
+        strategy.aggregate_fit(round_num, client_results, [])
 
-        # Track trust evolution
-        for client_id in [proxy.cid for proxy, _ in fit_configs]:
-            if client_id in strategy.scheduler.client_states:
-                trust_score = strategy.scheduler.client_states[client_id].trust_score
-                if client_id not in trust_evolution:
-                    trust_evolution[client_id] = []
-                trust_evolution[client_id].append(trust_score)
-
-        print(f"    Byzantine detected: {metrics['num_byzantine_detected']}")
-        print(f"    Budget utilization: {metrics['budget_utilization']:.1%}")
-
-    # Test trust convergence
-    honest_clients = ["client_2", "client_3", "client_4"]
-    byzantine_clients = ["client_0", "client_1"]
-
-    honest_final_trust = [trust_evolution[cid][-1] for cid in honest_clients if cid in trust_evolution]
-    byzantine_final_trust = [trust_evolution[cid][-1] for cid in byzantine_clients if cid in trust_evolution]
-
-    if honest_final_trust and byzantine_final_trust:
-        avg_honest_trust = np.mean(honest_final_trust)
-        avg_byzantine_trust = np.mean(byzantine_final_trust)
-
-        print(f"✓ Trust convergence: honest={avg_honest_trust:.3f}, byzantine={avg_byzantine_trust:.3f}")
-
-        if avg_honest_trust > avg_byzantine_trust:
-            print("✓ Trust system correctly distinguishes client types")
-        else:
-            print("⚠ Trust system may need more rounds to fully converge")
-
+    # Check trust state via the V2 Scheduler
+    trust_scores = strategy.scheduler.trust_scores
+    
+    assert trust_scores["client_0"] < 0.5, "Attacker was not penalized"
+    assert trust_scores["client_1"] >= 0.5, "Honest client trust incorrectly dropped"
+    
+    print("✓ Trust dynamically tracks via the V2 scheduler.")
     return True
-
 
 def test_end_to_end_fl_simulation():
-    """Test complete federated learning simulation with TAVS-ESP."""
-    from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
+    """Test complete federated learning simulation loop."""
+    print("\nTesting end-to-end FL simulation loop...")
 
-    print("\nTesting end-to-end FL simulation...")
-
-    # Create temporary directory for logs
-    with tempfile.TemporaryDirectory() as temp_dir:
-        config = TavsEspConfig(
-            min_fit_clients=5,
-            target_k=150,
-            save_round_decisions=True,
-            output_dir=temp_dir
-        )
-
-        strategy = TavsEspStrategy(config=config)
-        client_manager = MockClientManager(num_clients=10)
-
-        # Initialize parameters
-        initial_params = MockParameters([np.random.randn(200), np.random.randn(100)])
-        strategy.current_parameters = initial_params
-
-        simulation_metrics = []
-
-        # Run FL simulation for 5 rounds
-        for round_num in range(1, 6):
-            # Configure clients
-            fit_configs = strategy.configure_fit(
-                server_round=round_num,
-                parameters=strategy.current_parameters,
-                client_manager=client_manager
-            )
-
-            # Simulate client training
-            client_results = []
-            for i, (proxy, fit_ins) in enumerate(fit_configs):
-                # Simulate realistic parameter updates
-                if i < 3:  # Some Byzantine clients
-                    noise_scale = 1.5 if round_num > 2 else 0.1  # Attack after round 2
-                    client_params = [
-                        np.random.randn(200) * noise_scale,
-                        np.random.randn(100) * noise_scale
-                    ]
-                else:  # Honest clients
-                    client_params = [
-                        np.random.randn(200) * 0.05,
-                        np.random.randn(100) * 0.05
-                    ]
-
-                fit_res = MockFitRes(
-                    parameters=MockParameters(client_params),
-                    metrics={"tavs_assignment": fit_ins.config["tavs_assignment"]}
-                )
-                client_results.append((proxy, fit_res))
-
-            # Aggregate
-            aggregated_params, metrics = strategy.aggregate_fit(
-                server_round=round_num,
-                results=client_results,
-                failures=[]
-            )
-
-            # Update global parameters
-            strategy.current_parameters = aggregated_params
-            simulation_metrics.append(metrics)
-
-            print(f"  Round {round_num}: "
-                  f"V={metrics['num_verified']}, "
-                  f"S={metrics['num_promoted']}, "
-                  f"Byzantine={metrics['num_byzantine_detected']}, "
-                  f"Time={metrics['total_time_ms']:.1f}ms")
-
-        # Verify simulation results
-        assert len(simulation_metrics) == 5
-        assert len(strategy.round_analytics) == 5
-
-        # Check that Byzantine detection improves over time
-        round_3_4_5_detections = [simulation_metrics[i]['num_byzantine_detected'] for i in range(2, 5)]
-        if max(round_3_4_5_detections) > 0:
-            print("✓ Byzantine detection active in later rounds")
-
-        # Check trust statistics
-        trust_stats = strategy.get_trust_statistics()
-        assert trust_stats['total_clients'] == len(client_manager.clients)
-        print(f"✓ Final trust statistics: {trust_stats['tier_distribution']}")
-
-        print("✓ End-to-end FL simulation successful")
-
-        return True
-
-
-def test_strategy_export_and_analytics():
-    """Test analytics export and state management."""
-    from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
-
-    print("\nTesting analytics and state export...")
-
-    config = TavsEspConfig()
+    config = DummyConfig()
     strategy = TavsEspStrategy(config=config)
+    client_manager = MockClientManager(num_clients=5)
+    initial_params = MockParameters([np.random.randn(150000)])
 
-    # Run a few rounds to generate data
-    strategy.current_parameters = MockParameters([np.random.randn(50)])
-    client_manager = MockClientManager(num_clients=4)
+    # Run FL simulation for 3 rounds
+    for round_num in range(1, 4):
+        fit_configs = strategy.configure_fit(round_num, initial_params, client_manager)
 
-    for round_num in range(1, 3):
-        fit_configs = strategy.configure_fit(round_num, strategy.current_parameters, client_manager)
-
-        # Create simple results
-        results = []
-        for proxy, fit_ins in fit_configs:
+        client_results = []
+        for i, (proxy, fit_ins) in enumerate(fit_configs):
+            client_params = [np.random.randn(150000) * 0.05]
             fit_res = MockFitRes(
-                parameters=MockParameters([np.random.randn(50) * 0.1]),
-                metrics={"tavs_assignment": "verified"}
+                parameters=MockParameters(client_params),
+                metrics={"is_verified": fit_ins.config["is_verified"]}
             )
-            results.append((proxy, fit_res))
+            client_results.append((proxy, fit_res))
 
-        aggregated_params, metrics = strategy.aggregate_fit(round_num, results, [])
-        strategy.current_parameters = aggregated_params
+        aggregated_params, metrics = strategy.aggregate_fit(round_num, client_results, [])
+        initial_params = aggregated_params
+        
+        print(f"  Round {round_num}: Inliers={metrics.get('inliers')}, Outliers={metrics.get('outliers')}")
 
-    # Test state export
-    complete_state = strategy.export_complete_state()
-
-    assert "config" in complete_state
-    assert "trust_state" in complete_state
-    assert "csprng_stats" in complete_state
-    assert "round_analytics" in complete_state
-    assert len(complete_state["round_analytics"]) == 2
-
-    print("✓ Complete state export successful")
-
-    # Test trust statistics
-    trust_stats = strategy.get_trust_statistics()
-    assert "total_clients" in trust_stats
-    assert "trust_statistics" in trust_stats
-    assert "tier_distribution" in trust_stats
-
-    print("✓ Trust statistics export successful")
-
+    assert len(strategy.scheduler.trust_scores) == 5, "Not all clients tracked"
+    print("✓ End-to-end FL simulation bridge successful")
     return True
-
 
 def main():
     """Run all TAVS-ESP strategy tests."""
@@ -505,32 +278,14 @@ def main():
     print("=" * 50)
 
     try:
-        # Test 1: Initialization
         success1 = test_tavs_esp_strategy_initialization()
-
-        # Test 2: TAVS Layer 1 scheduling
         success2 = test_configure_fit_scheduling()
-
-        # Test 3: ESP Layer 2 aggregation
         success3 = test_aggregate_fit_esp_layer()
-
-        # Test 4: Trust dynamics
         success4 = test_trust_dynamics_integration()
-
-        # Test 5: End-to-end simulation
         success5 = test_end_to_end_fl_simulation()
 
-        # Test 6: Analytics and export
-        success6 = test_strategy_export_and_analytics()
-
-        if all([success1, success2, success3, success4, success5, success6]):
+        if all([success1, success2, success3, success4, success5]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
-            print("✓ Strategy initialization working")
-            print("✓ TAVS Layer 1 scheduling working")
-            print("✓ ESP Layer 2 aggregation working")
-            print("✓ Trust dynamics integration working")
-            print("✓ End-to-end FL simulation working")
-            print("✓ Analytics and state export working")
             return True
         else:
             print(f"\n❌ Some TAVS-ESP Strategy tests FAILED")
@@ -541,7 +296,6 @@ def main():
         import traceback
         traceback.print_exc()
         return False
-
 
 if __name__ == "__main__":
     success = main()

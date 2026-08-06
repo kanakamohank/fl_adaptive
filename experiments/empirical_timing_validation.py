@@ -229,7 +229,7 @@ class EmpiricalTimingValidator:
             target_k=150,  # JL Lemma: k=O(log N / ε²) for ~100 clients
             detection_threshold=2.0,
             theta_low=0.3,
-            theta_high=0.7,
+            theta_high=0.8,
             gamma_budget=0.35,
             min_fit_clients=clients_per_round,
             min_available_clients=clients_per_round

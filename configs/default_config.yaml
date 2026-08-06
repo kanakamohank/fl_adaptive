@@ -25,7 +25,7 @@ federated_learning:
   num_rounds: 50
   local_epochs: 5
   batch_size: 32
-  learning_rate: 0.01
+  learning_rate: 0.0005
   fraction_fit: 1.0
   fraction_evaluate: 1.0
 

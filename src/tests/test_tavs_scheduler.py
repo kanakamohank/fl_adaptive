@@ -19,7 +19,7 @@ def test_tavs_scheduler():
     scheduler = TavsScheduler(
         csprng_manager=csprng,
         theta_low=0.3,
-        theta_high=0.7,
+        theta_high=0.8,
         alpha=0.9,
         gamma_budget=0.35
     )

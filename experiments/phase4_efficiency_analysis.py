@@ -4,13 +4,10 @@ import json
 import numpy as np
 import matplotlib.pyplot as plt
 import flwr as fl
-from typing import List, Dict, Any
-from src.tavs.end_to_end_pipeline import PipelineConfig, TavsEspConfig
-# Adjust these imports to match your project's exact structure
-from src.tavs.tavs_esp_strategy import TavsEspStrategy
-from src.tavs.scheduler import TavsScheduler
-# Assuming you have a config module and a client factory
 
+# Exact imports based on your repository structure
+from src.tavs.tavs_esp_strategy import TavsEspStrategy
+from src.tavs.end_to_end_pipeline import PipelineConfig, TavsEspConfig
 from src.tavs.end_to_end_pipeline import TAVSESPPipeline
 
 class EfficiencyExperimentRunner:
@@ -24,75 +21,85 @@ class EfficiencyExperimentRunner:
         """Helper to run a Flower simulation with a specific TAVS budget."""
         print(f"\n--- Starting {exp_name} (Gamma: {gamma}) ---")
 
-        # 1. Create the specific TAVS config for this run
+        # 1. Create the specific TAVS config matching your EXACT class signature
         tavs_config = TavsEspConfig(
-            gamma_budget=gamma,
-            theta_low=0.3,
-            theta_high=0.8,
-            alpha_trust=0.9,
             projection_type="structured",
-            detection_threshold=5.0  # BVD Threshold
+            # BVD runs on JL-compressed vectors; target_k=150 across ~10 blocks ⇒ tiny k_m
+            # and huge variance → almost all honest clients marked outliers and dropped.
+            detection_threshold=25.0,
+            target_k=2048,
+            theta_low=0.3,            # Tier 1 threshold
+            theta_high=0.8,           # Tier 3 threshold
+            gamma_budget=gamma,        # The active budget constraint for this run
+            tau_ramp= 30,        # Trust ramp-up parameter (Sybil resistance)
+            decoy_probability= 0.15
         )
 
-        # 2. Wrap it in the main PipelineConfig that the strategy expects
+        # 2. Wrap it in the PipelineConfig matching your EXACT class signature
         pipeline_config = PipelineConfig(
             num_rounds=num_rounds,
             num_clients=num_clients,
-            clients_per_round=num_clients,  # Sample everyone available
-            min_fit_clients=num_clients,
-            min_available_clients=num_clients,
+            clients_per_round=num_clients,  # Sample everyone
+            byzantine_fraction=0.1,         # 10% attackers
             model_type="cifar_cnn",
             dataset="cifar10",
             output_dir=self.output_dir,
-            tavs_config=tavs_config
+            tavs_config=tavs_config,
+            simulation_backend="thread"
         )
+        # 3. Initialize the Strategy safely
+        strategy = TavsEspStrategy(config=tavs_config)
 
-        # 3. Initialize the Strategy using your custom config
-        strategy = TavsEspStrategy(config=pipeline_config)
-
-        # 4. Start Simulation
+        # 4. Start Simulation (Using mock timing for instantaneous plot generation)
         start_time = time.time()
 
-        # Note: Replace `client_fn` with your actual client loader when ready
-        # client_fn = get_client_fn(dataset="cifar10", byzantine_fraction=0.1)
+        # 3. Launch the REAL PyTorch Training Loop via your native Pipeline
+        print("Launching PyTorch Training Loop... this will take a while!")
+        pipeline = TAVSESPPipeline(pipeline_config)
 
-        # MOCK SIMULATION CALL (Uncomment real fl.simulation.start_simulation in production)
-        # history = fl.simulation.start_simulation(
-        #     client_fn=client_fn,
-        #     num_clients=num_clients,
-        #     config=fl.server.ServerConfig(num_rounds=num_rounds),
-        #     strategy=strategy,
-        # )
+        # This single call partitions the CIFAR-10 data, spawns the clients, and runs Flower
+        results = pipeline.run_simulation()
 
-        total_time = time.time() - start_time
-        print(f"Simulation completed in {total_time:.2f} seconds.")
+        print(f"REAL Simulation completed in {results.total_time_seconds:.2f} seconds.")
 
-        # MOCK DATA FOR SCRIPT TESTING (Remove when hooking up real simulation)
-        mock_accuracy = 0.85 - (0.05 * (1.0 - gamma)) # Slight accuracy penalty for lower gamma
-        mock_analytics = []
-        for r in range(1, num_rounds + 1):
-            promoted = min(int(num_clients * 0.8 * (1 - np.exp(-r/10))), int(num_clients * (1 - gamma)))
-            agg_time = 1500 - (promoted * 10) + np.random.normal(0, 20)
-            mock_analytics.append({
-                "round": r,
-                "num_promoted": promoted,
-                "aggregation_time_ms": max(200, agg_time)
+        # 4. Extract REAL Data for the Plots
+        final_accuracy = results.server_accuracies[-1] if results.server_accuracies else 0.0
+
+        # Calculate promoted clients per round from the tier_evolution dictionary
+        # Tier 3 clients are the ones that bypassed verification
+        promoted_counts = [0] * num_rounds
+        if results.tier_evolution:
+            for cid, tiers in results.tier_evolution.items():
+                for r_idx, tier in enumerate(tiers):
+                    if tier == 3 and r_idx < num_rounds:
+                        promoted_counts[r_idx] += 1
+
+        # Map the extracted data to the format the plotting function expects
+        real_analytics = []
+        for r in range(num_rounds):
+            # results.round_times contains the exact ms spent on projection/detection
+            time_ms = results.round_times[r] if r < len(results.round_times) else 0.0
+
+            real_analytics.append({
+                "round": r + 1,
+                "num_promoted": promoted_counts[r],
+                "aggregation_time_ms": time_ms
             })
 
         return {
-            "total_time_seconds": total_time,
-            "final_accuracy": mock_accuracy,
-            "round_analytics": mock_analytics
+            "total_time_seconds": results.total_time_seconds,
+            "final_accuracy": final_accuracy,
+            "round_analytics": real_analytics
         }
 
     def run_experiment_2_warmup(self):
         """Exp 2: Compute reduction as trust is established."""
         print("\n>>> Running Experiment 2: Warm-Up Compute Reduction")
         num_rounds = 50
-        num_clients = 100
+        num_clients = 20
 
         # Run with 30% verification budget
-        results = self._run_simulation(gamma=0.3, num_rounds=num_rounds, num_clients=num_clients, exp_name="Exp2_WarmUp")
+        results = self._run_simulation(gamma=0.4, num_rounds=num_rounds, num_clients=num_clients, exp_name="Exp2_WarmUp")
 
         # Extract data for plotting
         rounds = [data['round'] for data in results['round_analytics']]
@@ -128,12 +135,13 @@ class EfficiencyExperimentRunner:
         """Exp 3: Pareto Efficiency Trade-off (Time vs Accuracy)."""
         print("\n>>> Running Experiment 3: Pareto Efficiency Curve")
 
-        gammas = [0.1, 0.3, 0.5, 0.8, 1.0] # 1.0 is Full Verification (Baseline)
+        #gammas = [0.1, 0.3, 0.5, 0.8, 1.0] # 1.0 is Full Verification (Baseline)
+        gammas = [0.5]
         accuracies = []
         compute_times = []
 
         for gamma in gammas:
-            res = self._run_simulation(gamma=gamma, num_rounds=30, num_clients=50, exp_name=f"Exp3_Gamma_{gamma}")
+            res = self._run_simulation(gamma=gamma, num_rounds=10, num_clients=20, exp_name=f"Exp3_Gamma_{gamma}")
             accuracies.append(res['final_accuracy'] * 100) # Convert to percentage
 
             # Sum up total aggregation time across all rounds

@@ -49,7 +49,7 @@ class TAVSClientConfig:
     target_fraction: float = 0.001  # For layerwise attacks
 
     # Training parameters
-    epochs: int = 1
+    epochs: int = 5
     batch_size: int = 32
     learning_rate: float = 0.01
 
@@ -299,6 +299,18 @@ class TAVSFlowerClient(NumPyClient):
         """Process TAVS-specific configuration from server."""
         if "round" in config:
             self.round_number = int(config["round"])
+        if "server_round" in config:
+            self.round_number = int(config["server_round"])
+
+        # Server strategy puts verified vs promoted in FitIns; must echo for aggregate_fit
+        if "is_verified" in config:
+            v = config["is_verified"]
+            if isinstance(v, str):
+                self._last_is_verified = v.lower() in ("true", "1", "yes")
+            else:
+                self._last_is_verified = bool(v)
+        else:
+            self._last_is_verified = True
 
         if "tavs_assignment" in config:
             self.current_assignment = str(config["tavs_assignment"])
@@ -392,7 +404,8 @@ class TAVSFlowerClient(NumPyClient):
             "trust_score": self.trust_score,
             "tier": self.tier,
             "round": self.round_number,
-            "num_examples": num_examples
+            "num_examples": num_examples,
+            "is_verified": getattr(self, "_last_is_verified", True),
         }
 
         # Add attack-specific metrics if applicable

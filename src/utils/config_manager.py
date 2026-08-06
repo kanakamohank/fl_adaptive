@@ -298,6 +298,23 @@ class ConfigManager:
 class ExperimentTracker:
     """Track and log experiment execution for reproducibility."""
 
+    @staticmethod
+    def _convert_for_json(obj):
+        """Recursively convert numpy/torch types for JSON serialization."""
+        if isinstance(obj, dict):
+            return {ExperimentTracker._convert_for_json(k): ExperimentTracker._convert_for_json(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [ExperimentTracker._convert_for_json(item) for item in obj]
+        elif isinstance(obj, np.ndarray):
+            return obj.tolist()
+        elif isinstance(obj, np.integer):
+            return int(obj)
+        elif isinstance(obj, np.floating):
+            return float(obj)
+        elif isinstance(obj, torch.Tensor):
+            return obj.cpu().numpy().tolist()
+        return obj
+
     def __init__(self, results_dir: str):
         self.results_dir = Path(results_dir)
         self.results_dir.mkdir(parents=True, exist_ok=True)
@@ -353,7 +370,7 @@ class ExperimentTracker:
         # Save experiment log
         log_file = self.results_dir / f"{self.current_experiment['name']}_execution_log.json"
         with open(log_file, 'w') as f:
-            json.dump(self.current_experiment, f, indent=2, default=str)
+            json.dump(self._convert_for_json(self.current_experiment), f, indent=2, default=str)
 
         # Add to overall execution log
         self.execution_log.append(self.current_experiment.copy())
@@ -374,7 +391,7 @@ class ExperimentTracker:
         }
 
         with open(summary_file, 'w') as f:
-            json.dump(summary, f, indent=2, default=str)
+            json.dump(self._convert_for_json(summary), f, indent=2, default=str)
 
         logging.info(f"Execution summary saved to {summary_file}")
 

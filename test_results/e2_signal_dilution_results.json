@@ -28,7 +28,7 @@
     "theta_high": 0.7,
     "gamma_budget": 0.35,
     "tau_ramp": 30,
-    "k_ratio": 0.2,
+    "target_k": 150,
     "detection_threshold": 2.0,
     "target_asr_reduction": 0.04,
     "target_visibility_improvement": 25.0,
@@ -97,5 +97,5 @@
     "trust_separation": "True"
   },
   "total_experiment_time": 0.0,
-  "validation_timestamp": "2026-03-15 18:24:45"
+  "validation_timestamp": "2026-03-19 22:57:30"
 }

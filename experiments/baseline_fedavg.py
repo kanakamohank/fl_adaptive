@@ -199,7 +199,7 @@ def run_fedavg_experiment(config: Dict):
             model_kwargs=model_kwargs,
             train_data=client_datasets[0],
             test_data=testset,
-            device=config.get("device", "cpu"),
+            device=config.get("device", "mps"),
             batch_size=32,
             local_epochs=1,
             lr=0.01

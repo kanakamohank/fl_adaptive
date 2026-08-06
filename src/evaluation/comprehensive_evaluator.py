@@ -789,7 +789,7 @@ class ZeroTrustProjectionEvaluator:
             elif isinstance(obj, np.floating):
                 return float(obj)
             elif isinstance(obj, dict):
-                return {k: convert_numpy(v) for k, v in obj.items()}
+                return {convert_numpy(k): convert_numpy(v) for k, v in obj.items()}
             elif isinstance(obj, list):
                 return [convert_numpy(item) for item in obj]
             elif isinstance(obj, torch.Tensor):
