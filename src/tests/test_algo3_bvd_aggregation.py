@@ -94,20 +94,21 @@ def test_bayesian_unified_aggregation_rule():
     """
     # 1. Setup Data
     # Inlier contributes a gradient of 2.0
-    inliers = {
+    verified_updates = {
         "honest_verified": {"block_1": torch.tensor([2.0])}
     }
-    
+    verified_weights = {"honest_verified": 1.0}
+
     # Promoted contributes a gradient of 10.0
-    promoted = {
+    promoted_updates = {
         "honest_promoted": {"block_1": torch.tensor([10.0])}
     }
-    
-    # Promoted client has a trust-derived weight of 0.5
-    weights = {"honest_promoted": 0.5}
-    
+    promoted_weights = {"honest_promoted": 0.5}
+
     # 2. Run Aggregator
-    agg_result = UnifiedBayesianAggregator.aggregate(inliers, promoted, weights)
+    agg_result = UnifiedBayesianAggregator.aggregate(
+        verified_updates, verified_weights, promoted_updates, promoted_weights
+    )
     
     # 3. Calculate expected math manually:
     # Z(r) = |L| + sum(p_i) = 1 + 0.5 = 1.5
