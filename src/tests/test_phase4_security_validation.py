@@ -10,11 +10,7 @@ Tests the comprehensive security validation experiments including:
 """
 
 import unittest
-from unittest.mock import MagicMock, patch, call
-import numpy as np
-import torch
-from pathlib import Path
-import json
+from unittest.mock import MagicMock, patch
 
 # Import Phase 4 components
 import sys
@@ -29,7 +25,7 @@ from experiments.phase4_security_validation import (
     create_phase4_experiment_configs,
     run_phase4_validation
 )
-from src.tavs.end_to_end_pipeline import PipelineConfig, PipelineResults
+from src.tavs import PipelineConfig, PipelineResults
 
 
 class TestPhase4SecurityValidation(unittest.TestCase):

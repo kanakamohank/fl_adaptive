@@ -11,10 +11,9 @@ Tests the complete federated learning strategy including:
 
 import sys
 import numpy as np
-import torch
-from typing import List, Dict, Tuple
+from typing import List, Dict
 from unittest.mock import MagicMock
-import tempfile
+
 
 # Mock Flower imports for testing
 class MockClientProxy:
@@ -99,7 +98,7 @@ class MockCommon:
 sys.modules['flwr.common'] = MockCommon()
 
 # Import the actual Strategy AFTER patching flwr
-from src.tavs.tavs_esp_strategy import TavsEspStrategy
+from src.tavs import TavsEspStrategy
 
 # Dummy Config to mimic PipelineConfig
 class DummyConfig:

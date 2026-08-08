@@ -22,27 +22,21 @@ with empirical verification of theoretical security guarantees.
 
 import logging
 import time
-from typing import Dict, List, Tuple, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import json
 import numpy as np
-import torch
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # TAVS-ESP imports
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
-from src.tavs.end_to_end_pipeline import TAVSESPPipeline, PipelineConfig, PipelineResults
-from src.clients.tavs_flower_client import TAVSClientConfig
-from src.core.projection import StructuredJLProjection, DenseJLProjection
-from src.core.verification import IsomorphicVerification
+from src.tavs import TavsEspStrategy, TavsEspConfig
+from src.tavs import TAVSESPPipeline, PipelineConfig, PipelineResults
 from src.core.models import ModelStructure, get_model
-from src.utils.data_utils import load_cifar10, create_dirichlet_splits
+from src.utils.data_utils import load_cifar10
 
 logger = logging.getLogger(__name__)
 

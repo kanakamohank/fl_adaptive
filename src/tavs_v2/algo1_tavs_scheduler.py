@@ -8,7 +8,7 @@ class TavsScheduler:
     Algorithm 1: Trust-Adaptive Verification Scheduling (TAVS)
     
     Implements Layer 1 of the TAVS-ESP system. Maps 1-to-1 with Section 4.2
-    and Mechanism 1 & 3 from the NeurIPS 2025 manuscript.
+    and Mechanism 1 & 3 from the manuscript.
     """
     
     def __init__(

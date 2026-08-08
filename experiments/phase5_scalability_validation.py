@@ -24,25 +24,22 @@ demonstrating production-ready Byzantine-robust federated learning for LLMs.
 import logging
 import time
 import gc
-from typing import Dict, List, Tuple, Optional, Any, Callable
+from typing import Dict, List, Optional, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import json
 import numpy as np
 import torch
-import matplotlib.pyplot as plt
-import seaborn as sns
 
 # TAVS-ESP imports
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
-from src.tavs.end_to_end_pipeline import TAVSESPPipeline, PipelineConfig, PipelineResults
-from src.clients.gpt2_tavs_client import create_gpt2_tavs_client, create_sample_text_data
-from src.clients.tavs_flower_client import TAVSClientConfig
-from src.core.gpt2_model import get_gpt2_model, create_gpt2_tokenizer
+from src.tavs import TavsEspStrategy, TavsEspConfig
+from src.tavs import TAVSESPPipeline, PipelineConfig, PipelineResults
+from src.clients.gpt2_tavs_client import create_sample_text_data
+from src.core.gpt2_model import get_gpt2_model
 
 logger = logging.getLogger(__name__)
 

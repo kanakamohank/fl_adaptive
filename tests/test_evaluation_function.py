@@ -13,8 +13,8 @@ import shutil
 from pathlib import Path
 from unittest.mock import patch, MagicMock
 
-from src.tavs.end_to_end_pipeline import TAVSESPPipeline, PipelineConfig
-from src.tavs.tavs_esp_strategy import TavsEspConfig
+from src.tavs import TAVSESPPipeline, PipelineConfig
+from src.tavs import TavsEspConfig
 
 
 class TestEvaluationFunction(unittest.TestCase):

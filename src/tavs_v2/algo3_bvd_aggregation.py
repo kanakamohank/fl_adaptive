@@ -6,7 +6,7 @@ class BlockVarianceDetector:
     r"""
     Algorithm 3a: Block-Normalized Outlier Detection (BVD)
     
-    Implements Layer 2 detection from Section 4.3 of the NeurIPS 2025 manuscript.
+    Implements Layer 2 detection from Section 4.3 of the manuscript.
     Separates structural heterogeneity from localized backdoor attacks by tracking
     block-wise variance dynamically.
     """

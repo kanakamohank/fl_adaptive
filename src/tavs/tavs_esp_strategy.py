@@ -24,7 +24,7 @@ class TavsEspConfig:
     gamma_budget: float = 0.35
     theta_low: float = 0.3
     theta_high: float = 0.7
-    alpha_trust: float = 0.1
+    alpha_trust: float = 0.9
     tau_ramp: float = 30.0
     k_trust: int = 10
     p_decoy: float = 0.15

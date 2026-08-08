@@ -45,7 +45,7 @@ class EphemeralStructuredProjection:
     def _get_or_create_r_m(self, block_name: str, round_num: int, device: torch.device) -> torch.Tensor:
         """Generates the massive JL matrix ONCE per round and caches it."""
         if self._cached_round != round_num:
-            # New round! Clear the old matrices from Mac RAM
+            # New round! Clear the old matrices from RAM
             self._cached_matrices.clear()
             self._cached_round = round_num
             

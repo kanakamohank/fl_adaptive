@@ -10,8 +10,8 @@ Tests integration between:
 
 def test_csprng_scheduler_integration():
     """Test integration between CSPRNGManager and TavsScheduler."""
-    from src.tavs.csprng_manager import CSPRNGManager
-    from src.tavs.scheduler import TavsScheduler
+    from src.tavs import CSPRNGManager
+    from src.tavs import TavsScheduler
     import numpy as np
 
     print("=== Testing CSPRNG + Scheduler Integration ===")
@@ -89,11 +89,10 @@ def test_csprng_scheduler_integration():
 
 def test_projection_integration():
     """Test TavsScheduler integration with existing projection components."""
-    from src.tavs.csprng_manager import CSPRNGManager
-    from src.tavs.scheduler import TavsScheduler
-    from src.core.projection import StructuredJLProjection, DenseJLProjection
+    from src.tavs import CSPRNGManager
+    from src.tavs import TavsScheduler
+    from src.core.projection import StructuredJLProjection
     from src.core.models import get_model, ModelStructure
-    import torch
 
     print("\n=== Testing Scheduler + Projection Integration ===")
 
@@ -155,11 +154,10 @@ def test_projection_integration():
 
 def test_end_to_end_workflow():
     """Test complete TAVS workflow: scheduling → projection → aggregation."""
-    from src.tavs.csprng_manager import CSPRNGManager
-    from src.tavs.scheduler import TavsScheduler
+    from src.tavs import CSPRNGManager
+    from src.tavs import TavsScheduler
     from src.core.verification import IsomorphicVerification
     import torch
-    import numpy as np
 
     print("\n=== Testing End-to-End TAVS Workflow ===")
 

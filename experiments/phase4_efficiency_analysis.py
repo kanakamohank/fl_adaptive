@@ -1,14 +1,11 @@
 import os
 import time
-import json
-import numpy as np
 import matplotlib.pyplot as plt
-import flwr as fl
 
 # Exact imports based on your repository structure
-from src.tavs.tavs_esp_strategy import TavsEspStrategy
-from src.tavs.end_to_end_pipeline import PipelineConfig, TavsEspConfig
-from src.tavs.end_to_end_pipeline import TAVSESPPipeline
+from src.tavs import TavsEspStrategy
+from src.tavs import PipelineConfig, TavsEspConfig
+from src.tavs import TAVSESPPipeline
 
 class EfficiencyExperimentRunner:
     """Runs Phase 4 efficiency and scalability experiments for TAVS-ESP."""

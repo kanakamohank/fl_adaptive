@@ -8,8 +8,8 @@ budget constraints, and integration with CSPRNGManager.
 
 def test_tavs_scheduler():
     """Test TavsScheduler comprehensive functionality."""
-    from src.tavs.csprng_manager import CSPRNGManager
-    from src.tavs.scheduler import TavsScheduler
+    from src.tavs import CSPRNGManager
+    from src.tavs import TavsScheduler
     import numpy as np
 
     print("Testing TavsScheduler...")

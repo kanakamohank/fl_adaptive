@@ -19,14 +19,12 @@ import logging
 import time
 import gc
 import psutil
-import threading
-from typing import Dict, List, Tuple, Optional, Any
+from typing import Dict, List, Tuple, Any
 from dataclasses import dataclass, asdict
 from pathlib import Path
 import json
 import numpy as np
 import torch
-import torch.nn as nn
 from contextlib import contextmanager
 
 # TAVS-ESP imports
@@ -34,11 +32,10 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tavs.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
+from src.tavs import TavsEspStrategy, TavsEspConfig
 from src.server.fedavg_strategy import FedAvgStrategy
-from src.clients.honest_client import HonestClient
 from src.core.models import get_model
-from src.core.projection import StructuredJLProjection, DenseJLProjection
+from src.core.projection import StructuredJLProjection
 from src.core.verification import IsomorphicVerification
 from src.utils.data_utils import load_cifar10, create_dirichlet_splits
 

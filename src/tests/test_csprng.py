@@ -5,8 +5,7 @@ Quick test of CSPRNGManager implementation
 
 def test_csprng_manager():
     """Test CSPRNGManager basic functionality."""
-    from ..tavs import CSPRNGManager
-    import numpy as np
+    from src.tavs import CSPRNGManager
 
     print("Testing CSPRNGManager...")
 

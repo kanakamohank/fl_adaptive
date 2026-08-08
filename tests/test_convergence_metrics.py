@@ -169,7 +169,7 @@ class TestConvergenceMetrics(unittest.TestCase):
 
     def test_evaluate_function_creation(self):
         """Test the evaluate function creation in pipeline."""
-        from src.tavs.end_to_end_pipeline import TAVSESPPipeline, PipelineConfig
+        from src.tavs import TAVSESPPipeline, PipelineConfig
 
         # Create minimal pipeline config
         pipeline_config = PipelineConfig(

@@ -10,11 +10,8 @@ Tests the GPT-2 scalability validation experiments including:
 """
 
 import unittest
-from unittest.mock import MagicMock, patch, call
-import numpy as np
+from unittest.mock import MagicMock, patch
 import torch
-import torch.nn as nn
-from pathlib import Path
 
 # Import Phase 5 components
 import sys
@@ -25,7 +22,6 @@ from experiments.phase5_scalability_validation import (
     Phase5ScalabilityValidator,
     ScalabilityExperimentConfig,
     ScalabilityMetrics,
-    ScalabilityResults,
     run_phase5_validation
 )
 from src.clients.gpt2_tavs_client import GPT2TAVSClient, create_sample_text_data
@@ -298,7 +294,7 @@ class TestPhase5Scalability(unittest.TestCase):
     def test_scalability_metrics_extraction(self):
         """Test scalability metrics extraction from results."""
         # Create mock results
-        from src.tavs.end_to_end_pipeline import PipelineResults, PipelineConfig
+        from src.tavs import PipelineResults, PipelineConfig
 
         mock_results = PipelineResults(
             config=PipelineConfig(),
