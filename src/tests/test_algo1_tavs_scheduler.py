@@ -30,10 +30,16 @@ def test_mechanism_3_trust_initialization(baseline_scheduler):
     effective_t = baseline_scheduler.get_effective_trust("client_new", 1)
     assert effective_t == 0.0, "Mechanism 3 failed: New client trust not capped at 0.0 in round 1"
     
-    # At round 10, cap should be 1 - exp(-9/30) = 1 - exp(-0.3) ~= 0.259
+    # At round 10, cap = 1 - exp(-9/30) ~= 0.259.
+    # Effective trust is min(raw_trust, cap). Raw trust (0.25) < cap (0.259),
+    # so the raw trust is the binding constraint here — Mechanism 3 only
+    # activates when the cap is *lower* than raw trust.
     effective_t_10 = baseline_scheduler.get_effective_trust("client_new", 10)
     expected_cap = 1.0 - math.exp(-9.0 / 30.0)
-    assert math.isclose(effective_t_10, expected_cap, rel_tol=1e-4), "Mechanism 3 failed: Ramp-up curve incorrect"
+    raw_trust = baseline_scheduler.trust_scores["client_new"]
+    expected_effective = min(raw_trust, expected_cap)
+    assert math.isclose(effective_t_10, expected_effective, rel_tol=1e-4), \
+        f"Mechanism 3 failed: expected min(raw={raw_trust}, cap={expected_cap})={expected_effective}, got {effective_t_10}"
     
     # Because effective trust < theta_low (0.3), it MUST be in Tier 1 (Verified)
     assert "client_new" in V

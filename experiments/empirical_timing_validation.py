@@ -32,7 +32,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tavs import TavsEspStrategy, TavsEspConfig
+from src.tavs_v2 import TavsEspStrategy, TavsEspConfig
 from src.server.fedavg_strategy import FedAvgStrategy
 from src.core.models import get_model
 from src.core.projection import StructuredJLProjection

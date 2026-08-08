@@ -36,8 +36,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tavs import TavsEspStrategy, TavsEspConfig
-from src.tavs import TAVSESPPipeline, PipelineConfig, PipelineResults
+from src.tavs_v2 import TavsEspStrategy, TavsEspConfig
+from src.tavs_v2 import TAVSESPPipeline, PipelineConfig, PipelineResults
 from src.clients.gpt2_tavs_client import create_sample_text_data
 from src.core.gpt2_model import get_gpt2_model
 

@@ -25,7 +25,7 @@ from experiments.phase4_security_validation import (
     create_phase4_experiment_configs,
     run_phase4_validation
 )
-from src.tavs import PipelineConfig, PipelineResults
+from src.tavs_v2 import PipelineConfig, PipelineResults
 
 
 class TestPhase4SecurityValidation(unittest.TestCase):

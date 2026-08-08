@@ -16,7 +16,7 @@ from pathlib import Path
 
 def test_pipeline_configuration():
     """Test pipeline configuration and validation."""
-    from src.tavs import PipelineConfig, TavsEspConfig
+    from src.tavs_v2 import PipelineConfig, TavsEspConfig
 
     print("Testing pipeline configuration...")
 
@@ -54,7 +54,7 @@ def test_pipeline_configuration():
     print("✓ Advanced configuration with TAVS settings")
 
     # Test 3: Example configurations
-    from src.tavs import create_example_configs
+    from src.tavs_v2 import create_example_configs
 
     example_configs = create_example_configs()
     assert "dev" in example_configs
@@ -71,7 +71,7 @@ def test_pipeline_configuration():
 
 def test_pipeline_initialization():
     """Test pipeline initialization and setup."""
-    from src.tavs import TAVSESPPipeline, PipelineConfig
+    from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
 
     print("\nTesting pipeline initialization...")
 
@@ -108,7 +108,7 @@ def test_pipeline_initialization():
 
 def test_client_configuration():
     """Test client configuration and setup."""
-    from src.tavs import TAVSESPPipeline, PipelineConfig
+    from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
 
     print("\nTesting client configuration...")
 
@@ -145,7 +145,7 @@ def test_client_configuration():
 
 def test_server_strategy_creation():
     """Test server strategy creation and configuration."""
-    from src.tavs import TAVSESPPipeline, PipelineConfig
+    from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
     from src.core.models import ModelStructure
 
     print("\nTesting server strategy creation...")
@@ -181,7 +181,7 @@ def test_server_strategy_creation():
 
 def test_client_function_creation():
     """Test client function creation for simulation."""
-    from src.tavs import TAVSESPPipeline, PipelineConfig
+    from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
 
     print("\nTesting client function creation...")
 
@@ -224,7 +224,7 @@ def test_client_function_creation():
 
 def test_results_processing():
     """Test results extraction and processing."""
-    from src.tavs import PipelineResults, PipelineConfig
+    from src.tavs_v2 import PipelineResults, PipelineConfig
 
     print("\nTesting results processing...")
 
@@ -289,7 +289,7 @@ def test_results_processing():
 
 def test_configuration_serialization():
     """Test configuration and results serialization."""
-    from src.tavs import PipelineConfig, TavsEspConfig
+    from src.tavs_v2 import PipelineConfig, TavsEspConfig
     from dataclasses import asdict
     import json
 
@@ -321,7 +321,7 @@ def test_configuration_serialization():
 
 def test_example_experiment():
     """Test running a minimal example experiment."""
-    from src.tavs import TAVSESPPipeline, PipelineConfig
+    from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
 
     print("\nTesting minimal experiment example...")
 
