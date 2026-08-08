@@ -3,9 +3,9 @@ import time
 import matplotlib.pyplot as plt
 
 # Exact imports based on your repository structure
-from src.tavs import TavsEspStrategy
-from src.tavs import PipelineConfig, TavsEspConfig
-from src.tavs import TAVSESPPipeline
+from src.tavs_v2 import TavsEspStrategy
+from src.tavs_v2 import PipelineConfig, TavsEspConfig
+from src.tavs_v2 import TAVSESPPipeline
 
 class EfficiencyExperimentRunner:
     """Runs Phase 4 efficiency and scalability experiments for TAVS-ESP."""

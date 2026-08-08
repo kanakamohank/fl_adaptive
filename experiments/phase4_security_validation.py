@@ -33,8 +33,8 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
-from src.tavs import TavsEspStrategy, TavsEspConfig
-from src.tavs import TAVSESPPipeline, PipelineConfig, PipelineResults
+from src.tavs_v2 import TavsEspStrategy, TavsEspConfig
+from src.tavs_v2 import TAVSESPPipeline, PipelineConfig, PipelineResults
 from src.core.models import ModelStructure, get_model
 from src.utils.data_utils import load_cifar10
 

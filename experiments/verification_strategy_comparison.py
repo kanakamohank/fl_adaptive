@@ -24,8 +24,8 @@ from dataclasses import dataclass, asdict
 import matplotlib.pyplot as plt
 
 # TAVS-ESP imports
-from src.tavs import TavsEspStrategy, TavsEspConfig
-from src.tavs import TAVSESPPipeline, PipelineConfig
+from src.tavs_v2 import TavsEspStrategy, TavsEspConfig
+from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
 
 logger = logging.getLogger(__name__)
 

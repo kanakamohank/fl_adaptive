@@ -294,7 +294,7 @@ class TestPhase5Scalability(unittest.TestCase):
     def test_scalability_metrics_extraction(self):
         """Test scalability metrics extraction from results."""
         # Create mock results
-        from src.tavs import PipelineResults, PipelineConfig
+        from src.tavs_v2 import PipelineResults, PipelineConfig
 
         mock_results = PipelineResults(
             config=PipelineConfig(),
