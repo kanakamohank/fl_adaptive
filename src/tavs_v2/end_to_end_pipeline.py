@@ -15,9 +15,9 @@ from flwr.common import Context  # <--- THE FIX: Required for modern Flower API
 from flwr.simulation import run_simulation
 
 from .tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
-from ..clients.tavs_flower_client import TAVSFlowerClient, TAVSClientConfig, create_tavs_flower_client
-from ..core.models import ModelStructure, get_model
-from ..utils.data_utils import load_cifar10, create_dirichlet_splits
+from src.clients.tavs_flower_client import TAVSFlowerClient, TAVSClientConfig, create_tavs_flower_client
+from src.core.models import ModelStructure, get_model
+from src.utils.data_utils import load_cifar10, create_dirichlet_splits
 
 logger = logging.getLogger(__name__)
 

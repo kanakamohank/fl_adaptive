@@ -5,7 +5,7 @@ Tests for convergence metrics extraction and visualization.
 
 import sys
 import os
-sys.path.append(os.path.join(os.path.dirname(__file__), '..'))
+sys.path.append(os.path.join(os.path.dirname(__file__), '../..'))
 
 import unittest
 import json
