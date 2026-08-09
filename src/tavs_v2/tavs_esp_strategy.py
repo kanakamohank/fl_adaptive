@@ -65,6 +65,7 @@ class TavsEspStrategy(Strategy):
         
         self.model_blocks = {}
         self.block_shapes = {}
+        self.model_structure = model_structure
         
         if model_structure and hasattr(model_structure, 'blocks'):
             for b in model_structure.blocks:

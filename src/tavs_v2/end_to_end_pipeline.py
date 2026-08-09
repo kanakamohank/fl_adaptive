@@ -167,11 +167,11 @@ class TAVSESPPipeline:
 
     def _create_evaluate_function(self):
         def evaluate_fn(server_round: int, parameters_ndarrays, config_dict):
-            import torch
-            from src.core.models import get_model
-            from src.utils.data_utils import load_cifar10
 
             try:
+                import torch
+                from src.core.models import get_model
+                from src.utils.data_utils import load_cifar10
                 model = get_model(self.config.model_type)
                 params_dict = zip(model.parameters(), parameters_ndarrays)
                 for param, new_param in params_dict:

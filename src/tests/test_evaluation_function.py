@@ -168,7 +168,7 @@ class TestEvaluationFunction(unittest.TestCase):
         # Loss should be reasonable dummy value
         self.assertGreater(loss, 0)
 
-    @patch('src.tavs.end_to_end_pipeline.logger')
+    @patch('src.tavs_v2.end_to_end_pipeline.logger')
     def test_evaluation_logging(self, mock_logger):
         """Test that evaluation function logs correctly."""
         config = PipelineConfig(
@@ -183,7 +183,7 @@ class TestEvaluationFunction(unittest.TestCase):
         eval_fn = pipeline._create_evaluate_function()
 
         # Test with invalid parameters to trigger error path
-        eval_fn(1, [], {})
+        eval_fn(1, None, {})
 
         # Should log warning about evaluation failure
         mock_logger.warning.assert_called()

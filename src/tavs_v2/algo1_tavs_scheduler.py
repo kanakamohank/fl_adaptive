@@ -55,7 +55,6 @@ class TavsScheduler:
         raw_trust = self.trust_scores.get(client_id, 0.25)
         r_0 = self.join_rounds.get(client_id, round_num)
 
-        #0.5 multiplier is a safe default for the ramping function
         t_max = 1.0 - math.exp(-(round_num - r_0) / self.tau_ramp)
         return min(raw_trust, t_max)
 
@@ -119,7 +118,7 @@ class TavsScheduler:
         """
         Section 4.2: T_i(r) = \alpha \cdot T_i(r-1) + (1-\alpha) \cdot \varphi_i(r)
         """
-        old_trust = self.trust_scores.get(client_id, 0.5)
+        old_trust = self.trust_scores.get(client_id, 0.25)
         
         if was_verified:
             new_trust = (self.alpha_trust * old_trust) + ((1.0 - self.alpha_trust) * behavior_score)

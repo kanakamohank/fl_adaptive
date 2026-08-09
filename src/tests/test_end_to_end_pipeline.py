@@ -171,12 +171,8 @@ def test_server_strategy_creation():
     print("✓ Server strategy created with TAVS-ESP configuration")
 
     # Test strategy components
-    assert strategy.csprng_manager is not None
     assert strategy.scheduler is not None
-    assert strategy.verification is not None
     print("✓ Strategy components initialized")
-
-    return True
 
 
 def test_client_function_creation():

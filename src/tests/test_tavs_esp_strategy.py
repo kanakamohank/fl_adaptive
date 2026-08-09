@@ -13,6 +13,7 @@ import sys
 import numpy as np
 from typing import List, Dict
 from unittest.mock import MagicMock
+import io
 
 
 # Mock Flower imports for testing
@@ -34,7 +35,29 @@ class MockEvaluateRes:
 
 class MockParameters:
     def __init__(self, tensors: List[np.ndarray]):
-        self.tensors = tensors
+        byte_tensors = []
+        for t in tensors:
+            # Serialize ndarrays into a valid .npy byte stream
+            if isinstance(t, np.ndarray):
+                b = io.BytesIO()
+                np.save(b, t, allow_pickle=False)
+                byte_tensors.append(b.getvalue())
+            else:
+                byte_tensors.append(t)
+        self.tensors = byte_tensors
+
+# Mock Flower functions
+def mock_parameters_to_ndarrays(params):
+    if hasattr(params, 'tensors'):
+        res = []
+        for t in params.tensors:
+            # Deserialize .npy bytes back to ndarray
+            if isinstance(t, bytes):
+                res.append(np.load(io.BytesIO(t), allow_pickle=False))
+            else:
+                res.append(t)
+        return res
+    return [np.random.randn(150000)] # Match the default 'full_model' fallback dim
 
 class MockClientManager:
     def __init__(self, num_clients: int):
@@ -49,12 +72,6 @@ class MockClientManager:
     def all(self) -> dict:
         """Return all available clients (required by Flower API)."""
         return {c.cid: c for c in self.clients}
-
-# Mock Flower functions
-def mock_parameters_to_ndarrays(params):
-    if hasattr(params, 'tensors'):
-        return params.tensors
-    return [np.random.randn(150000)] # Match the default 'full_model' fallback dim
 
 def mock_ndarrays_to_parameters(arrays):
     return MockParameters(arrays)
