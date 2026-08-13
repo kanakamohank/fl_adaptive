@@ -1,0 +1,83 @@
+{
+  "experiment_config": {
+    "num_rounds": 10,
+    "num_clients": 20,
+    "clients_per_round": 8,
+    "byzantine_fraction": 0.15,
+    "model_type": "cifar_cnn",
+    "dataset": "cifar10",
+    "data_alpha": 0.3,
+    "tavs_config": {
+      "gamma_budget": 0.35,
+      "theta_low": 0.3,
+      "theta_high": 0.7,
+      "alpha_trust": 0.9,
+      "tau_ramp": 30.0,
+      "k_trust": 10,
+      "p_decoy": 0.15,
+      "decoy_probability": 0.15,
+      "detection_threshold": 2.0,
+      "target_k": 150,
+      "projection_type": "structured",
+      "scheduling_type": "csprng",
+      "min_fit_clients": 8,
+      "master_key": "b'default_key'",
+      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x11860e520>",
+      "min_inlier_fraction_for_agg": 0.25
+    },
+    "client_epochs": 5,
+    "client_batch_size": 32,
+    "client_learning_rate": 0.01,
+    "attack_types": [
+      "null_space",
+      "layerwise"
+    ],
+    "attack_intensities": [
+      1.0,
+      2.0
+    ],
+    "simulation_backend": "ray",
+    "ray_init_args": {
+      "ignore_reinit_error": true,
+      "include_dashboard": false
+    },
+    "output_dir": "results/verification_strategy_comparison/tavs_light_attack",
+    "save_client_data": false
+  },
+  "final_metrics": {
+    "loss": 0.6687352627888126,
+    "accuracy": 0.7626460569100065,
+    "total_time": 140.3133099079132,
+    "avg_round_time": 1020.1188087463379
+  },
+  "trust_summary": {
+    "final_trust_distribution": {
+      "10711484234720105407": 0.7384910034802643,
+      "16450030901184023296": 0.7384910302700446,
+      "973144899925610184": 0.7384910365613793,
+      "2724381620166498698": 0.7384910358426758,
+      "8126271634592955465": 0.738491065240548,
+      "16485797872059868170": 0.738491011637432,
+      "4203634307611722963": 0.7384910567941535,
+      "17256364137345273486": 0.7384910384720612,
+      "1351046001590629333": 0.7384910193026696,
+      "11054790220633812245": 0.738491022555281,
+      "6083444075743344603": 0.7384910184418925,
+      "5350349080278863708": 0.738491009291564,
+      "2929166723122661535": 0.7384908798423588,
+      "14743960408790506908": 0.7384910633965527,
+      "18405917925444280032": 0.7384910597553654,
+      "11103356863158023144": 0.7384910532415652,
+      "6354434248166636463": 0.7384910283454484,
+      "6557204967021374831": 0.08716961002640307,
+      "3105741265774271542": 0.7384910505131281,
+      "9454914515769179700": 0.7384910739567806
+    },
+    "trust_convergence": "analyzed"
+  },
+  "security_summary": {
+    "total_byzantine_detections": 23,
+    "consensus_rate": 1.0,
+    "avg_detections_per_round": 2.3
+  }
+}

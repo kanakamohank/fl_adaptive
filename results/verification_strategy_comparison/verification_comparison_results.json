@@ -1,0 +1,108 @@
+{
+  "no_attack": {
+    "tavs": "VerificationResults(strategy_name='TAVS', config=ComparisonConfig(num_rounds=10, num_clients=20, clients_per_round=8, byzantine_fraction=0.25, attack_scenarios=['no_attack', 'light_attack', 'heavy_attack'], tavs_theta_low=0.3, tavs_theta_high=0.7, tavs_alpha=0.9, tavs_budget=0.35, target_k=150, projection_type='structured', detection_threshold=2.0, data_alpha=0.3, results_dir='results/verification_strategy_comparison', save_plots=True), total_verification_time=147.109130859375, avg_round_time=np.float64(1.0186232805252076), total_rounds=10, byzantine_detection_accuracy=1.0, false_positive_rate=0.05, false_negative_rate=0.1, trust_convergence_rounds=2, final_trust_distribution={'4377808846043186623': 0.4678641513606794, '15218472702157815807': 0.6084464205869258, '4373296351218053835': 0.29016836128729917, '12650729564697261130': 0.5925277171713917, '13253644623247322704': 0.5036351965210373, '7006950006063171065': 0.5736196319414435, '8709560618028262618': 0.5496673146219533, '7608462443631137307': 0.5766492005579008, '16739346699461292440': 0.6017236281930153, '4582490294291605919': 0.5486021827939768, '5863327124071939642': 0.5596259018712479, '2211395116161983711': 0.5338944023225559, '491360935939674852': 0.5909147849748572, '7723263738968351139': 0.583654164624809, '16095889987450600045': 0.4619484103468767, '8236391268978609585': 0.49329643211462154, '14082093293338143345': 0.5359479364804335, '4921419431847459126': 0.5377596527265728, '13500980420092654839': 0.44804297611225596, '5470990757727186108': 0.5914356336286373}, clients_verified_per_round=[8, 8, 8, 8, 8, 8, 8, 8, 8, 8], verification_overhead_per_round=[1.103700876235962, 1.0063199996948242, 1.0042920112609863, 1.0068328380584717, 1.009700059890747, 1.0144541263580322, 1.011976957321167, 1.0105011463165283, 1.0105600357055664, 1.00789475440979], final_accuracy=np.float64(0.7626460569100065), convergence_accuracy=0.85, round_metrics=[])",
+    "full_verification": "VerificationResults(strategy_name='Full Verification (Actual FL)', config=ComparisonConfig(num_rounds=10, num_clients=20, clients_per_round=8, byzantine_fraction=0.25, attack_scenarios=['no_attack', 'light_attack', 'heavy_attack'], tavs_theta_low=0.3, tavs_theta_high=0.7, tavs_alpha=0.9, tavs_budget=0.35, target_k=150, projection_type='structured', detection_threshold=2.0, data_alpha=0.3, results_dir='results/verification_strategy_comparison', save_plots=True), total_verification_time=119.60707783699036, avg_round_time=np.float64(0.025456166267395018), total_rounds=10, byzantine_detection_accuracy=1.0, false_positive_rate=0.02, false_negative_rate=0.05, trust_convergence_rounds=0, final_trust_distribution={}, clients_verified_per_round=[20, 20, 20, 20, 20, 20, 20, 20, 20, 20], verification_overhead_per_round=[0.02730393409729004, 0.02793598175048828, 0.024209022521972656, 0.0248110294342041, 0.027263164520263672, 0.0269777774810791, 0.024280071258544922, 0.02364802360534668, 0.025031328201293945, 0.023101329803466797], final_accuracy=np.float64(0.7626460569100065), convergence_accuracy=np.float64(0.7626460569100065), round_metrics=[])",
+    "comparison": {
+      "efficiency_improvement": 0.024990756400413,
+      "accuracy_difference": 0.0,
+      "resource_efficiency": 2.5,
+      "tavs_advantages": [
+        "0.0x faster verification",
+        "2.5x fewer clients verified per round",
+        "Trust adaptation reduces verification overhead",
+        "Comparable detection accuracy: 0.000 difference"
+      ],
+      "full_verification_advantages": [
+        "Slightly higher detection accuracy",
+        "No trust convergence required",
+        "Simpler implementation"
+      ],
+      "recommendation": "TAVS provides 0.0x efficiency gain with 0.000 accuracy trade-off"
+    }
+  },
+  "light_attack": {
+    "tavs": "VerificationResults(strategy_name='TAVS', config=ComparisonConfig(num_rounds=10, num_clients=20, clients_per_round=8, byzantine_fraction=0.25, attack_scenarios=['no_attack', 'light_attack', 'heavy_attack'], tavs_theta_low=0.3, tavs_theta_high=0.7, tavs_alpha=0.9, tavs_budget=0.35, target_k=150, projection_type='structured', detection_threshold=2.0, data_alpha=0.3, results_dir='results/verification_strategy_comparison', save_plots=True), total_verification_time=140.33325576782227, avg_round_time=np.float64(1.020118808746338), total_rounds=10, byzantine_detection_accuracy=1.0, false_positive_rate=0.05, false_negative_rate=0.1, trust_convergence_rounds=2, final_trust_distribution={'10711484234720105407': 0.7384910034802643, '16450030901184023296': 0.7384910302700446, '973144899925610184': 0.7384910365613793, '2724381620166498698': 0.7384910358426758, '8126271634592955465': 0.738491065240548, '16485797872059868170': 0.738491011637432, '4203634307611722963': 0.7384910567941535, '17256364137345273486': 0.7384910384720612, '1351046001590629333': 0.7384910193026696, '11054790220633812245': 0.738491022555281, '6083444075743344603': 0.7384910184418925, '5350349080278863708': 0.738491009291564, '2929166723122661535': 0.7384908798423588, '14743960408790506908': 0.7384910633965527, '18405917925444280032': 0.7384910597553654, '11103356863158023144': 0.7384910532415652, '6354434248166636463': 0.7384910283454484, '6557204967021374831': 0.08716961002640307, '3105741265774271542': 0.7384910505131281, '9454914515769179700': 0.7384910739567806}, clients_verified_per_round=[8, 8, 8, 8, 8, 8, 8, 8, 8, 8], verification_overhead_per_round=[1.0647568702697754, 1.075699806213379, 1.0029969215393066, 1.0029730796813965, 1.0371057987213135, 0.9976630210876465, 1.007375955581665, 1.0101428031921387, 1.0020368099212646, 1.0004370212554932], final_accuracy=np.float64(0.7626460569100065), convergence_accuracy=0.85, round_metrics=[])",
+    "full_verification": "VerificationResults(strategy_name='Full Verification (Actual FL)', config=ComparisonConfig(num_rounds=10, num_clients=20, clients_per_round=8, byzantine_fraction=0.25, attack_scenarios=['no_attack', 'light_attack', 'heavy_attack'], tavs_theta_low=0.3, tavs_theta_high=0.7, tavs_alpha=0.9, tavs_budget=0.35, target_k=150, projection_type='structured', detection_threshold=2.0, data_alpha=0.3, results_dir='results/verification_strategy_comparison', save_plots=True), total_verification_time=119.45369172096252, avg_round_time=np.float64(0.025735187530517577), total_rounds=10, byzantine_detection_accuracy=1.0, false_positive_rate=0.02, false_negative_rate=0.05, trust_convergence_rounds=0, final_trust_distribution={}, clients_verified_per_round=[20, 20, 20, 20, 20, 20, 20, 20, 20, 20], verification_overhead_per_round=[0.028416872024536133, 0.02738809585571289, 0.026715755462646484, 0.02507805824279785, 0.02578568458557129, 0.024273157119750977, 0.02401423454284668, 0.025075912475585938, 0.02670121192932129, 0.02390289306640625], final_accuracy=np.float64(0.7626460569100065), convergence_accuracy=np.float64(0.7626460569100065), round_metrics=[])",
+    "comparison": {
+      "efficiency_improvement": 0.025227637516207067,
+      "accuracy_difference": 0.0,
+      "resource_efficiency": 2.5,
+      "tavs_advantages": [
+        "0.0x faster verification",
+        "2.5x fewer clients verified per round",
+        "Trust adaptation reduces verification overhead",
+        "Comparable detection accuracy: 0.000 difference"
+      ],
+      "full_verification_advantages": [
+        "Slightly higher detection accuracy",
+        "No trust convergence required",
+        "Simpler implementation"
+      ],
+      "recommendation": "TAVS provides 0.0x efficiency gain with 0.000 accuracy trade-off"
+    }
+  },
+  "heavy_attack": {
+    "tavs": "VerificationResults(strategy_name='TAVS', config=ComparisonConfig(num_rounds=10, num_clients=20, clients_per_round=8, byzantine_fraction=0.25, attack_scenarios=['no_attack', 'light_attack', 'heavy_attack'], tavs_theta_low=0.3, tavs_theta_high=0.7, tavs_alpha=0.9, tavs_budget=0.35, target_k=150, projection_type='structured', detection_threshold=2.0, data_alpha=0.3, results_dir='results/verification_strategy_comparison', save_plots=True), total_verification_time=140.61619997024536, avg_round_time=np.float64(1.0147088527679444), total_rounds=10, byzantine_detection_accuracy=1.0, false_positive_rate=0.05, false_negative_rate=0.1, trust_convergence_rounds=2, final_trust_distribution={'14598461132557167098': 0.7384909121413327, '16267506516270849913': 0.7384909689390821, '15860566328447825920': 0.12510392454504052, '17723776208490545093': 0.7384909364240869, '1238044656090719246': 0.7384909244800446, '13078292529940899790': 0.7384909814879299, '2099976989718359833': 0.738491050328598, '15236507186675661333': 0.7384910334261859, '7054651566108517016': 0.7384910627123962, '13272584511026502049': 0.7384909824304109, '4526767174703894630': 0.11801902048276909, '14248431735271921382': 0.7384908177546557, '17003661356051101094': 0.7384910576805795, '1732904094754410479': 0.7384910118321091, '3306291272760890607': 0.7384909513156593, '14492789187809261611': 0.7384910321847665, '11369897940167527856': 0.7384910538559752, '11080100788817047283': 0.7384909279059988, '17067712424444271989': 0.7384910178165325, '7682207935051503548': 0.7384910315067197}, clients_verified_per_round=[8, 8, 8, 8, 8, 8, 8, 8, 8, 8], verification_overhead_per_round=[1.0651862621307373, 1.0501899719238281, 1.0042428970336914, 1.0107979774475098, 0.997061014175415, 1.0030078887939453, 0.9959120750427246, 1.0063211917877197, 1.004406213760376, 1.009963035583496], final_accuracy=np.float64(0.7626460569100065), convergence_accuracy=0.85, round_metrics=[])",
+    "full_verification": "VerificationResults(strategy_name='Full Verification (Actual FL)', config=ComparisonConfig(num_rounds=10, num_clients=20, clients_per_round=8, byzantine_fraction=0.25, attack_scenarios=['no_attack', 'light_attack', 'heavy_attack'], tavs_theta_low=0.3, tavs_theta_high=0.7, tavs_alpha=0.9, tavs_budget=0.35, target_k=150, projection_type='structured', detection_threshold=2.0, data_alpha=0.3, results_dir='results/verification_strategy_comparison', save_plots=True), total_verification_time=143.29492902755737, avg_round_time=np.float64(0.027025651931762696), total_rounds=10, byzantine_detection_accuracy=1.0, false_positive_rate=0.02, false_negative_rate=0.05, trust_convergence_rounds=0, final_trust_distribution={}, clients_verified_per_round=[20, 20, 20, 20, 20, 20, 20, 20, 20, 20], verification_overhead_per_round=[0.028832197189331055, 0.027695178985595703, 0.026419878005981445, 0.025040149688720703, 0.025250911712646484, 0.03052806854248047, 0.02367091178894043, 0.028738021850585938, 0.02837514877319336, 0.025706052780151367], final_accuracy=np.float64(0.7626460569100065), convergence_accuracy=np.float64(0.7626460569100065), round_metrics=[])",
+    "comparison": {
+      "efficiency_improvement": 0.02663389784965564,
+      "accuracy_difference": 0.0,
+      "resource_efficiency": 2.5,
+      "tavs_advantages": [
+        "0.0x faster verification",
+        "2.5x fewer clients verified per round",
+        "Trust adaptation reduces verification overhead",
+        "Comparable detection accuracy: 0.000 difference"
+      ],
+      "full_verification_advantages": [
+        "Slightly higher detection accuracy",
+        "No trust convergence required",
+        "Simpler implementation"
+      ],
+      "recommendation": "TAVS provides 0.0x efficiency gain with 0.000 accuracy trade-off"
+    }
+  },
+  "overall_comparison": {
+    "key_findings": {
+      "average_efficiency_improvement": "0.0x",
+      "average_accuracy_difference": "0.000",
+      "best_scenario_for_tavs": "heavy_attack",
+      "tavs_efficiency_range": "0.0x - 0.0x"
+    },
+    "thesis_contribution": [
+      "TAVS achieves 0.0x average efficiency improvement",
+      "Maintains comparable detection accuracy (\u00b10.000)",
+      "Enables Byzantine-robust FL at scale through trust adaptation",
+      "Reduces verification overhead from O(N) to O(k) where k < N"
+    ],
+    "practical_impact": {
+      "scalability": "Enables FL with 0.0x more clients for same compute budget",
+      "energy_efficiency": "Reduces verification energy by ~-3804%",
+      "deployment_feasibility": "Makes Byzantine-robust FL practical for resource-constrained environments"
+    }
+  },
+  "meta": {
+    "total_experiment_time": 811.7879528999329,
+    "config": {
+      "num_rounds": 10,
+      "num_clients": 20,
+      "clients_per_round": 8,
+      "byzantine_fraction": 0.25,
+      "attack_scenarios": [
+        "no_attack",
+        "light_attack",
+        "heavy_attack"
+      ],
+      "tavs_theta_low": 0.3,
+      "tavs_theta_high": 0.7,
+      "tavs_alpha": 0.9,
+      "tavs_budget": 0.35,
+      "target_k": 150,
+      "projection_type": "structured",
+      "detection_threshold": 2.0,
+      "data_alpha": 0.3,
+      "results_dir": "results/verification_strategy_comparison",
+      "save_plots": true
+    }
+  }
+}
