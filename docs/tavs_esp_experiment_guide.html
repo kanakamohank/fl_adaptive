@@ -1,0 +1,854 @@
+<title>TAVS-ESP: Experiment Guide & Algorithm Deep-Dive</title>
+<style>
+  @import url('data:text/css,');
+
+  :root {
+    --bg: #f7f6f3;
+    --surface: #ffffff;
+    --text: #1a1a1e;
+    --text-muted: #5c5c66;
+    --accent: #2d5f8a;
+    --accent-light: #e8f0f7;
+    --border: #d8d6d0;
+    --code-bg: #efeee9;
+    --warn: #b85c2f;
+    --good: #2e7d4f;
+    --math-bg: #f0ede6;
+    --heading: #0f2035;
+    --caption: #6b6960;
+    --diagram-accent: #2d5f8a;
+    --diagram-warn: #c96832;
+    --shadow: rgba(0,0,0,0.06);
+  }
+
+  @media (prefers-color-scheme: dark) {
+    :root:not([data-theme="light"]) {
+      --bg: #16161a;
+      --surface: #1e1e24;
+      --text: #e2e0db;
+      --text-muted: #9a9890;
+      --accent: #6aade4;
+      --accent-light: #1c2e40;
+      --border: #2e2e36;
+      --code-bg: #22222a;
+      --warn: #e08a52;
+      --good: #5cb87a;
+      --math-bg: #1c1c22;
+      --heading: #c8d8ec;
+      --caption: #8a877e;
+      --diagram-accent: #6aade4;
+      --diagram-warn: #e08a52;
+      --shadow: rgba(0,0,0,0.2);
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16161a;
+    --surface: #1e1e24;
+    --text: #e2e0db;
+    --text-muted: #9a9890;
+    --accent: #6aade4;
+    --accent-light: #1c2e40;
+    --border: #2e2e36;
+    --code-bg: #22222a;
+    --warn: #e08a52;
+    --good: #5cb87a;
+    --math-bg: #1c1c22;
+    --heading: #c8d8ec;
+    --caption: #8a877e;
+    --diagram-accent: #6aade4;
+    --diagram-warn: #e08a52;
+    --shadow: rgba(0,0,0,0.2);
+  }
+
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+
+  body {
+    background: var(--bg);
+    color: var(--text);
+    font-family: 'Charter', 'Georgia', 'Noto Serif', serif;
+    font-size: 17px;
+    line-height: 1.72;
+    -webkit-font-smoothing: antialiased;
+  }
+
+  .page {
+    max-width: 820px;
+    margin: 0 auto;
+    padding: 3rem 1.5rem 5rem;
+  }
+
+  h1 {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 1.6rem;
+    font-weight: 700;
+    color: var(--heading);
+    letter-spacing: -0.02em;
+    text-wrap: balance;
+    margin-bottom: 0.3rem;
+  }
+
+  .subtitle {
+    font-size: 0.95rem;
+    color: var(--text-muted);
+    margin-bottom: 2.5rem;
+    border-bottom: 1px solid var(--border);
+    padding-bottom: 1.5rem;
+  }
+
+  h2 {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 1.15rem;
+    font-weight: 700;
+    color: var(--heading);
+    letter-spacing: -0.01em;
+    text-wrap: balance;
+    margin-top: 3rem;
+    margin-bottom: 1rem;
+    padding-bottom: 0.4rem;
+    border-bottom: 2px solid var(--accent);
+  }
+
+  h3 {
+    font-size: 1.05rem;
+    font-weight: 700;
+    color: var(--heading);
+    margin-top: 2rem;
+    margin-bottom: 0.6rem;
+  }
+
+  h4 {
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    margin-top: 1.5rem;
+    margin-bottom: 0.5rem;
+  }
+
+  p { margin-bottom: 1rem; }
+  p + p { margin-top: 0; }
+
+  a { color: var(--accent); text-decoration: none; }
+  a:hover { text-decoration: underline; }
+
+  code {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.85em;
+    background: var(--code-bg);
+    padding: 0.15em 0.4em;
+    border-radius: 3px;
+  }
+
+  pre {
+    background: var(--code-bg);
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 1rem 1.2rem;
+    overflow-x: auto;
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.82rem;
+    line-height: 1.6;
+    margin-bottom: 1.2rem;
+  }
+  pre code {
+    background: none;
+    padding: 0;
+    font-size: inherit;
+  }
+
+  .math-block {
+    background: var(--math-bg);
+    border-left: 3px solid var(--accent);
+    padding: 1rem 1.2rem;
+    margin: 1.2rem 0;
+    border-radius: 0 6px 6px 0;
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.88rem;
+    line-height: 1.8;
+    overflow-x: auto;
+  }
+
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.3rem 1.5rem;
+    margin: 1.2rem 0;
+    box-shadow: 0 1px 3px var(--shadow);
+  }
+
+  .card-title {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.92rem;
+    font-weight: 700;
+    color: var(--accent);
+    margin-bottom: 0.5rem;
+  }
+
+  .status-badge {
+    display: inline-block;
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.72rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.15em 0.55em;
+    border-radius: 3px;
+    vertical-align: middle;
+    margin-left: 0.4rem;
+  }
+  .badge-pass { background: var(--good); color: #fff; }
+  .badge-needs-data { background: var(--warn); color: #fff; }
+  .badge-broken { background: #a03030; color: #fff; }
+
+  table {
+    width: 100%;
+    border-collapse: collapse;
+    margin: 1rem 0 1.5rem;
+    font-size: 0.9rem;
+    font-variant-numeric: tabular-nums;
+  }
+  th {
+    text-align: left;
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.78rem;
+    font-weight: 700;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 0.5rem 0.8rem;
+    border-bottom: 2px solid var(--border);
+  }
+  td {
+    padding: 0.55rem 0.8rem;
+    border-bottom: 1px solid var(--border);
+    vertical-align: top;
+  }
+  tr:last-child td { border-bottom: none; }
+  .table-wrap { overflow-x: auto; }
+
+  ol, ul { padding-left: 1.5rem; margin-bottom: 1rem; }
+  li { margin-bottom: 0.3rem; }
+  li > p { margin-bottom: 0.3rem; }
+
+  .step-num {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 1.6rem;
+    height: 1.6rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: #fff;
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.75rem;
+    font-weight: 700;
+    margin-right: 0.5rem;
+    flex-shrink: 0;
+  }
+
+  .step {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.6rem;
+    margin-bottom: 1.5rem;
+  }
+  .step-content { flex: 1; }
+  .step-content h4 { margin-top: 0; }
+
+  figure {
+    margin: 1.5rem 0;
+  }
+  figcaption {
+    font-size: 0.82rem;
+    color: var(--caption);
+    text-align: center;
+    margin-top: 0.5rem;
+  }
+
+  .toc {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    padding: 1.2rem 1.5rem;
+    margin-bottom: 2rem;
+  }
+  .toc-title {
+    font-family: 'SF Mono', 'Cascadia Code', 'Consolas', monospace;
+    font-size: 0.82rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--text-muted);
+    margin-bottom: 0.5rem;
+  }
+  .toc ol { padding-left: 1.2rem; margin-bottom: 0; }
+  .toc li { font-size: 0.9rem; margin-bottom: 0.25rem; }
+
+  .warn-box {
+    background: var(--accent-light);
+    border-left: 3px solid var(--warn);
+    padding: 0.8rem 1rem;
+    border-radius: 0 6px 6px 0;
+    margin: 1rem 0;
+    font-size: 0.9rem;
+  }
+
+  .divider {
+    border: none;
+    border-top: 1px solid var(--border);
+    margin: 2.5rem 0;
+  }
+
+  @media (max-width: 600px) {
+    .page { padding: 1.5rem 1rem 3rem; }
+    h1 { font-size: 1.3rem; }
+    pre { font-size: 0.76rem; padding: 0.8rem; }
+    table { font-size: 0.82rem; }
+  }
+</style>
+
+<div class="page">
+
+<h1>TAVS-ESP: Experiment Guide &amp; Algorithm Deep-Dive</h1>
+<p class="subtitle">Trust-Adaptive Verification Scheduling with Ephemeral Structured Projection &mdash; a Byzantine-robust federated learning framework. This guide covers every experiment, how to run each one, what results to expect, and a complete walk-through of the mathematics.</p>
+
+<nav class="toc">
+  <div class="toc-title">Contents</div>
+  <ol>
+    <li><a href="#health">Current Project Health</a></li>
+    <li><a href="#architecture">System Architecture (How It All Fits)</a></li>
+    <li><a href="#algo-walkthrough">Algorithm Walk-Through: The Math, Step by Step</a></li>
+    <li><a href="#experiments">Experiments: What, Why, and How to Run</a></li>
+    <li><a href="#expected-results">Expected Plots &amp; Results</a></li>
+    <li><a href="#commands">Quick-Reference Command Sheet</a></li>
+  </ol>
+</nav>
+
+<!-- ============================================================ -->
+<h2 id="health">1. Current Project Health</h2>
+
+<div class="table-wrap">
+<table>
+  <thead>
+    <tr><th>Test Suite</th><th>Count</th><th>Status</th></tr>
+  </thead>
+  <tbody>
+    <tr><td>Algorithm 1 &mdash; Scheduler (unit + multi-round)</td><td>11</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td>Algorithm 2 &mdash; ESP Projection</td><td>4</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td>Algorithm 3 &mdash; BVD + Aggregation</td><td>3</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td>V2 Cross-Component Integration</td><td>6</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td>Flower Strategy Bridge</td><td>5</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td>End-to-End Pipeline</td><td>8</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td>Flower Client + Convergence + Evaluation</td><td>25</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td>Security &amp; Scalability Validation</td><td>32</td><td><span class="status-badge badge-pass">Pass</span></td></tr>
+    <tr><td><strong>Total</strong></td><td><strong>94 pass, 1 skip</strong></td><td><span class="status-badge badge-pass">All Green</span></td></tr>
+  </tbody>
+</table>
+</div>
+
+<pre><code># Run the full suite (requires: torch, torchvision, flwr, matplotlib, seaborn, transformers)
+pip install -r requirements.txt
+python -m pytest src/tests/ -v
+
+# Run ONLY the core algorithm tests (no heavy deps beyond torch)
+python -m pytest src/tests/test_algo1_tavs_scheduler.py \
+                 src/tests/test_algo1_multiround.py \
+                 src/tests/test_algo2_esp_projection.py \
+                 src/tests/test_algo3_bvd_aggregation.py \
+                 src/tests/test_v2_integration.py -v</code></pre>
+
+<!-- ============================================================ -->
+<h2 id="architecture">2. System Architecture</h2>
+
+<p>TAVS-ESP protects federated learning from Byzantine (malicious) clients. In standard FL, a central server averages gradient updates from many clients &mdash; a single poisoned update can corrupt the global model. TAVS-ESP adds three coordinated layers that decide <em>who to trust</em>, <em>how to inspect</em> their updates, and <em>how to safely combine</em> them.</p>
+
+<figure>
+  <svg viewBox="0 0 780 420" style="max-width:100%;height:auto;display:block;margin:0 auto" role="img" aria-label="TAVS-ESP three-layer pipeline: scheduling feeds into projection which feeds into detection and aggregation, with trust scores feeding back to scheduling">
+    <!-- Background -->
+    <!-- Layer 1 -->
+    <rect x="20" y="30" width="230" height="120" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="135" y="55" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="currentColor">LAYER 1: TAVS Scheduler</text>
+    <text x="135" y="78" text-anchor="middle" font-family="serif" font-size="11" fill="currentColor">algo1_tavs_scheduler.py</text>
+    <text x="40" y="100" font-family="serif" font-size="10.5" fill="currentColor">Trust scores T_i(r)</text>
+    <text x="40" y="116" font-family="serif" font-size="10.5" fill="currentColor">Tier assignment: V, P, D</text>
+    <text x="40" y="132" font-family="serif" font-size="10.5" fill="currentColor">CSPRNG decoy injection</text>
+
+    <!-- Layer 2 -->
+    <rect x="280" y="30" width="230" height="120" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="395" y="55" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="currentColor">LAYER 2: ESP Projection</text>
+    <text x="395" y="78" text-anchor="middle" font-family="serif" font-size="11" fill="currentColor">algo2_esp_projection.py</text>
+    <text x="300" y="100" font-family="serif" font-size="10.5" fill="currentColor">JL random projection R_m</text>
+    <text x="300" y="116" font-family="serif" font-size="10.5" fill="currentColor">Ephemeral seeds (change/round)</text>
+    <text x="300" y="132" font-family="serif" font-size="10.5" fill="currentColor">Block-wise compression</text>
+
+    <!-- Layer 3 -->
+    <rect x="540" y="30" width="230" height="120" rx="8" fill="none" stroke="currentColor" stroke-width="1.5"/>
+    <text x="655" y="55" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="currentColor">LAYER 3: BVD + Aggregation</text>
+    <text x="655" y="78" text-anchor="middle" font-family="serif" font-size="11" fill="currentColor">algo3_bvd_aggregation.py</text>
+    <text x="560" y="100" font-family="serif" font-size="10.5" fill="currentColor">Block-normalized Z-scores</text>
+    <text x="560" y="116" font-family="serif" font-size="10.5" fill="currentColor">Inlier/outlier classification</text>
+    <text x="560" y="132" font-family="serif" font-size="10.5" fill="currentColor">Bayesian weighted avg</text>
+
+    <!-- Forward arrows -->
+    <defs>
+      <marker id="arr" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="currentColor"/>
+      </marker>
+      <marker id="arr-accent" markerWidth="8" markerHeight="6" refX="8" refY="3" orient="auto">
+        <polygon points="0 0, 8 3, 0 6" fill="var(--diagram-accent)"/>
+      </marker>
+    </defs>
+
+    <line x1="250" y1="90" x2="275" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="263" y="83" text-anchor="middle" font-family="monospace" font-size="9" fill="currentColor">V set</text>
+
+    <line x1="510" y1="90" x2="535" y2="90" stroke="currentColor" stroke-width="1.5" marker-end="url(#arr)"/>
+    <text x="523" y="83" text-anchor="middle" font-family="monospace" font-size="9" fill="currentColor">projected</text>
+
+    <!-- Feedback arrow (trust scores flow back) -->
+    <path d="M 655 155 L 655 185 L 135 185 L 135 155" fill="none" stroke="var(--diagram-accent)" stroke-width="1.5" stroke-dasharray="6,4" marker-end="url(#arr-accent)"/>
+    <text x="395" y="200" text-anchor="middle" font-family="monospace" font-size="10" font-weight="bold" fill="var(--diagram-accent)">behavior_scores feed back to update T_i(r)</text>
+
+    <!-- Round lifecycle below -->
+    <rect x="20" y="230" width="750" height="170" rx="8" fill="var(--math-bg, #f0ede6)" stroke="var(--border)" stroke-width="1"/>
+    <text x="395" y="255" text-anchor="middle" font-family="monospace" font-size="12" font-weight="bold" fill="currentColor">ONE ROUND OF FEDERATED LEARNING (r)</text>
+
+    <text x="40" y="282" font-family="monospace" font-size="10" font-weight="bold" fill="var(--diagram-accent)">1.</text>
+    <text x="56" y="282" font-family="serif" font-size="11" fill="currentColor">Server calls schedule_verifications(clients, r) &rarr; V (verify), P (promote), D (decoy)</text>
+
+    <text x="40" y="306" font-family="monospace" font-size="10" font-weight="bold" fill="var(--diagram-accent)">2.</text>
+    <text x="56" y="306" font-family="serif" font-size="11" fill="currentColor">Clients train locally, send gradient updates g_i back to the server</text>
+
+    <text x="40" y="330" font-family="monospace" font-size="10" font-weight="bold" fill="var(--diagram-accent)">3.</text>
+    <text x="56" y="330" font-family="serif" font-size="11" fill="currentColor">Server projects verified clients' updates: y_i = R_m &middot; g_i (ephemeral per round)</text>
+
+    <text x="40" y="354" font-family="monospace" font-size="10" font-weight="bold" fill="var(--diagram-accent)">4.</text>
+    <text x="56" y="354" font-family="serif" font-size="11" fill="currentColor">BVD detects outliers via block Z-scores. Aggregator combines inliers + weighted promoted.</text>
+
+    <text x="40" y="378" font-family="monospace" font-size="10" font-weight="bold" fill="var(--diagram-accent)">5.</text>
+    <text x="56" y="378" font-family="serif" font-size="11" fill="currentColor">Trust scores updated: T_i(r) = &alpha; &middot; T_i(r-1) + (1-&alpha;) &middot; &phi;_i(r). Repeat from step 1.</text>
+  </svg>
+  <figcaption>The TAVS-ESP pipeline: three algorithms compose into a single FL round, with trust feedback closing the loop.</figcaption>
+</figure>
+
+<!-- ============================================================ -->
+<h2 id="algo-walkthrough">3. Algorithm Walk-Through</h2>
+
+<p>Think of TAVS-ESP as a <strong>trust-based bouncer system</strong> for federated learning. New clients start with low trust and get fully inspected. As they prove honest over many rounds, they earn the right to contribute with less inspection &mdash; but the system randomly spot-checks even trusted clients to prevent long-game attacks.</p>
+
+<!-- === ALGO 1 === -->
+<h3>Algorithm 1: Trust-Adaptive Verification Scheduling (TAVS)</h3>
+
+<p><strong>The problem it solves:</strong> In standard FL, you either verify every client every round (expensive) or trust everyone (insecure). TAVS finds a middle ground: spend verification resources where they matter most.</p>
+
+<h4>Trust Score Update (EMA)</h4>
+<p>Every client <code>i</code> has a trust score <code>T_i(r)</code> that evolves over rounds. When the client is <em>verified</em> (actually inspected), the trust updates using an <strong>Exponential Moving Average</strong>:</p>
+
+<div class="math-block">
+T_i(r) = &alpha; &middot; T_i(r-1) + (1 - &alpha;) &middot; &phi;_i(r)
+<br><br>
+&alpha; = 0.9 (how much history matters)
+<br>
+&phi;_i(r) = behavior score from detection (0.0 = caught attacking, 1.0 = clean)
+</div>
+
+<p><strong>Intuition:</strong> This is a weighted average between the old trust (90% weight) and the new observation (10% weight). It's like a teacher's running impression of a student &mdash; one bad test doesn't destroy a good record, but consistent bad scores eventually drag it down.</p>
+
+<p><strong>Example:</strong> Client starts at T=0.5. Gets &phi;=1.0 (clean):</p>
+<div class="math-block">
+T_new = 0.9 &times; 0.5 + 0.1 &times; 1.0 = 0.45 + 0.10 = 0.55
+</div>
+<p>Trust inches up. After many clean rounds, it converges toward ~0.95. One bad round (&phi;=0.1):</p>
+<div class="math-block">
+T_new = 0.9 &times; 0.95 + 0.1 &times; 0.1 = 0.855 + 0.01 = 0.865
+</div>
+<p>Trust drops, but not catastrophically. Consistent bad behavior eventually pushes trust below 0.15.</p>
+
+<p>When a client is <em>promoted</em> (trusted enough to skip verification), they get <strong>pure decay</strong> instead:</p>
+<div class="math-block">
+T_i(r) = &alpha; &middot; T_i(r-1)     (no behavior observation available)
+</div>
+<p>This means promoted clients slowly lose trust unless they get verified again. It prevents a client from gaming the system by behaving well early, getting promoted, then attacking silently.</p>
+
+<h4>Mechanism 3: Trust Ramp (Rate-Limiting New Clients)</h4>
+<p>A brand-new client could fake good behavior for a few rounds. The ramp prevents trust from growing too fast:</p>
+<div class="math-block">
+T_i^max(r) = 1 - exp(-(r - r_0) / &tau;_ramp)
+<br>
+T_i^effective(r) = min(T_i^raw(r), T_i^max(r))
+<br><br>
+r_0 = round when client joined
+<br>
+&tau;_ramp = 30 (how many rounds until the cap lifts)
+</div>
+
+<p><strong>Intuition:</strong> Even if a new client has perfect behavior scores, their effective trust is capped by this exponential curve. At round 1 after joining, the cap is 0.0. At round 10, it's ~0.26. At round 30, it's ~0.63. At round 100, it's ~0.96. This forces clients to prove themselves over time, not just in a burst.</p>
+
+<h4>Three-Tier Classification</h4>
+<p>Using effective trust, clients are sorted into three groups every round:</p>
+
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Tier</th><th>Condition</th><th>Action</th></tr></thead>
+  <tbody>
+    <tr><td><strong>Tier 1 (Verified)</strong></td><td>T_eff &lt; &theta;_low (0.3)</td><td>Fully inspected via BVD detection</td></tr>
+    <tr><td><strong>Tier 2 (Tentative)</strong></td><td>&theta;_low &le; T_eff &lt; &theta;_high</td><td>Tentatively promoted, subject to budget</td></tr>
+    <tr><td><strong>Tier 3 (Trusted)</strong></td><td>T_eff &ge; &theta;_high (0.8) AND k_trust consecutive clean rounds</td><td>Promoted, but randomly spot-checked with probability p_decoy=0.15</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h4>CSPRNG Decoy Verification</h4>
+<p>Even Tier 3 clients aren't safe from inspection. Each round, the system rolls a cryptographic dice:</p>
+<div class="math-block">
+roll = SHA-256(master_key || client_id || round_num)[:8] / 0xFFFFFFFF
+<br><br>
+If roll &lt; p_decoy (0.15): client is secretly pulled back for verification
+</div>
+<p>Because the roll depends on a <strong>secret master key</strong>, the client cannot predict when they'll be checked. This defeats "sleeper agent" attacks where a malicious client behaves well until it knows it won't be inspected.</p>
+
+<h4>Mechanism 1: Budget Constraint</h4>
+<p>The system guarantees that unverified clients can never dominate the aggregate. Define the unverified influence ratio:</p>
+<div class="math-block">
+&gamma;(r) = &Sigma; p_i(r) / Z(r)  &le;  &gamma;_budget (0.35)
+<br><br>
+Z(r) = |V| + &Sigma; p_i    (normalization factor)
+<br>
+p_i = &sigma;(c_&lambda; &middot; (T_i - 0.5))    (Bayesian posterior weight, see below)
+</div>
+<p>If too many clients are promoted, the lowest-trust ones get <strong>demoted back to verification</strong> until the budget constraint is satisfied. This is a hard guarantee, not a soft guideline.</p>
+
+<h4>Bayesian Posterior Weight</h4>
+<p>Promoted clients contribute with a weight proportional to their trustworthiness, using a sigmoid function:</p>
+<div class="math-block">
+p_i(r) = &sigma;(c_&lambda; &middot; (T_i(r) - 0.5)) = 1 / (1 + exp(-c_&lambda; &middot; (T_i - 0.5)))
+<br><br>
+c_&lambda; = 8.0 (steepness: higher = sharper transition at T=0.5)
+</div>
+<p><strong>At T_i = 0.5:</strong> p_i = 0.5 (half weight). <strong>At T_i = 0.1:</strong> p_i &approx; 0.018 (nearly zero). <strong>At T_i = 0.9:</strong> p_i &approx; 0.982 (nearly full weight). This sigmoid curve smoothly maps trust to influence, heavily penalizing untrusted clients.</p>
+
+<hr class="divider">
+
+<!-- === ALGO 2 === -->
+<h3>Algorithm 2: Ephemeral Structured Projection (ESP)</h3>
+
+<p><strong>The problem it solves:</strong> A sophisticated attacker could craft a gradient that poisons the model but looks normal when inspected. ESP projects gradients into a random subspace that changes every round, making it mathematically impossible to hide poison in the null space of the projection.</p>
+
+<h4>Johnson-Lindenstrauss (JL) Lemma</h4>
+<p>The core mathematical insight: a random linear projection <em>preserves distances</em> between vectors with high probability. If two gradients are far apart in the original 150,000-dimensional space, they'll still be far apart after projection to 500 dimensions.</p>
+
+<div class="math-block">
+y_i^(m) = R_m &middot; g_i^(m)
+<br><br>
+R_m &isin; &reals;^(k_m &times; d_m),   R_ij ~ N(0, 1/k_m)
+<br><br>
+Property: E[||R &middot; x||&sup2;] = ||x||&sup2;
+</div>
+
+<p><strong>Plain English:</strong> Generate a random matrix <code>R</code> where each entry is drawn from a normal distribution with mean 0 and standard deviation <code>1/&radic;k</code>. Multiply the gradient by this matrix. The result is a much smaller vector that statistically preserves the "shape" of the original &mdash; outliers in the original space remain outliers in the projected space.</p>
+
+<h4>Block-wise Allocation</h4>
+<p>The model is split into semantic blocks (e.g., attention layers, FFN layers). Each block gets a proportional share of the projection budget:</p>
+<div class="math-block">
+k_m = floor(k &middot; d_m / &Sigma; d_j)
+<br><br>
+Example: model has 50,000 params total, k=500
+<br>
+attention_1 (10,000 params): k_m = 500 &times; 10000/50000 = 100
+<br>
+attention_2 (15,000 params): k_m = 150
+<br>
+ffn_1 (25,000 params): k_m = 250
+</div>
+
+<h4>Ephemeral Seeds (Why It Changes Every Round)</h4>
+<p>Each round, each block gets a fresh random seed derived from a secret master key:</p>
+<div class="math-block">
+seed_m(r) = SHA-256(master_key || round_num || block_name)[:8]
+</div>
+<p>This seed generates the random matrix <code>R_m</code>. Since the seed changes every round, the projection matrix changes too. An attacker who reverse-engineers the null space of round <code>r</code>'s projection will find their attack exposed in round <code>r+1</code> because the null space has shifted unpredictably.</p>
+
+<p><strong>Key invariant:</strong> Same seed &rarr; same matrix (deterministic within a round for all clients), different seed &rarr; different matrix (ephemeral across rounds).</p>
+
+<hr class="divider">
+
+<!-- === ALGO 3 === -->
+<h3>Algorithm 3: Block Variance Detection (BVD) + Bayesian Aggregation</h3>
+
+<p><strong>The problem it solves:</strong> After projection, we need to identify which clients are outliers (Byzantine) and which are honest but happen to have non-IID data (legitimate variance). A naive approach would flag honest non-IID clients as attackers.</p>
+
+<h4>Step 1: Robust Aggregate (Coordinate-wise Median)</h4>
+<p>Instead of computing the mean (which is easily corrupted), compute the <strong>median</strong> of all projected updates per block:</p>
+<div class="math-block">
+g&#772;_r^(m) = median({y_i^(m)})    for each coordinate
+</div>
+<p>The median is robust: up to ~50% of the values can be corrupted without affecting it.</p>
+
+<h4>Step 2: Block-Normalized Z-Scores</h4>
+<p>For each client, compute how far their projected update is from the median, normalized by the historical variance:</p>
+<div class="math-block">
+Z_i^(m) = ||y_i^(m) - g&#772;_r^(m)||&sup2; / (&sigma;&#770;_m&sup2; + &epsilon;_stab)
+<br><br>
+&sigma;&#770;_m&sup2; = running EMA of inlier distances (updated ONLY using clean clients)
+<br>
+&epsilon;_stab = 1e-5 (prevents division by zero)
+</div>
+
+<p><strong>Classification rule:</strong> If max_m(Z_i^(m)) &gt; &tau;_z (threshold, typically 10.0), client <code>i</code> is an <strong>outlier</strong>. Otherwise, <strong>inlier</strong>.</p>
+
+<p><strong>Why block-wise?</strong> A "sleeper agent" might inject poison into only one layer (e.g., the attention layer) while keeping all other layers normal. A global norm check would average out the localized spike. By checking <em>each block separately</em>, a spike in even one block triggers detection.</p>
+
+<h4>Step 3: Variance EMA Update (Inliers Only)</h4>
+<p>Critical security property: the variance estimate is updated using <strong>only inlier</strong> data:</p>
+<div class="math-block">
+&sigma;&#770;_m&sup2;(r) = &alpha;_&sigma; &middot; &sigma;&#770;_m&sup2;(r-1) + (1 - &alpha;_&sigma;) &middot; mean({dist_i^(m) : i &isin; inliers})
+</div>
+<p>If attackers' distances were included, they'd inflate the variance, making future attacks harder to detect (a "variance poisoning" attack). By excluding outliers, the threshold stays tight around honest behavior.</p>
+
+<h4>Step 4: Behavior Scores</h4>
+<p>Each verified client gets a continuous behavior score for trust updates:</p>
+<div class="math-block">
+&phi;_i(r) = max(0, 1 - Z_i^max / Z_max_overall)
+</div>
+<p>Clean clients get scores near 1.0; outliers get scores near 0.0. These flow back to Algorithm 1 for trust updates.</p>
+
+<h4>Step 5: Unified Bayesian Aggregation</h4>
+<p>Finally, combine all clean contributions:</p>
+<div class="math-block">
+&Delta;w(r) = [&Sigma;_{i &isin; L} v_i &middot; g_i + &Sigma;_{i &isin; P} p_i &middot; g_i] / Z(r)
+<br><br>
+v_i = 1.0 for verified inliers (full weight)
+<br>
+p_i = sigmoid(c_&lambda; &middot; (T_i - 0.5)) for promoted clients (trust-weighted)
+<br>
+Z(r) = &Sigma; v_i + &Sigma; p_i (normalization)
+</div>
+
+<p>Verified inliers contribute at full weight. Promoted clients contribute proportional to their trust. Outliers are excluded entirely. This is the "Bayesian" part: the system doesn't just filter bad clients, it <em>weights</em> contributions by confidence.</p>
+
+<!-- ============================================================ -->
+<h2 id="experiments">4. Experiments</h2>
+
+<p>The project contains 8 experiment scripts. Here's each one: what it measures, what question it answers, and how to run it.</p>
+
+<div class="warn-box">
+<strong>Prerequisites for all experiments:</strong> Run from the project root directory. Most experiments need CIFAR-10 (downloaded automatically on first run, ~170 MB). Install all dependencies first: <code>pip install -r requirements.txt</code>
+</div>
+
+<!-- Experiment 1 -->
+<div class="card">
+  <div class="card-title">Experiment 1: Quick Timing Validation <span class="status-badge badge-pass">Self-Contained</span></div>
+  <p><strong>File:</strong> <code>experiments/quick_timing_test.py</code></p>
+  <p><strong>Question:</strong> How much wall-clock overhead does TAVS-ESP add versus plain FedAvg?</p>
+  <p><strong>What it does:</strong> Uses synthetic data (no dataset download needed). Measures timing of trust updates, tier assignment, CSPRNG rolls, projection matrix generation, gradient projection, and geometric median detection. Compares against baseline FedAvg averaging.</p>
+  <pre><code>python experiments/quick_timing_test.py --device cpu</code></pre>
+  <p><strong>Expected output:</strong> Console timing report. Scheduling overhead should be &lt;5% of round time. Projection overhead depends on model size and device (GPU dramatically reduces this).</p>
+</div>
+
+<!-- Experiment 2 -->
+<div class="card">
+  <div class="card-title">Experiment 2: Phase 1 Attack Validation <span class="status-badge badge-needs-data">Needs CIFAR-10</span></div>
+  <p><strong>File:</strong> <code>experiments/phase1_attack_validation.py</code></p>
+  <p><strong>Question:</strong> How effective are null-space and layerwise backdoor attacks against different projection types? What's the baseline Attack Success Rate (ASR)?</p>
+  <p><strong>What it does:</strong> Tests NullSpaceAttacker and LayerwiseBackdoorAttacker against static, dense, and structured projections. Also validates timing attack resistance across scheduling schemes.</p>
+  <pre><code>PYTHONPATH=. python experiments/phase1_attack_validation.py</code></pre>
+  <p><strong>Expected outputs:</strong></p>
+  <ul>
+    <li><code>results/phase1/phase1_asr_comparison.png</code> &mdash; Heatmap: ASR by attack type vs projection type</li>
+    <li><code>results/phase1/phase1_projected_visibility.png</code> &mdash; Bar chart: how visible are attacks after projection</li>
+    <li><code>results/phase1/phase1_detection_performance.png</code> &mdash; Detection rate and false positive rate heatmaps</li>
+    <li>JSON results file with raw numbers</li>
+  </ul>
+</div>
+
+<!-- Experiment 3 -->
+<div class="card">
+  <div class="card-title">Experiment 3: Verification Strategy Comparison <span class="status-badge badge-needs-data">Needs CIFAR-10</span></div>
+  <p><strong>File:</strong> <code>experiments/verification_strategy_comparison.py</code></p>
+  <p><strong>Question:</strong> How does TAVS (verify selectively) compare against verifying every client every round? What's the resource savings vs accuracy trade-off?</p>
+  <p><strong>What it does:</strong> Runs full FL pipelines under 3 attack scenarios (no attack, light attack, heavy attack), comparing TAVS vs full verification. Measures verification count, detection accuracy, trust convergence, and model performance.</p>
+  <pre><code>PYTHONPATH=. python experiments/verification_strategy_comparison.py</code></pre>
+  <p><strong>Expected outputs:</strong></p>
+  <ul>
+    <li><code>verification_strategy_comparison.png</code> &mdash; Infographic showing ~60% resource savings</li>
+    <li><code>model_convergence_analysis.png</code> &mdash; 4-panel: loss curves, accuracy curves, final accuracy bars, quality-vs-efficiency scatter</li>
+    <li>JSON results with per-scenario breakdowns</li>
+  </ul>
+  <p><strong>Expected finding:</strong> TAVS achieves comparable detection accuracy to full verification while using 40-60% fewer verification resources.</p>
+</div>
+
+<!-- Experiment 4 -->
+<div class="card">
+  <div class="card-title">Experiment 4: Phase 4 Security Validation <span class="status-badge badge-needs-data">Needs CIFAR-10</span></div>
+  <p><strong>File:</strong> <code>experiments/phase4_security_validation.py</code></p>
+  <p><strong>Question:</strong> Do the theoretical security guarantees (TC1, TC3, TC4) hold empirically?</p>
+  <p><strong>What it does:</strong> Three sub-experiments:</p>
+  <ul>
+    <li><strong>E1 (TC1):</strong> Null-space poisoning defense &mdash; does ESP amplify attack visibility by &gt;25&times;?</li>
+    <li><strong>E2 (TC3):</strong> Signal dilution analysis &mdash; does Bayesian weighting resist Byzantine influence?</li>
+    <li><strong>E4 (TC4):</strong> Timing attack suppression &mdash; does CSPRNG prevent scheduling prediction?</li>
+  </ul>
+  <pre><code># Run all three:
+PYTHONPATH=. python experiments/phase4_security_validation.py
+
+# Run a specific experiment:
+PYTHONPATH=. python experiments/phase4_security_validation.py E1</code></pre>
+  <p><strong>Expected outputs:</strong> JSON reports for each experiment plus a combined validation summary.</p>
+</div>
+
+<!-- Experiment 5 -->
+<div class="card">
+  <div class="card-title">Experiment 5: Phase 4 Efficiency Analysis <span class="status-badge badge-needs-data">Needs CIFAR-10</span></div>
+  <p><strong>File:</strong> <code>experiments/phase4_efficiency_analysis.py</code></p>
+  <p><strong>Question:</strong> How does verification overhead decrease as clients build trust? What's the Pareto frontier of accuracy vs compute?</p>
+  <p><strong>What it does:</strong> Two sub-experiments:</p>
+  <ul>
+    <li><strong>Exp 2 (Warmup Reduction):</strong> Tracks aggregation time and % promoted clients over 50 rounds. As trust builds, more clients get promoted, reducing verification overhead.</li>
+    <li><strong>Exp 3 (Pareto Efficiency):</strong> Sweeps &gamma;_budget from tight (0.1) to loose (0.5). Plots accuracy vs compute to find the optimal operating point.</li>
+  </ul>
+  <pre><code>PYTHONPATH=. python experiments/phase4_efficiency_analysis.py</code></pre>
+  <p><strong>Expected outputs:</strong></p>
+  <ul>
+    <li><code>exp2_warmup_reduction.png</code> &mdash; Dual-axis: aggregation time drops as promoted % rises over rounds</li>
+    <li><code>exp3_pareto_efficiency.png</code> &mdash; Accuracy vs compute scatter with gamma annotations; expect a "knee" near &gamma;=0.35</li>
+  </ul>
+</div>
+
+<!-- Experiment 6 -->
+<div class="card">
+  <div class="card-title">Experiment 6: Empirical Timing Validation <span class="status-badge badge-needs-data">Needs CIFAR-10</span></div>
+  <p><strong>File:</strong> <code>experiments/empirical_timing_validation.py</code></p>
+  <p><strong>Question:</strong> What's the precise wall-clock breakdown of TAVS-ESP components at scale?</p>
+  <p><strong>What it does:</strong> Full timing analysis with real models. Measures each component (trust update, tier assignment, projection generation, gradient projection, verification detection, Bayesian aggregation) across client populations [20, 50, 100]. Produces confidence intervals and production-readiness assessment.</p>
+  <pre><code>PYTHONPATH=. python experiments/empirical_timing_validation.py --device auto</code></pre>
+  <p><strong>Expected output:</strong> <code>experiments/empirical_timing_results.json</code> + detailed markdown report to console.</p>
+</div>
+
+<!-- Experiment 7 -->
+<div class="card">
+  <div class="card-title">Experiment 7: Phase 5 GPT-2 Scalability <span class="status-badge badge-needs-data">Needs CIFAR-10</span></div>
+  <p><strong>File:</strong> <code>experiments/phase5_scalability_validation.py</code></p>
+  <p><strong>Question:</strong> Does TAVS-ESP scale to large language models (GPT-2, 124M params)?</p>
+  <p><strong>What it does:</strong> Three sub-experiments testing client scalability (10-50 clients), language model convergence, and Byzantine resilience at scale. <em>Note: currently uses mock results for the FL simulation, not actual GPT-2 training.</em></p>
+  <pre><code>PYTHONPATH=. python experiments/phase5_scalability_validation.py
+# Or specific: PYTHONPATH=. python experiments/phase5_scalability_validation.py S1</code></pre>
+</div>
+
+<!-- Experiment 8 -->
+<div class="card">
+  <div class="card-title">Experiment 8: Baseline FedAvg <span class="status-badge badge-needs-data">Needs CIFAR-10</span></div>
+  <p><strong>File:</strong> <code>experiments/baseline_fedavg.py</code></p>
+  <p><strong>Question:</strong> What's the baseline model accuracy without any Byzantine defense?</p>
+  <pre><code>PYTHONPATH=. python experiments/baseline_fedavg.py --num_clients 10 --num_rounds 5 --model_type cifar_cnn</code></pre>
+</div>
+
+<div class="card" style="border-color: #a03030;">
+  <div class="card-title" style="color: #a03030;">Corrupted File: plot_generator.py <span class="status-badge badge-broken">Broken</span></div>
+  <p><strong>File:</strong> <code>experiments/plot_generator.py</code></p>
+  <p>This file is corrupted with garbled/duplicated text starting at line 31. It was a post-hoc plot generator for reading JSON results and producing seaborn plots. It is <strong>not functional</strong> and should be rewritten or removed.</p>
+</div>
+
+<!-- ============================================================ -->
+<h2 id="expected-results">5. Expected Plots &amp; Results</h2>
+
+<p>Here's what you should see from each experiment category when running on your local machine with CIFAR-10 available.</p>
+
+<h3>Trust Convergence (from tests, verified working)</h3>
+<p>Over 100 rounds with honest clients (behavior_score=0.95) and Byzantine clients (behavior_score=0.1):</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Metric</th><th>Expected Value</th><th>Why</th></tr></thead>
+  <tbody>
+    <tr><td>Byzantine trust after 100 rounds</td><td>&lt; 0.15</td><td>Consistent low &phi; drives trust down via EMA</td></tr>
+    <tr><td>Honest-Byzantine trust gap</td><td>&gt; 0.10</td><td>EMA separation: honest oscillate ~0.28-0.35 due to promoted decay</td></tr>
+    <tr><td>Byzantine effective trust</td><td>&lt; &theta;_low (0.30)</td><td>They stay in Tier 1 (always verified) permanently</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Verification Strategy Comparison (Experiment 3)</h3>
+<p>The headline result for the paper:</p>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Metric</th><th>Full Verification</th><th>TAVS</th></tr></thead>
+  <tbody>
+    <tr><td>Verifications per round</td><td>20 (all clients)</td><td>8-12 (40-60% savings)</td></tr>
+    <tr><td>Byzantine detection rate</td><td>~95%</td><td>~90-95%</td></tr>
+    <tr><td>Model accuracy (no attack)</td><td>~82-85%</td><td>~80-84%</td></tr>
+    <tr><td>Resource utilization</td><td>100%</td><td>~40-60%</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Security Validation (Experiment 4)</h3>
+<div class="table-wrap">
+<table>
+  <thead><tr><th>Theorem</th><th>Expected Result</th></tr></thead>
+  <tbody>
+    <tr><td>TC1: Null-space visibility amplification</td><td>&gt;25&times; higher detection after ESP vs static projection</td></tr>
+    <tr><td>TC3: Byzantine influence bound</td><td>Unverified influence &le; &gamma;_budget (0.35) every round</td></tr>
+    <tr><td>TC4: Timing attack resistance</td><td>CSPRNG scheduling prediction accuracy &asymp; random (50%)</td></tr>
+  </tbody>
+</table>
+</div>
+
+<h3>Efficiency Analysis (Experiment 5)</h3>
+<p><strong>Warmup Reduction:</strong> Expect a curve showing aggregation time <em>decreasing</em> over rounds as more clients are promoted. By round 30-40, ~60-70% of clients should be promoted.</p>
+<p><strong>Pareto Frontier:</strong> Expect an "elbow" or "knee" at &gamma;_budget &asymp; 0.35, where accuracy stops improving significantly but compute keeps dropping.</p>
+
+<h3>JL Distance Preservation (from tests, verified working)</h3>
+<p>When projecting a vector from 10,000 dimensions down to 2,000 and averaging over 50 random projections:</p>
+<div class="math-block">
+|E[||R&middot;x||&sup2;] - ||x||&sup2;| &lt; 0.05 &middot; ||x||&sup2;    (within 5%)
+</div>
+
+<!-- ============================================================ -->
+<h2 id="commands">6. Quick-Reference Command Sheet</h2>
+
+<h4>Install Dependencies</h4>
+<pre><code>pip install -r requirements.txt</code></pre>
+
+<h4>Run All Tests</h4>
+<pre><code>python -m pytest src/tests/ -v</code></pre>
+
+<h4>Run Core Algorithm Tests Only (lightweight)</h4>
+<pre><code>python -m pytest src/tests/test_algo1_tavs_scheduler.py \
+                 src/tests/test_algo1_multiround.py \
+                 src/tests/test_algo2_esp_projection.py \
+                 src/tests/test_algo3_bvd_aggregation.py \
+                 src/tests/test_v2_integration.py -v</code></pre>
+
+<h4>Run Individual Test Files</h4>
+<pre><code>python -m pytest src/tests/test_algo1_tavs_scheduler.py -v      # Scheduler unit tests
+python -m pytest src/tests/test_algo1_multiround.py -v           # Multi-round + CSPRNG + Bayesian
+python -m pytest src/tests/test_algo2_esp_projection.py -v       # ESP projection + JL lemma
+python -m pytest src/tests/test_algo3_bvd_aggregation.py -v      # BVD + aggregation
+python -m pytest src/tests/test_v2_integration.py -v             # Cross-component integration
+python -m pytest src/tests/test_tavs_esp_strategy.py -v          # Flower strategy bridge
+python -m pytest src/tests/test_end_to_end_pipeline.py -v        # Pipeline (needs flwr)
+python -m pytest src/tests/test_tavs_flower_client.py -v         # Flower client tests</code></pre>
+
+<h4>Run Experiments</h4>
+<pre><code># Quick timing (no dataset download needed)
+python experiments/quick_timing_test.py --device cpu
+
+# Full experiments (need CIFAR-10, will auto-download)
+PYTHONPATH=. python experiments/phase1_attack_validation.py
+PYTHONPATH=. python experiments/verification_strategy_comparison.py
+PYTHONPATH=. python experiments/phase4_security_validation.py          # all
+PYTHONPATH=. python experiments/phase4_security_validation.py E1       # specific
+PYTHONPATH=. python experiments/phase4_efficiency_analysis.py
+PYTHONPATH=. python experiments/empirical_timing_validation.py --device auto
+PYTHONPATH=. python experiments/phase5_scalability_validation.py
+PYTHONPATH=. python experiments/baseline_fedavg.py --num_clients 10 --num_rounds 5</code></pre>
+
+<h4>Run the Main Experiment Runner</h4>
+<pre><code># Quick smoke test
+PYTHONPATH=. python run_experiments.py --quick-test --device cpu
+
+# Full experiment suite
+PYTHONPATH=. python run_experiments.py --all --device auto</code></pre>
+
+</div>
