@@ -1,6 +1,9 @@
 import os
+import sys
 import time
 import matplotlib.pyplot as plt
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 # Exact imports based on your repository structure
 from src.tavs_v2 import TavsEspStrategy
