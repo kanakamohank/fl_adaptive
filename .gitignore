@@ -12,7 +12,5 @@ results_quick_test
 test_results
 test_results_phase5
 test_temp
-*/__pycache__/*
-src/tests/__pycache__/*
-src/core/__pycache__/*
-src/tavs_v2/__pycache__/*
+**/__pycache__/
+*.pyc
