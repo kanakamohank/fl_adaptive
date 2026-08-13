@@ -23,6 +23,10 @@ import json
 from dataclasses import dataclass, asdict
 import matplotlib.pyplot as plt
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # TAVS-ESP imports
 from src.tavs_v2 import TavsEspStrategy, TavsEspConfig
 from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
@@ -184,7 +188,7 @@ class VerificationStrategyComparator:
         tavs_config = TavsEspConfig(
             theta_low=self.config.tavs_theta_low,
             theta_high=self.config.tavs_theta_high,
-            alpha=self.config.tavs_alpha,
+            alpha_trust=self.config.tavs_alpha,
             gamma_budget=self.config.tavs_budget,
             target_k=self.config.target_k,
             projection_type=self.config.projection_type,
@@ -256,7 +260,7 @@ class VerificationStrategyComparator:
                 # Disable TAVS features for true baseline
                 theta_low=0.0,  # No tier classification
                 theta_high=1.0, # All clients treated equally
-                alpha=0.0,      # No trust updates
+                alpha_trust=0.0,      # No trust updates
                 gamma_budget=1.0, # No budget constraints
                 target_k=self.config.target_k,
                 projection_type="dense",  # Use dense (traditional) instead of structured

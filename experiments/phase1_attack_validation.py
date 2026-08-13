@@ -32,6 +32,10 @@ import matplotlib.pyplot as plt
 import seaborn as sns
 from dataclasses import dataclass, asdict
 
+import sys
+import os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 # Core imports
 from src.core.models import get_model, ModelStructure
 from src.core.projection import StructuredJLProjection, DenseJLProjection
