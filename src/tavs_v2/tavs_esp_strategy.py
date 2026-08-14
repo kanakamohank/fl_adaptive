@@ -102,6 +102,17 @@ class TavsEspStrategy(Strategy):
         
         self.round_analytics = []
 
+        # Centralised evaluation results, recorded per round by evaluate().
+        #
+        # flwr.simulation.run_simulation() returns None (its signature is
+        # literally `-> None`), unlike the legacy start_simulation() which
+        # returned a History. Every centralised loss/accuracy the server computed
+        # was therefore discarded the moment evaluate() returned, leaving the
+        # pipeline with no metrics to extract. The strategy is the only object
+        # that observes every evaluation AND survives the simulation, so it is
+        # the correct place to accumulate them.
+        self.evaluation_history: List[Dict[str, object]] = []
+
     def initialize_parameters(self, client_manager):
         from src.core.models import get_model
         
@@ -274,9 +285,24 @@ class TavsEspStrategy(Strategy):
         return None, {}
     
     def evaluate(self, server_round, parameters):
-        if hasattr(self.config, 'evaluate_fn') and self.config.evaluate_fn is not None:
-            return self.config.evaluate_fn(server_round, parameters_to_ndarrays(parameters), {})
-        return None
+        evaluate_fn = getattr(self.config, 'evaluate_fn', None)
+        if evaluate_fn is None:
+            return None
+
+        result = evaluate_fn(server_round, parameters_to_ndarrays(parameters), {})
+        if result is None:
+            return None
+
+        # Record before returning: the server drops these into a History that
+        # run_simulation() never hands back to us (see __init__).
+        loss, metrics = result
+        self.evaluation_history.append({
+            "round": server_round,
+            "loss": float(loss),
+            "accuracy": float(metrics.get("accuracy", 0.0)) if isinstance(metrics, dict) else 0.0,
+            "metrics": metrics,
+        })
+        return result
 
     def export_complete_state(self):
         return {"trust_state": self.scheduler.trust_scores}
