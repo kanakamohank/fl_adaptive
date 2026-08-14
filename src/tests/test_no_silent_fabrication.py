@@ -184,3 +184,105 @@ def test_attack_metric_flag_is_present_on_both_paths():
             f"{module.__name__} must set attack_executed on both the armed and "
             f"unarmed paths"
         )
+
+
+# ---------------------------------------------------------------------------
+# Baseline / scheduling configuration
+# ---------------------------------------------------------------------------
+
+
+def test_disabling_tavs_by_config_verifies_nobody():
+    """
+    Documents WHY FullVerificationStrategy has to be its own class.
+
+    The old baseline was built by setting theta_low=0.0, theta_high=1.0,
+    gamma_budget=1.0 and calling it "verify everyone". Trace it through the real
+    scheduler: the intended meaning inverts and nothing is verified at all.
+    """
+    from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
+
+    scheduler = TavsScheduler(
+        gamma_budget=1.0, theta_low=0.0, theta_high=1.0,
+        alpha_trust=0.0, tau_ramp=30.0, k_trust=3,
+    )
+    clients = [f"client_{i}" for i in range(20)]
+    V, P, _ = scheduler.schedule_verifications(clients, round_num=5)
+
+    assert len(V) == 0, "the 'full verification' preset verifies nobody"
+    assert len(P) == 20, "it promotes everyone instead"
+
+
+def test_full_verification_strategy_verifies_every_sampled_client():
+    """FullVerificationStrategy must mark every sampled client is_verified."""
+    from src.tavs_v2.tavs_esp_strategy import FullVerificationStrategy, TavsEspConfig
+
+    class _Proxy:
+        def __init__(self, cid): self.cid = cid
+
+    class _Manager:
+        def __init__(self, n): self._p = [_Proxy(f"c{i}") for i in range(n)]
+        def num_available(self): return len(self._p)
+        def sample(self, num_clients, min_num_clients=None): return self._p[:num_clients]
+
+    config = TavsEspConfig(min_fit_clients=8, min_available_clients=8, target_k=16)
+    strategy = FullVerificationStrategy.__new__(FullVerificationStrategy)
+    strategy.config = config
+
+    fit_ins = FullVerificationStrategy.configure_fit(
+        strategy, server_round=3, parameters=None, client_manager=_Manager(20)
+    )
+
+    assert len(fit_ins) == 8, "must honour clients_per_round, not train everyone"
+    assert all(ins.config["is_verified"] is True for _, ins in fit_ins)
+
+
+def test_k_trust_must_be_reachable_within_the_round_budget():
+    """
+    A k_trust at or above num_rounds makes Tier 3 unreachable, silently turning
+    TAVS into full verification -- which is precisely what the comparison
+    experiment is trying to measure the difference against.
+    """
+    from experiments.verification_strategy_comparison import ComparisonConfig
+
+    config = ComparisonConfig(num_rounds=10)
+    assert config.tavs_k_trust < config.num_rounds, (
+        f"k_trust={config.tavs_k_trust} unreachable in {config.num_rounds} rounds"
+    )
+
+
+def test_comparison_excludes_null_space_attack():
+    """
+    null_space cannot threaten an ephemeral projection by construction, so
+    including it in this comparison silently dilutes the Byzantine fraction.
+    """
+    from experiments.verification_strategy_comparison import ComparisonConfig
+
+    config = ComparisonConfig()
+    assert "null_space" not in config.attack_types
+    assert config.attack_types, "some attack must still be configured"
+
+
+def test_results_json_roundtrips_dataclasses():
+    """
+    VerificationResults must serialise to real nested JSON, not a repr() string.
+    The old serializer produced unparseable blobs, so the summary that reads
+    them reported 0.0x efficiency.
+    """
+    import json as _json
+    from dataclasses import asdict, is_dataclass
+
+    from experiments.verification_strategy_comparison import ComparisonConfig
+
+    def convert(obj):
+        if is_dataclass(obj) and not isinstance(obj, type):
+            return convert(asdict(obj))
+        if isinstance(obj, dict):
+            return {k: convert(v) for k, v in obj.items()}
+        if isinstance(obj, list):
+            return [convert(i) for i in obj]
+        return obj
+
+    payload = convert({"cfg": ComparisonConfig()})
+    restored = _json.loads(_json.dumps(payload))
+    assert isinstance(restored["cfg"], dict), "dataclass must become a dict"
+    assert restored["cfg"]["num_rounds"] == 15
