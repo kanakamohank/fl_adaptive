@@ -34,6 +34,12 @@ class PipelineConfig:
 
     tavs_config: TavsEspConfig = None
 
+    # Server strategy class to run. Defaults to TAVS; set to
+    # FullVerificationStrategy for the traditional verify-everyone baseline.
+    # Selecting the baseline by class rather than by neutering TavsEspConfig
+    # keeps the two arms from silently becoming the same algorithm.
+    strategy_class: type = None
+
     client_epochs: int = 5
     client_batch_size: int = 32
     client_learning_rate: float = 0.01
@@ -163,7 +169,9 @@ class TAVSESPPipeline:
         strategy_config.min_evaluate_clients = 0
         strategy_config.fraction_evaluate = 0.0
 
-        return TavsEspStrategy(config=strategy_config, model_structure=self.model_structure)
+        strategy_class = self.config.strategy_class or TavsEspStrategy
+        logger.info(f"Server strategy: {strategy_class.__name__}")
+        return strategy_class(config=strategy_config, model_structure=self.model_structure)
 
     def _create_evaluate_function(self):
         def evaluate_fn(server_round: int, parameters_ndarrays, config_dict):

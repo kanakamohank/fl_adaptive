@@ -37,6 +37,10 @@ class TavsEspConfig:
     projection_type: str = "structured"
     scheduling_type: str = "csprng"
     min_fit_clients: int = 2
+    # Declared explicitly because configure_fit now samples against it. It was
+    # previously only ever attached dynamically by the pipeline, which works for
+    # a plain dataclass but leaves the contract invisible at the definition.
+    min_available_clients: int = 2
     master_key: bytes = b'default_key'
     evaluate_fn: Optional[Callable] = None
     min_inlier_fraction_for_agg: float = 0.25
@@ -110,10 +114,36 @@ class TavsEspStrategy(Strategy):
             [np.array(p.detach().cpu().numpy(), dtype=np.float32, copy=True) for p in model.parameters()]
         ) 
 
+    def _sample_cohort(self, client_manager) -> Dict[str, ClientProxy]:
+        """
+        Select this round's participating clients, keyed by client id.
+
+        Falls back to full participation only when the client manager cannot
+        sample, so older mocks and single-cohort setups keep working.
+        """
+        if not hasattr(client_manager, "sample") or not hasattr(client_manager, "num_available"):
+            return dict(client_manager.all())
+
+        num_available = client_manager.num_available()
+        requested = getattr(self.config, "min_fit_clients", num_available)
+        sample_size = max(1, min(requested, num_available))
+        min_num = min(getattr(self.config, "min_available_clients", sample_size), num_available)
+
+        sampled = client_manager.sample(num_clients=sample_size, min_num_clients=min_num)
+        return {proxy.cid: proxy for proxy in sampled}
+
     def configure_fit(self, server_round: int, parameters: Parameters, client_manager: fl.server.client_manager.ClientManager):
-        available_clients = client_manager.all()
+        # Sample the per-round cohort BEFORE scheduling.
+        #
+        # This previously used client_manager.all(), which made every client in
+        # the federation train every round and silently ignored
+        # clients_per_round / min_fit_clients. Partial participation is a
+        # defining property of FL, and it also changes what TAVS is measured on:
+        # with full participation the scheduler never has to choose between
+        # clients, so the verification budget it manages is unrepresentative.
+        available_clients = self._sample_cohort(client_manager)
         client_ids = list(available_clients.keys())
-        
+
         if not client_ids:
             return []
 
@@ -250,3 +280,43 @@ class TavsEspStrategy(Strategy):
 
     def export_complete_state(self):
         return {"trust_state": self.scheduler.trust_scores}
+
+class FullVerificationStrategy(TavsEspStrategy):
+    """
+    Traditional Byzantine-robust baseline: verify EVERY client EVERY round.
+
+    This is the control arm for the TAVS comparison. It runs the identical
+    defence pipeline (ESP projection -> BVD outlier detection -> aggregation) but
+    performs no trust-adaptive scheduling: no tiers, no promotion, no decoys, no
+    budget constraint. Every sampled client is verified, always.
+
+    Why this exists as a class rather than a TavsEspConfig preset
+    -------------------------------------------------------------
+    The comparison experiment previously built its baseline by disabling TAVS
+    through configuration: theta_low=0.0, theta_high=1.0, gamma_budget=1.0.
+    Tracing that through TavsScheduler.schedule_verifications shows it produces
+    the exact opposite of the intent:
+
+        t_eff < theta_low   -> `t < 0.0` is never true -> no client is verified
+        t_eff >= theta_high -> `t >= 1.0` is never true -> no client is promoted
+                                                          via the Tier 3 path
+        everything else     -> falls to the Tier 2 branch -> tentatively promoted
+        gamma_budget = 1.0  -> the demotion loop never triggers
+
+    So the "verify everything" baseline verified nothing and trusted everyone,
+    which is why it ran ~30x faster than TAVS and reported the efficiency
+    comparison backwards. Encoding the baseline as an explicit override makes it
+    impossible to misconfigure it into a different algorithm by accident.
+    """
+
+    def configure_fit(self, server_round: int, parameters: Parameters,
+                      client_manager: fl.server.client_manager.ClientManager):
+        sampled = list(self._sample_cohort(client_manager).values())
+        if not sampled:
+            return []
+
+        # Every sampled client is verified. aggregate_fit splits verified from
+        # promoted on the is_verified flag the client echoes back, so setting it
+        # True here routes all of them down the verified path.
+        config_dict = {"server_round": server_round, "is_verified": True}
+        return [(proxy, FitIns(parameters, config_dict.copy())) for proxy in sampled]

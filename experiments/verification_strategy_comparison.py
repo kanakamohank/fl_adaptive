@@ -20,7 +20,7 @@ import numpy as np
 from typing import Dict, List, Any
 from pathlib import Path
 import json
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, is_dataclass
 import matplotlib.pyplot as plt
 
 import sys
@@ -30,6 +30,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 # TAVS-ESP imports
 from src.tavs_v2 import TavsEspStrategy, TavsEspConfig
 from src.tavs_v2 import TAVSESPPipeline, PipelineConfig
+from src.tavs_v2.tavs_esp_strategy import FullVerificationStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -52,11 +53,32 @@ class ComparisonConfig:
     tavs_theta_high: float = 0.7
     tavs_alpha: float = 0.9
     tavs_budget: float = 0.35
+    # Consecutive clean verifications required before Tier 3 promotion.
+    # This MUST be well below num_rounds or promotion is unreachable and TAVS
+    # degenerates to full verification: the default of 10 in a 10-round run left
+    # no client able to accumulate the streak, so the efficiency advantage the
+    # experiment exists to measure could never appear.
+    tavs_k_trust: int = 3
 
     # ESP projection settings
     target_k: int = 150
     projection_type: str = "structured"
     detection_threshold: float = 2.0
+
+    # Attack model for both arms.
+    #
+    # null_space is deliberately EXCLUDED here. That attack works by placing
+    # poison in ker(R) of a *static* projection matrix; ESP re-derives R every
+    # round, so as the class docstring itself states, the attack is impossible
+    # against it by construction. Including it in this comparison does not test
+    # ESP -- it just replaces a quarter of the Byzantine clients with effectively
+    # honest ones, diluting the stated 25% threat to roughly 12.5% and weakening
+    # the very claim the experiment is meant to support.
+    #
+    # null_space belongs in a separate static-vs-ephemeral ablation, where it is
+    # the right instrument and demonstrates what ESP's ephemerality buys.
+    attack_types: List[str] = None  # set in __post_init__
+    attack_intensities: List[float] = None  # set in __post_init__
 
     # Data settings
     data_alpha: float = 0.3  # Non-IID heterogeneity
@@ -68,6 +90,11 @@ class ComparisonConfig:
     def __post_init__(self):
         if self.attack_scenarios is None:
             self.attack_scenarios = ["no_attack", "light_attack", "heavy_attack"]
+        if self.attack_types is None:
+            # Attacks that genuinely threaten an ephemeral-projection defence.
+            self.attack_types = ["layerwise", "distributed"]
+        if self.attack_intensities is None:
+            self.attack_intensities = [1.5, 2.0]
 
 
 @dataclass
@@ -192,7 +219,8 @@ class VerificationStrategyComparator:
             gamma_budget=self.config.tavs_budget,
             target_k=self.config.target_k,
             projection_type=self.config.projection_type,
-            detection_threshold=self.config.detection_threshold
+            detection_threshold=self.config.detection_threshold,
+            k_trust=self.config.tavs_k_trust,
         )
 
         # Configure pipeline
@@ -204,6 +232,8 @@ class VerificationStrategyComparator:
             clients_per_round=self.config.clients_per_round,
             byzantine_fraction=byzantine_fraction,
             tavs_config=tavs_config,
+            attack_types=self.config.attack_types,
+            attack_intensities=self.config.attack_intensities,
             data_alpha=self.config.data_alpha,
             output_dir=str(self.results_dir / f"tavs_{attack_scenario}")
         )
@@ -251,21 +281,28 @@ class VerificationStrategyComparator:
         byzantine_fraction = self._get_byzantine_fraction_for_scenario(attack_scenario)
 
         # Create IDENTICAL pipeline config as TAVS but with full verification strategy
+        # Identical cohort size to the TAVS arm: the comparison isolates the
+        # scheduling policy, so both arms must sample the same number of clients
+        # per round. The baseline's distinguishing property is that it VERIFIES
+        # all of them, not that it trains more of them.
         pipeline_config = PipelineConfig(
             num_rounds=self.config.num_rounds,
             num_clients=self.config.num_clients,
-            clients_per_round=self.config.num_clients,  # KEY: verify ALL clients (not just subset)
+            clients_per_round=self.config.clients_per_round,
             byzantine_fraction=byzantine_fraction,
+            strategy_class=FullVerificationStrategy,
             tavs_config=TavsEspConfig(
-                # Disable TAVS features for true baseline
-                theta_low=0.0,  # No tier classification
-                theta_high=1.0, # All clients treated equally
-                alpha_trust=0.0,      # No trust updates
-                gamma_budget=1.0, # No budget constraints
+                # Trust parameters are inert under FullVerificationStrategy --
+                # it never consults the scheduler -- but the projection and
+                # detection settings must match the TAVS arm exactly so that the
+                # only difference between arms is the scheduling policy.
                 target_k=self.config.target_k,
-                projection_type="dense",  # Use dense (traditional) instead of structured
-                detection_threshold=self.config.detection_threshold
+                projection_type=self.config.projection_type,
+                detection_threshold=self.config.detection_threshold,
+                k_trust=self.config.tavs_k_trust,
             ),
+            attack_types=self.config.attack_types,
+            attack_intensities=self.config.attack_intensities,
             data_alpha=self.config.data_alpha,
             output_dir=str(self.results_dir / f"full_verification_{attack_scenario}")
         )
@@ -703,8 +740,15 @@ class VerificationStrategyComparator:
 
         results_file = self.results_dir / 'verification_comparison_results.json'
 
-        # Convert numpy types for JSON serialization
+        # Convert numpy types for JSON serialization.
+        # VerificationResults / ComparisonConfig are dataclasses: without the
+        # is_dataclass branch they fell through to json.dump(default=str) and were
+        # written as Python repr() strings, so every per-scenario 'tavs' and
+        # 'full_verification' entry became an unparseable blob and the summary
+        # that reads them reported 0.0x efficiency and -3804% energy saving.
         def convert_numpy(obj):
+            if is_dataclass(obj) and not isinstance(obj, type):
+                return convert_numpy(asdict(obj))
             if isinstance(obj, np.ndarray):
                 return obj.tolist()
             elif isinstance(obj, np.integer):
