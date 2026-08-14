@@ -263,7 +263,22 @@ class TAVSESPPipeline:
         loss_sources = ['losses_centralized', 'losses_distributed', 'losses']
         metrics_sources = ['metrics_centralized', 'metrics_distributed', 'metrics']
 
-        for source in loss_sources:
+        # Primary source: metrics the strategy recorded during evaluate().
+        #
+        # flwr.simulation.run_simulation() returns None, so `history` is None on
+        # the modern API and the History-scraping below finds nothing. That is
+        # what silently triggered the synthetic-curve fallback for every run.
+        # The strategy accumulates the same values as it observes them.
+        strategy_evals = getattr(strategy, 'evaluation_history', None)
+        if strategy_evals:
+            ordered = sorted(strategy_evals, key=lambda e: e["round"])
+            server_losses = [e["loss"] for e in ordered]
+            server_accuracies = [e["accuracy"] for e in ordered]
+
+        # Legacy fallback: scrape a History object if one was actually returned
+        # (start_simulation-style APIs). Only runs when the strategy recorded
+        # nothing, so it can never overwrite real measurements.
+        for source in (loss_sources if not server_losses else []):
             if hasattr(history, source) and getattr(history, source):
                 source_data = getattr(history, source)
                 if isinstance(source_data, list):
@@ -272,7 +287,7 @@ class TAVSESPPipeline:
                     server_losses = list(source_data.values())
                 if server_losses: break
 
-        for source in metrics_sources:
+        for source in (metrics_sources if not server_accuracies else []):
             if hasattr(history, source) and getattr(history, source):
                 source_data = getattr(history, source)
                 if isinstance(source_data, dict):

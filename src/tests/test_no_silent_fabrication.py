@@ -286,3 +286,76 @@ def test_results_json_roundtrips_dataclasses():
     restored = _json.loads(_json.dumps(payload))
     assert isinstance(restored["cfg"], dict), "dataclass must become a dict"
     assert restored["cfg"]["num_rounds"] == 15
+
+
+# ---------------------------------------------------------------------------
+# Metric capture (run_simulation returns None)
+# ---------------------------------------------------------------------------
+
+
+def test_run_simulation_returns_none_so_history_cannot_be_the_source():
+    """
+    Pins the upstream fact that caused the whole fabrication.
+
+    flwr.simulation.run_simulation() is annotated `-> None` and returns nothing,
+    unlike the legacy start_simulation() which returned a History. Any pipeline
+    that does `history = run_simulation(...)` and then scrapes `history` gets
+    None and finds no metrics -- which is exactly how every experiment ended up
+    with a synthetic learning curve.
+    """
+    import inspect
+
+    from flwr.simulation import run_simulation
+
+    assert inspect.signature(run_simulation).return_annotation is None
+
+
+def test_strategy_records_centralized_evaluations():
+    """The strategy must accumulate what evaluate() computes."""
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig, TavsEspStrategy
+
+    calls = []
+
+    def fake_evaluate_fn(server_round, ndarrays, cfg):
+        calls.append(server_round)
+        return 2.5 - 0.1 * server_round, {"accuracy": 0.1 + 0.05 * server_round}
+
+    config = TavsEspConfig(target_k=16, evaluate_fn=fake_evaluate_fn)
+    strategy = TavsEspStrategy(config=config)
+
+    class _Params:
+        tensors = []
+        tensor_type = "numpy.ndarray"
+
+    import flwr.common as fc
+    params = fc.ndarrays_to_parameters([np.zeros(4, dtype=np.float32)])
+
+    for rnd in range(4):
+        strategy.evaluate(rnd, params)
+
+    assert len(strategy.evaluation_history) == 4
+    assert [e["round"] for e in strategy.evaluation_history] == [0, 1, 2, 3]
+    assert strategy.evaluation_history[2]["accuracy"] == pytest.approx(0.2)
+    assert strategy.evaluation_history[2]["loss"] == pytest.approx(2.3)
+
+
+def test_extract_results_prefers_strategy_over_none_history():
+    """
+    With history=None (the real modern-API situation), metrics must still come
+    through from the strategy instead of raising or fabricating.
+    """
+    pipeline = TAVSESPPipeline.__new__(TAVSESPPipeline)
+    pipeline.config = PipelineConfig(num_rounds=3, output_dir="test_temp/nsf")
+
+    strategy = _FakeStrategy()
+    strategy.evaluation_history = [
+        {"round": 2, "loss": 1.4, "accuracy": 0.41, "metrics": {}},
+        {"round": 0, "loss": 2.3, "accuracy": 0.10, "metrics": {}},
+        {"round": 1, "loss": 1.8, "accuracy": 0.29, "metrics": {}},
+    ]
+
+    results = pipeline._extract_results(None, strategy, total_time=1.0)
+
+    # Sorted by round, not insertion order.
+    assert results.server_losses == [2.3, 1.8, 1.4]
+    assert results.server_accuracies == [0.10, 0.29, 0.41]
