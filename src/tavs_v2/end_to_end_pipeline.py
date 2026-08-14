@@ -6,7 +6,7 @@ import torch
 from pathlib import Path
 import json
 import time
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass, asdict, field
 
 import flwr as fl
 from flwr.server import ServerApp, ServerConfig, ServerAppComponents
@@ -53,6 +53,11 @@ class PipelineConfig:
     output_dir: str = "tavs_esp_results"
     save_client_data: bool = False
 
+    # Refuse to run when TAVS cannot promote within num_rounds. Disable only for
+    # tests that build deliberately tiny pipelines to exercise plumbing; a real
+    # experiment with this off silently reports a 1.0x efficiency result.
+    validate_promotion_feasibility: bool = True
+
     def __post_init__(self):
         if self.tavs_config is None:
             self.tavs_config = TavsEspConfig()
@@ -78,6 +83,9 @@ class PipelineResults:
     round_times: List[float]
     convergence_metrics: Dict[str, float]
     security_metrics: Dict[str, float]
+    # Measured per-round verified/promoted counts from the scheduler. Defaulted
+    # because it was added after every existing construction site.
+    scheduling_history: List[Dict[str, int]] = field(default_factory=list)
 
 class TAVSESPPipeline:
     def __init__(self, config: PipelineConfig):
@@ -171,7 +179,31 @@ class TAVSESPPipeline:
 
         strategy_class = self.config.strategy_class or TavsEspStrategy
         logger.info(f"Server strategy: {strategy_class.__name__}")
-        return strategy_class(config=strategy_config, model_structure=self.model_structure)
+        strategy = strategy_class(config=strategy_config, model_structure=self.model_structure)
+
+        # Refuse to run a TAVS experiment whose parameters make promotion
+        # mathematically impossible. Without this the run completes normally,
+        # every client stays Tier 1, and the experiment reports "1.0x efficiency
+        # improvement" -- a real number produced by two identical algorithms.
+        # FullVerificationStrategy never promotes by design, so it is exempt.
+        if strategy_class is TavsEspStrategy and self.config.validate_promotion_feasibility:
+            feasibility = strategy.scheduler.describe_promotion_feasibility(self.config.num_rounds)
+            if not feasibility["feasible"]:
+                raise ValueError(
+                    f"TAVS cannot promote any client within {self.config.num_rounds} rounds: "
+                    f"promotion first becomes possible at round "
+                    f"{feasibility['min_round_for_promotion']}, limited by "
+                    f"{feasibility['binding_constraint']}. Bounds: "
+                    f"{ {k: round(v, 1) for k, v in feasibility['bounds'].items()} }. "
+                    f"TAVS would degenerate into full verification and the comparison "
+                    f"would be meaningless. Increase num_rounds, or lower tau_ramp / "
+                    f"theta_high / alpha_trust / k_trust."
+                )
+            logger.info(
+                f"Promotion feasible from round {feasibility['min_round_for_promotion']} "
+                f"of {self.config.num_rounds}"
+            )
+        return strategy
 
     def _create_evaluate_function(self):
         def evaluate_fn(server_round: int, parameters_ndarrays, config_dict):
@@ -361,7 +393,9 @@ class TAVSESPPipeline:
         return PipelineResults(
             config=self.config, server_metrics=[], server_losses=server_losses, server_accuracies=server_accuracies,
             final_trust_state=trust_state, trust_evolution=trust_evolution, tier_evolution=tier_evolution,
-            byzantine_detection_history=byzantine_detection_history, attack_success_rates={},
+            byzantine_detection_history=byzantine_detection_history,
+            scheduling_history=list(getattr(strategy, 'scheduling_history', [])),
+            attack_success_rates={},
             total_time_seconds=total_time, round_times=round_times, convergence_metrics=convergence_metrics, security_metrics=security_metrics
         )
 

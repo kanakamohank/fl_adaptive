@@ -31,6 +31,8 @@ class TestEvaluationFunction(unittest.TestCase):
     def test_evaluate_function_creation(self):
         """Test that evaluation function is created correctly."""
         config = PipelineConfig(
+            # Plumbing test only; 2 rounds cannot satisfy the promotion gate.
+            validate_promotion_feasibility=False,
             num_rounds=2,
             num_clients=5,
             clients_per_round=3,
@@ -47,6 +49,8 @@ class TestEvaluationFunction(unittest.TestCase):
     def test_evaluate_function_signature(self):
         """Test evaluation function has correct signature."""
         config = PipelineConfig(
+            # Plumbing test only; 2 rounds cannot satisfy the promotion gate.
+            validate_promotion_feasibility=False,
             num_rounds=2,
             num_clients=5,
             clients_per_round=3,
@@ -102,6 +106,7 @@ class TestEvaluationFunction(unittest.TestCase):
 
             # Create and test evaluation function
             config = PipelineConfig(
+                validate_promotion_feasibility=False,
                 num_rounds=2,
                 num_clients=5,
                 clients_per_round=3,
@@ -129,6 +134,8 @@ class TestEvaluationFunction(unittest.TestCase):
         tavs_config = TavsEspConfig(evaluate_fn=None)
 
         config = PipelineConfig(
+            # Plumbing test only; 2 rounds cannot satisfy the promotion gate.
+            validate_promotion_feasibility=False,
             num_rounds=2,
             num_clients=5,
             clients_per_round=3,
@@ -148,6 +155,8 @@ class TestEvaluationFunction(unittest.TestCase):
     def test_evaluate_function_error_handling(self):
         """Test evaluation function error handling."""
         config = PipelineConfig(
+            # Plumbing test only; 2 rounds cannot satisfy the promotion gate.
+            validate_promotion_feasibility=False,
             num_rounds=2,
             num_clients=5,
             clients_per_round=3,
@@ -172,6 +181,8 @@ class TestEvaluationFunction(unittest.TestCase):
     def test_evaluation_logging(self, mock_logger):
         """Test that evaluation function logs correctly."""
         config = PipelineConfig(
+            # Plumbing test only; 2 rounds cannot satisfy the promotion gate.
+            validate_promotion_feasibility=False,
             num_rounds=2,
             num_clients=5,
             clients_per_round=3,

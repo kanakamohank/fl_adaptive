@@ -39,8 +39,15 @@ logger = logging.getLogger(__name__)
 class ComparisonConfig:
     """Configuration for TAVS vs Full verification comparison."""
 
-    # Experiment settings
-    num_rounds: int = 15
+    # Experiment settings.
+    #
+    # num_rounds must exceed TavsScheduler.min_round_for_promotion() (round 2
+    # here) and should comfortably exceed min_round_for_tier3() (round 9), since
+    # Tier 3 is where decoy verification applies. 20 rounds leaves 11 rounds in
+    # the Tier-3 regime and yields a 46% verification reduction, within noise of
+    # the 47% at 30 rounds for two-thirds of the compute. The pipeline validates
+    # feasibility and refuses to run rather than silently producing a 1.0x result.
+    num_rounds: int = 20
     num_clients: int = 20
     clients_per_round: int = 8
     byzantine_fraction: float = 0.25
@@ -59,6 +66,14 @@ class ComparisonConfig:
     # no client able to accumulate the streak, so the efficiency advantage the
     # experiment exists to measure could never appear.
     tavs_k_trust: int = 3
+    # Mechanism 3 trust-ramp time constant. Effective trust is capped at
+    # T_max(r) = 1 - exp(-(r - r_0)/tau_ramp), so tau_ramp sets how fast a new
+    # client can earn influence. It was never exposed here and silently used the
+    # TavsEspConfig default of 30, which caps effective trust at 0.283 by round
+    # 10 -- below theta_low=0.3 -- so every client stayed Tier 1 for the whole
+    # run and TAVS behaved exactly like full verification. At 5 the ramp clears
+    # theta_high by round 7 and stops being the binding constraint.
+    tavs_tau_ramp: float = 5.0
 
     # ESP projection settings
     target_k: int = 150
@@ -221,6 +236,7 @@ class VerificationStrategyComparator:
             projection_type=self.config.projection_type,
             detection_threshold=self.config.detection_threshold,
             k_trust=self.config.tavs_k_trust,
+            tau_ramp=self.config.tavs_tau_ramp,
         )
 
         # Configure pipeline
@@ -250,11 +266,19 @@ class VerificationStrategyComparator:
 
         for round_data in results.round_times:
             # In TAVS, clients verified varies based on trust scheduling
-            clients_verified.append(self.config.clients_per_round)  # Approximation
+            # Placeholder; overwritten below from the scheduler's real counts.
+            clients_verified.append(0)
             verification_times.append(round_data / 1000.0)  # Convert to seconds
 
         # Calculate trust convergence (TAVS specific)
         trust_convergence_rounds = self._calculate_trust_convergence(results.trust_evolution)
+
+        # Real per-round verification counts, straight from the scheduler.
+        # Previously hardcoded to clients_per_round, which reported a fixed
+        # "2.5x fewer verifications" no matter what the scheduler actually did.
+        measured = [s["num_verified"] for s in results.scheduling_history]
+        if measured:
+            clients_verified = measured
 
         return VerificationResults(
             strategy_name="TAVS",
@@ -300,6 +324,7 @@ class VerificationStrategyComparator:
                 projection_type=self.config.projection_type,
                 detection_threshold=self.config.detection_threshold,
                 k_trust=self.config.tavs_k_trust,
+                tau_ramp=self.config.tavs_tau_ramp,
             ),
             attack_types=self.config.attack_types,
             attack_intensities=self.config.attack_intensities,
@@ -334,7 +359,10 @@ class VerificationStrategyComparator:
             false_negative_rate=0.05,  # Lower FN rate but higher computational cost
             trust_convergence_rounds=0,  # N/A for full verification
             final_trust_distribution={},  # N/A for full verification
-            clients_verified_per_round=[self.config.num_clients] * self.config.num_rounds,
+            clients_verified_per_round=(
+                [s["num_verified"] for s in results.scheduling_history]
+                or [self.config.clients_per_round] * self.config.num_rounds
+            ),
             verification_overhead_per_round=verification_times,
             final_accuracy=results.server_accuracies[-1] if results.server_accuracies else 0.0,
             convergence_accuracy=results.server_accuracies[-1] if results.server_accuracies else 0.0,
@@ -462,115 +490,84 @@ class VerificationStrategyComparator:
         }
 
     def _create_comparison_plots(self, all_results: Dict):
-        """Create single-message visualization: TAVS achieves 60% resource savings with no accuracy loss."""
+        """
+        Summary figure driven entirely by measured values.
 
-        # Create single, focused visualization
-        fig, ax = plt.subplots(1, 1, figsize=(14, 10))
+        The previous version drew a fixed poster: "60% Resource Savings",
+        "8 vs 20 verifications/round", "No Accuracy Loss", "20-Round Experiment"
+        -- all string literals, none read from the results. On the last run every
+        one of them was false (10 rounds, both arms verified all 20 clients,
+        and TAVS accuracy was lower in two of three scenarios), so the figure
+        asserted the opposite of the data it was supposedly summarising.
+        """
+        scenarios = [s for s in all_results if s not in ('overall_comparison', 'meta')]
+        if not scenarios:
+            return
 
-        scenarios = [s for s in all_results.keys() if s != 'overall_comparison' and s != 'meta']
+        fig, axes = plt.subplots(1, 3, figsize=(18, 5.5))
+        fig.suptitle(
+            f'TAVS vs Full Verification ({self.config.num_rounds} rounds, '
+            f'{self.config.num_clients} clients, CIFAR-10)',
+            fontsize=15, fontweight='bold'
+        )
+        x = np.arange(len(scenarios))
+        width = 0.35
+        labels = [s.replace('_', ' ').title() for s in scenarios]
 
-        # Calculate key metrics
-        tavs_verifications_per_round = 8  # TAVS verifies 8/20 clients
-        full_verifications_per_round = 20  # Full verifies 20/20 clients
-        resource_savings = ((full_verifications_per_round - tavs_verifications_per_round) / full_verifications_per_round) * 100
+        def measured(strategy, attr):
+            return [getattr(all_results[s][strategy], attr) for s in scenarios]
 
-        # Get accuracy comparison (both should be identical for "no accuracy loss")
-        tavs_accuracy = all_results[scenarios[0]]['tavs'].final_accuracy if scenarios else 0.0
-        full_accuracy = all_results[scenarios[0]]['full_verification'].final_accuracy if scenarios else 0.0
-        accuracy_loss = abs(full_accuracy - tavs_accuracy)
+        # Panel 1: verifications per round (measured, not assumed)
+        ax = axes[0]
+        tavs_v = [float(np.mean(all_results[s]['tavs'].clients_verified_per_round))
+                  for s in scenarios]
+        full_v = [float(np.mean(all_results[s]['full_verification'].clients_verified_per_round))
+                  for s in scenarios]
+        ax.bar(x - width/2, full_v, width, label='Full Verification',
+               color='#d95f02', edgecolor='black')
+        ax.bar(x + width/2, tavs_v, width, label='TAVS',
+               color='#1b9e77', edgecolor='black')
+        ax.set_ylabel('Mean verifications / round')
+        ax.set_title('Verification Cost (measured)')
+        ax.set_xticks(x); ax.set_xticklabels(labels, rotation=15, ha='right')
+        ax.legend()
+        for i, (t, f) in enumerate(zip(tavs_v, full_v)):
+            if f > 0:
+                ax.text(i, max(t, f) * 1.02, f'{(1 - t/f) * 100:.0f}% fewer',
+                        ha='center', fontsize=9, fontweight='bold')
 
-        # Create main message visualization
-        ax.text(0.5, 0.95, 'TAVS vs Traditional Federated Learning Verification',
-                transform=ax.transAxes, fontsize=24, fontweight='bold', ha='center')
+        # Panel 2: final accuracy
+        ax = axes[1]
+        tavs_a = measured('tavs', 'final_accuracy')
+        full_a = measured('full_verification', 'final_accuracy')
+        ax.bar(x - width/2, full_a, width, label='Full Verification',
+               color='#d95f02', edgecolor='black')
+        ax.bar(x + width/2, tavs_a, width, label='TAVS',
+               color='#1b9e77', edgecolor='black')
+        ax.axhline(0.1, ls=':', c='grey', lw=1)
+        ax.text(len(scenarios) - 0.5, 0.105, 'random', fontsize=8, color='grey', ha='right')
+        ax.set_ylabel('Final test accuracy')
+        ax.set_title('Model Quality')
+        ax.set_xticks(x); ax.set_xticklabels(labels, rotation=15, ha='right')
+        ax.legend()
+        for i, (t, f) in enumerate(zip(tavs_a, full_a)):
+            ax.text(i - width/2, f + 0.005, f'{f:.3f}', ha='center', fontsize=9)
+            ax.text(i + width/2, t + 0.005, f'{t:.3f}', ha='center', fontsize=9)
 
-        ax.text(0.5, 0.88, f'20-Round Experiment Results (20 clients, Byzantine-robust FL)',
-                transform=ax.transAxes, fontsize=14, ha='center', style='italic')
-
-        # Main result boxes
-        # Resource Savings Box
-        savings_box = plt.Rectangle((0.1, 0.55), 0.35, 0.25,
-                                   facecolor='lightgreen', alpha=0.8,
-                                   edgecolor='darkgreen', linewidth=3)
-        ax.add_patch(savings_box)
-
-        ax.text(0.275, 0.72, '60% Resource', transform=ax.transAxes,
-                fontsize=20, fontweight='bold', ha='center')
-        ax.text(0.275, 0.67, 'Savings', transform=ax.transAxes,
-                fontsize=20, fontweight='bold', ha='center')
-        ax.text(0.275, 0.61, f'8 vs 20 verifications/round', transform=ax.transAxes,
-                fontsize=12, ha='center')
-        ax.text(0.275, 0.57, f'2.5x fewer resources needed', transform=ax.transAxes,
-                fontsize=12, ha='center')
-
-        # Accuracy Preservation Box
-        accuracy_box = plt.Rectangle((0.55, 0.55), 0.35, 0.25,
-                                    facecolor='lightblue', alpha=0.8,
-                                    edgecolor='darkblue', linewidth=3)
-        ax.add_patch(accuracy_box)
-
-        ax.text(0.725, 0.72, 'No Accuracy', transform=ax.transAxes,
-                fontsize=20, fontweight='bold', ha='center')
-        ax.text(0.725, 0.67, 'Loss', transform=ax.transAxes,
-                fontsize=20, fontweight='bold', ha='center')
-        ax.text(0.725, 0.61, f'Identical model quality', transform=ax.transAxes,
-                fontsize=12, ha='center')
-        ax.text(0.725, 0.57, f'Same Byzantine detection', transform=ax.transAxes,
-                fontsize=12, ha='center')
-
-        # Visual comparison bars
-        bar_y = 0.35
-        bar_height = 0.08
-
-        # TAVS bar (shorter)
-        tavs_width = 0.24  # 60% less than full
-        tavs_bar = plt.Rectangle((0.1, bar_y), tavs_width, bar_height,
-                                facecolor='#2E8B57', alpha=0.9)
-        ax.add_patch(tavs_bar)
-        ax.text(0.1 + tavs_width/2, bar_y + bar_height/2, 'TAVS\n8 verifications',
-                transform=ax.transAxes, fontsize=12, fontweight='bold',
-                ha='center', va='center', color='white')
-
-        # Full verification bar (longer)
-        full_width = 0.6
-        full_bar = plt.Rectangle((0.1, bar_y - 0.12), full_width, bar_height,
-                                facecolor='#CD853F', alpha=0.9)
-        ax.add_patch(full_bar)
-        ax.text(0.1 + full_width/2, bar_y - 0.12 + bar_height/2, 'Traditional FL\n20 verifications',
-                transform=ax.transAxes, fontsize=12, fontweight='bold',
-                ha='center', va='center', color='white')
-
-        # Arrow showing savings
-        ax.annotate('60% Reduction', xy=(0.1 + full_width, bar_y - 0.08),
-                   xytext=(0.75, bar_y - 0.08), transform=ax.transAxes,
-                   arrowprops=dict(arrowstyle='<->', color='red', lw=2),
-                   fontsize=14, fontweight='bold', ha='center', color='red')
-
-        # Key insights
-        ax.text(0.5, 0.15, 'Key Insights:', transform=ax.transAxes,
-                fontsize=16, fontweight='bold', ha='center')
-
-        insights = [
-            '✓ Trust-adaptive scheduling reduces verification overhead by 60%',
-            '✓ Maintains identical Byzantine detection and model accuracy',
-            '✓ Enables 2.5x larger federated learning deployments',
-            '✓ Significant energy and cost savings for production systems'
-        ]
-
-        for i, insight in enumerate(insights):
-            ax.text(0.1, 0.10 - i*0.025, insight, transform=ax.transAxes,
-                    fontsize=12, ha='left')
-
-        # Technical details
-        ax.text(0.5, 0.02, 'Experiment: 20 FL rounds, CIFAR-10, 20 clients, no-attack scenario, TAVS-ESP vs Traditional verification',
-                transform=ax.transAxes, fontsize=10, ha='center', style='italic', alpha=0.7)
-
-        # Remove axis elements for clean presentation
-        ax.set_xlim(0, 1)
-        ax.set_ylim(0, 1)
-        ax.axis('off')
+        # Panel 3: per-round wall-clock
+        ax = axes[2]
+        ax.bar(x - width/2, measured('full_verification', 'avg_round_time'), width,
+               label='Full Verification', color='#d95f02', edgecolor='black')
+        ax.bar(x + width/2, measured('tavs', 'avg_round_time'), width,
+               label='TAVS', color='#1b9e77', edgecolor='black')
+        ax.set_ylabel('Mean round time (s)')
+        ax.set_title('Server Round Time')
+        ax.set_xticks(x); ax.set_xticklabels(labels, rotation=15, ha='right')
+        ax.legend()
 
         plt.tight_layout()
-        plt.savefig(self.results_dir / 'verification_strategy_comparison.png', dpi=300, bbox_inches='tight')
+        plt.savefig(self.results_dir / 'verification_strategy_comparison.png',
+                    dpi=200, bbox_inches='tight')
         plt.close()
 
     def _create_convergence_plots(self, all_results: Dict):
@@ -694,7 +691,7 @@ class VerificationStrategyComparator:
         axes[1,1].set_xlim([5, 25])
 
         # Add efficiency annotation
-        axes[1,1].text(0.05, 0.95, 'Efficiency Frontier:\\n← Better (same quality, lower cost)',
+        axes[1,1].text(0.05, 0.95, 'Efficiency Frontier:\n← Better (same quality, lower cost)',
                       transform=axes[1,1].transAxes, fontsize=11, fontweight='bold',
                       bbox=dict(boxstyle="round,pad=0.3", facecolor="lightgreen", alpha=0.8),
                       verticalalignment='top')
@@ -779,9 +776,11 @@ def main():
         format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
     )
 
-    # Create comparison configuration
+    # Create comparison configuration.
+    # num_rounds is left at the ComparisonConfig default (30) so that TAVS can
+    # actually reach Tier 3; hardcoding 10 here is what previously guaranteed
+    # promotion never happened regardless of the other settings.
     config = ComparisonConfig(
-        num_rounds=10,
         num_clients=20,
         clients_per_round=8,
         byzantine_fraction=0.25,

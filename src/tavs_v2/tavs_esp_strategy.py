@@ -113,6 +113,14 @@ class TavsEspStrategy(Strategy):
         # the correct place to accumulate them.
         self.evaluation_history: List[Dict[str, object]] = []
 
+        # Per-round verified/promoted counts as actually scheduled. Consumed by
+        # the comparison experiment so its resource claims are measurements.
+        self.scheduling_history: List[Dict[str, int]] = []
+
+        # Server-side record of each round's verified/promoted/decoy sets, so
+        # aggregate_fit never has to trust a client's self-report.
+        self._round_assignments: Dict[int, Dict[str, set]] = {}
+
     def initialize_parameters(self, client_manager):
         from src.core.models import get_model
         
@@ -159,19 +167,38 @@ class TavsEspStrategy(Strategy):
             return []
 
         V, P, D = self.scheduler.schedule_verifications(client_ids, server_round)
-        logger.info(f"Round {server_round} Scheduling: {len(V)} Verified, {len(P)} Promoted, {len(D)} Dropped")
-        
+        logger.info(
+            f"Round {server_round} Scheduling: {len(V)} Verified "
+            f"({len(D)} of them decoys), {len(P)} Promoted"
+        )
+
+        self._round_assignments[server_round] = {
+            "verified": set(V), "promoted": set(P), "decoy": set(D),
+        }
+
         fit_configurations = []
-        config_dict = {"server_round": server_round}
-        
         for cid, client_proxy in available_clients.items():
-            if cid in V:
-                config_dict["is_verified"] = True
-                fit_configurations.append((client_proxy, FitIns(parameters, config_dict.copy())))
-            elif cid in P:
-                config_dict["is_verified"] = False
-                fit_configurations.append((client_proxy, FitIns(parameters, config_dict.copy())))
-                
+            if cid not in V and cid not in P:
+                continue
+
+            # What the client is TOLD, which is not always what the server DOES.
+            #
+            # A decoy is verified server-side but told it was promoted. That
+            # asymmetry is the entire mechanism: an adaptive attacker that
+            # behaves honestly whenever it knows it is being checked would
+            # otherwise evade every check, and announcing is_verified=True to a
+            # decoy hands it exactly that signal. Telling it "promoted" means it
+            # attacks, and the hidden verification catches it.
+            told_verified = (cid in V) and (cid not in D)
+
+            config_dict = {
+                "server_round": server_round,
+                "is_verified": told_verified,
+                "tavs_assignment": "verified" if told_verified else "promoted",
+                "trust_score": float(self.scheduler.get_effective_trust(cid, server_round)),
+            }
+            fit_configurations.append((client_proxy, FitIns(parameters, config_dict)))
+
         return fit_configurations
 
     def _parse_client_updates(self, results: List[Tuple[ClientProxy, FitRes]]) -> Dict[str, Dict[str, torch.Tensor]]:
@@ -215,8 +242,26 @@ class TavsEspStrategy(Strategy):
         start_time = time.time()
         all_updates = self._parse_client_updates(results)
         
-        V_ids = {proxy.cid for proxy, res in results if res.metrics.get("is_verified", True)}
-        P_ids = {proxy.cid for proxy, res in results if not res.metrics.get("is_verified", True)}
+        # Verified/promoted split comes from the SERVER's own record of what it
+        # scheduled, never from the client.
+        #
+        # This previously read res.metrics["is_verified"], i.e. it asked each
+        # client which bucket to put it in. A Byzantine client only had to report
+        # is_verified=False to be routed into P_ids -- and promoted clients are
+        # never projected and never passed to the detector, so the poison went
+        # straight into the aggregate weighted by p_i. The attacker could opt out
+        # of the defence by setting one boolean.
+        #
+        # Clients whose assignment the server has no record of (a stale round, a
+        # late reply) fall back to verified, the conservative choice.
+        scheduled = self._round_assignments.get(server_round)
+        if scheduled is None:
+            V_ids = {proxy.cid for proxy, _res in results}
+            P_ids = set()
+        else:
+            returned = {proxy.cid for proxy, _res in results}
+            P_ids = returned & scheduled["promoted"]
+            V_ids = returned - P_ids
         
         projected_updates = {}
         for cid in V_ids:
@@ -263,6 +308,21 @@ class TavsEspStrategy(Strategy):
 
         analytics = LegacyAnalyticsBridge(server_round, outliers, self.scheduler.trust_scores, P_ids, execution_time_ms)
         self.round_analytics.append(analytics)
+
+        # Actual per-round scheduling counts, measured rather than assumed.
+        # The comparison experiment used to hardcode these as clients_per_round
+        # for TAVS and num_clients for the baseline, which produced a fixed
+        # "2.5x fewer verifications" regardless of what the scheduler really did
+        # -- and what it really did was verify everyone, because promotion was
+        # unreachable. Recording the true counts makes that visible.
+        self.scheduling_history.append({
+            "round": server_round,
+            "cohort_size": len(V_ids) + len(P_ids),
+            "num_verified": len(V_ids),
+            "num_promoted": len(P_ids),
+            "num_inliers": len(inliers),
+            "num_outliers": len(outliers),
+        })
 
         aggregated_ndarrays = []
         for name in self.model_blocks.keys():
