@@ -45,6 +45,17 @@ class TavsEspConfig:
     evaluate_fn: Optional[Callable] = None
     min_inlier_fraction_for_agg: float = 0.25
 
+    # Bound how far an unverified (promoted) update may deviate from the verified
+    # consensus before it is projected back onto that ball. gamma_budget bounds
+    # only the WEIGHT promoted clients carry, never the MAGNITUDE of what they
+    # carry, so without this a promoted client inside the budget can still
+    # dominate the aggregate outright. Exposed as a flag so the clipped and
+    # unclipped variants can be run as a controlled ablation.
+    clip_promoted_updates: bool = True
+    # Radius as a multiple of the verified cohort's median deviation. 1.0 reads
+    # as "a promoted client may deviate as much as a typical verified client".
+    promoted_clip_factor: float = 1.0
+
 class LegacyAnalyticsBridge:
     def __init__(self, round_num, outliers, trust_scores, p_ids, execution_time_ms):
         self.round_number = round_num
@@ -290,16 +301,26 @@ class TavsEspStrategy(Strategy):
             ) for cid in P_ids
         }
         
-        try:
-            verified_weights = {cid: max(0.05, float(behavior_scores.get(cid, 0.0))) for cid in verified_updates.keys()}
-            aggregated_blocks = UnifiedBayesianAggregator.aggregate(
-                verified_updates, verified_weights, 
-                promoted_updates, promoted_weights
+        verified_weights = {
+            cid: max(0.05, float(behavior_scores.get(cid, 0.0)))
+            for cid in verified_updates.keys()
+        }
+        clip_stats: Dict[str, object] = {}
+        aggregated_blocks = UnifiedBayesianAggregator.aggregate(
+            verified_updates, verified_weights,
+            promoted_updates, promoted_weights,
+            clip_promoted=getattr(self.config, "clip_promoted_updates", True),
+            clip_factor=getattr(self.config, "promoted_clip_factor", 1.0),
+            clip_stats_out=clip_stats,
+        )
+        if clip_stats.get("num_clipped"):
+            logger.info(
+                f"Round {server_round} Clipping: {clip_stats['num_clipped']} promoted "
+                f"update(s) exceeded radius {clip_stats['clip_radius']:.4g} "
+                f"(max deviation {clip_stats['max_deviation_ratio']:.1f}x the radius)"
             )
-        except TypeError:
-            aggregated_blocks = UnifiedBayesianAggregator.aggregate(
-                verified_updates, promoted_updates, promoted_weights
-            )
+        elif clip_stats.get("skipped_reason"):
+            logger.debug(f"Round {server_round} Clipping skipped: {clip_stats['skipped_reason']}")
 
         execution_time_ms = (time.time() - start_time) * 1000
 
@@ -322,6 +343,8 @@ class TavsEspStrategy(Strategy):
             "num_promoted": len(P_ids),
             "num_inliers": len(inliers),
             "num_outliers": len(outliers),
+            "num_clipped": int(clip_stats.get("num_clipped") or 0),
+            "clip_radius": clip_stats.get("clip_radius"),
         })
 
         aggregated_ndarrays = []

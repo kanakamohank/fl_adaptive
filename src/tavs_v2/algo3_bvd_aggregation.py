@@ -111,14 +111,165 @@ class UnifiedBayesianAggregator:
     Algorithm 3b: Unified Aggregation Rule (Upgraded for Soft-Weighting)
     """
     
+    # Radius below which the verified cohort is treated as having no measurable
+    # spread, so no clip threshold can be estimated from it.
+    _MIN_CLIP_RADIUS = 1e-12
+
+    @staticmethod
+    def clip_promoted_to_consensus(
+        verified_updates: Dict[str, Dict[str, torch.Tensor]],
+        promoted_updates: Dict[str, Dict[str, torch.Tensor]],
+        clip_factor: float = 1.0,
+    ) -> Tuple[Dict[str, Dict[str, torch.Tensor]], Dict[str, object]]:
+        r"""
+        Bound how far an unverified update may sit from the verified consensus.
+
+        Why this is needed
+        ------------------
+        Mechanism 1 constrains \gamma(r) = \sum p_i / Z \le \gamma_{budget}, which
+        bounds the *weight* promoted clients carry, not the *magnitude* of what
+        they carry. The aggregate is \sum w_i g_i / Z, so damage scales with
+        w_i \cdot \|g_i\|, and \|g_i\| is unbounded. A promoted client with
+        p_i = 0.9 and \|g_i\| = 10^6 keeps \gamma at 0.11 -- comfortably inside a
+        0.35 budget -- while destroying the model. Empirically this drove test
+        accuracy to 0.086 (random is 0.10) with server loss above 2000.
+
+        Why deviation and not raw norm
+        ------------------------------
+        Clients submit full model parameters, not deltas, so every client's raw
+        \|g_i\| is dominated by the shared global model and is nearly identical
+        across honest and malicious clients alike. Clipping raw norm would shrink
+        the model toward the origin and destroy it. What actually distinguishes a
+        poisoned submission is its displacement from where everyone else is, so
+        the ball is centred on the verified consensus:
+
+            g_i <- c + (g_i - c) \cdot \min(1, \tau / \|g_i - c\|)
+
+        with c the coordinate-wise median of the verified updates and
+        \tau = clip_factor \cdot median_j \|g_j - c\| over verified clients j.
+        The threshold is therefore self-calibrating: it tracks the cohort's
+        natural spread as training progresses, needs no absolute scale constant,
+        and at clip_factor = 1.0 states exactly "a promoted client may deviate as
+        much as a typical verified client does".
+
+        Only the magnitude is touched. Direction is preserved, and clients inside
+        the ball are returned untouched, so honest promoted clients are unaffected.
+
+        Verified clients are deliberately exempt: they have already passed BVD
+        outlier detection this round, so clipping them would suppress legitimate
+        heterogeneity that the detector already vetted.
+
+        Returns:
+            (clipped_updates, stats) where stats records the threshold, how many
+            clients were clipped, and -- when clipping was skipped -- why.
+        """
+        stats: Dict[str, object] = {
+            "clipping_applied": False,
+            "clip_radius": None,
+            "num_clipped": 0,
+            "max_deviation_ratio": None,
+            "skipped_reason": None,
+        }
+
+        if not promoted_updates:
+            stats["skipped_reason"] = "no_promoted_clients"
+            return promoted_updates, stats
+        if not verified_updates:
+            # No vetted cohort means no trustworthy centre or scale. Leaving the
+            # updates untouched is reported rather than silently assumed safe.
+            stats["skipped_reason"] = "no_verified_clients_to_form_consensus"
+            return promoted_updates, stats
+
+        # Only blocks present in the verified cohort can be centred.
+        verified_blocks = set(next(iter(verified_updates.values())).keys())
+        for update in verified_updates.values():
+            verified_blocks &= set(update.keys())
+        if not verified_blocks:
+            stats["skipped_reason"] = "no_common_blocks"
+            return promoted_updates, stats
+
+        # 1. Robust centre: coordinate-wise median over verified clients.
+        center = {
+            block: torch.median(
+                torch.stack([u[block] for u in verified_updates.values()]), dim=0
+            ).values
+            for block in verified_blocks
+        }
+
+        def deviation_norm(update: Dict[str, torch.Tensor]) -> float:
+            # Global L2 across blocks, so scaling preserves direction.
+            total = 0.0
+            for block in verified_blocks:
+                if block in update:
+                    total += torch.sum((update[block] - center[block]) ** 2).item()
+            return math.sqrt(total)
+
+        # 2. Threshold from the verified cohort's own spread.
+        verified_devs = sorted(deviation_norm(u) for u in verified_updates.values())
+        median_dev = verified_devs[(len(verified_devs) - 1) // 2]
+        radius = clip_factor * median_dev
+
+        if radius <= UnifiedBayesianAggregator._MIN_CLIP_RADIUS:
+            # Verified clients are effectively identical (common at round 0 when
+            # everyone still holds the initial parameters). No scale can be
+            # inferred, and clipping to a zero-radius ball would collapse every
+            # promoted client onto the centre.
+            stats["skipped_reason"] = "verified_cohort_has_no_measurable_spread"
+            return promoted_updates, stats
+
+        # 3. Project anything outside the ball back onto its surface.
+        clipped: Dict[str, Dict[str, torch.Tensor]] = {}
+        num_clipped = 0
+        max_ratio = 0.0
+
+        for cid, update in promoted_updates.items():
+            dev = deviation_norm(update)
+            max_ratio = max(max_ratio, dev / radius)
+
+            if dev <= radius:
+                clipped[cid] = update  # Inside the ball: untouched.
+                continue
+
+            scale = radius / dev
+            clipped[cid] = {
+                block: (
+                    center[block] + (tensor - center[block]) * scale
+                    if block in verified_blocks
+                    else tensor  # Uncentrable block: cannot be clipped.
+                )
+                for block, tensor in update.items()
+            }
+            num_clipped += 1
+
+        stats.update({
+            "clipping_applied": True,
+            "clip_radius": radius,
+            "num_clipped": num_clipped,
+            "max_deviation_ratio": max_ratio,
+        })
+        return clipped, stats
+
     @staticmethod
     def aggregate(
         verified_updates: Dict[str, Dict[str, torch.Tensor]], 
         verified_weights: Dict[str, float],
         promoted_updates: Dict[str, Dict[str, torch.Tensor]],
-        promoted_weights: Dict[str, float] 
+        promoted_weights: Dict[str, float],
+        clip_promoted: bool = True,
+        clip_factor: float = 1.0,
+        clip_stats_out: Dict[str, object] = None,
     ) -> Dict[str, torch.Tensor]:
-        
+
+        # Bound unverified influence in MAGNITUDE before weighting. gamma_budget
+        # bounds only the weight these clients carry; without this an unverified
+        # client inside the budget can still dominate the sum outright.
+        if clip_promoted and promoted_updates:
+            promoted_updates, clip_stats = UnifiedBayesianAggregator.clip_promoted_to_consensus(
+                verified_updates, promoted_updates, clip_factor
+            )
+            if clip_stats_out is not None:
+                clip_stats_out.update(clip_stats)
+
         aggregated_update = {}
         
         sum_v_i = sum(verified_weights.values())
