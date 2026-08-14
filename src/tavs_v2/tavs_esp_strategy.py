@@ -113,6 +113,10 @@ class TavsEspStrategy(Strategy):
         # the correct place to accumulate them.
         self.evaluation_history: List[Dict[str, object]] = []
 
+        # Per-round verified/promoted counts as actually scheduled. Consumed by
+        # the comparison experiment so its resource claims are measurements.
+        self.scheduling_history: List[Dict[str, int]] = []
+
     def initialize_parameters(self, client_manager):
         from src.core.models import get_model
         
@@ -263,6 +267,21 @@ class TavsEspStrategy(Strategy):
 
         analytics = LegacyAnalyticsBridge(server_round, outliers, self.scheduler.trust_scores, P_ids, execution_time_ms)
         self.round_analytics.append(analytics)
+
+        # Actual per-round scheduling counts, measured rather than assumed.
+        # The comparison experiment used to hardcode these as clients_per_round
+        # for TAVS and num_clients for the baseline, which produced a fixed
+        # "2.5x fewer verifications" regardless of what the scheduler really did
+        # -- and what it really did was verify everyone, because promotion was
+        # unreachable. Recording the true counts makes that visible.
+        self.scheduling_history.append({
+            "round": server_round,
+            "cohort_size": len(V_ids) + len(P_ids),
+            "num_verified": len(V_ids),
+            "num_promoted": len(P_ids),
+            "num_inliers": len(inliers),
+            "num_outliers": len(outliers),
+        })
 
         aggregated_ndarrays = []
         for name in self.model_blocks.keys():

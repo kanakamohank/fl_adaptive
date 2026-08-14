@@ -133,3 +133,95 @@ class TavsScheduler:
             new_trust = self.alpha_trust * old_trust
             
         self.trust_scores[client_id] = new_trust
+
+    def _min_round_to_reach(self, threshold: float, initial_trust: float) -> float:
+        r"""
+        Earliest round at which effective trust can reach `threshold`, under
+        ideal behaviour (\varphi_i = 1.0, verified every round).
+
+        Effective trust is min(raw, ramp cap), so BOTH must clear the threshold:
+
+          Ramp (Mechanism 3): T^{max}(r) = 1 - e^{-(r-r_0)/\tau_{ramp}}
+              r >= -\tau_{ramp} \cdot \ln(1 - threshold)
+          EMA: best case is T_n = 1 - (1 - T_0)\alpha^n
+              n >= \ln((1-threshold)/(1-T_0)) / \ln(\alpha)
+        """
+        if threshold >= 1.0:
+            return math.inf  # The ramp asymptotes to 1.0 but never attains it.
+
+        ramp_bound = -self.tau_ramp * math.log(1.0 - threshold)
+
+        if initial_trust >= threshold:
+            ema_bound = 0.0
+        elif self.alpha_trust <= 0.0:
+            ema_bound = 1.0  # No history term: one clean observation suffices.
+        else:
+            ema_bound = math.log(
+                (1.0 - threshold) / (1.0 - initial_trust)
+            ) / math.log(self.alpha_trust)
+
+        return max(ramp_bound, ema_bound)
+
+    def min_round_for_promotion(self, initial_trust: float = 0.25) -> int:
+        r"""
+        Earliest round at which ANY client can be promoted (skip verification).
+
+        Note this is governed by \theta_{low}, not \theta_{high}: a client only
+        has to escape Tier 1. Tier 2 clients -- anything in
+        [\theta_{low}, \theta_{high}) -- are tentatively promoted by the `else`
+        branch of schedule_verifications, with Mechanism 1's budget loop
+        demoting the excess. Reaching \theta_{high} and a k_trust streak buys
+        Tier 3 (promotion plus decoy sampling), not promotion itself.
+
+        This is the number that decides whether TAVS can differ from full
+        verification at all. With \tau_{ramp}=30 and \theta_{low}=0.3 the ramp
+        alone needs 11 rounds, so a 10-round experiment leaves every client
+        pinned in Tier 1 and TAVS silently degenerates into full verification
+        while still reporting a plausible "1.0x efficiency" result.
+        """
+        return int(math.ceil(self._min_round_to_reach(self.theta_low, initial_trust)))
+
+    def min_round_for_tier3(self, initial_trust: float = 0.25) -> int:
+        r"""
+        Earliest round for Tier 3 (\theta_{high} plus a k_trust clean streak).
+
+        Tier 3 is the regime where decoy verification applies. Promotion is
+        already possible earlier via Tier 2 -- see min_round_for_promotion.
+        """
+        return int(math.ceil(max(
+            self._min_round_to_reach(self.theta_high, initial_trust),
+            float(self.k_trust),
+        )))
+
+    def describe_promotion_feasibility(self, num_rounds: int, initial_trust: float = 0.25) -> Dict:
+        """
+        Diagnostic for experiment configuration: can TAVS promote anyone within
+        `num_rounds`, and if not, which parameter is the binding constraint?
+        """
+        if self.theta_low >= 1.0:
+            ramp_bound = math.inf
+            ema_bound = math.inf
+        else:
+            ramp_bound = -self.tau_ramp * math.log(1.0 - self.theta_low)
+            if initial_trust >= self.theta_low:
+                ema_bound = 0.0
+            elif self.alpha_trust <= 0.0:
+                ema_bound = 1.0
+            else:
+                ema_bound = math.log(
+                    (1.0 - self.theta_low) / (1.0 - initial_trust)
+                ) / math.log(self.alpha_trust)
+
+        bounds = {
+            "ramp_cap (tau_ramp)": ramp_bound,
+            "ema_convergence (alpha_trust)": ema_bound,
+        }
+        min_round = self.min_round_for_promotion(initial_trust)
+        return {
+            "min_round_for_promotion": min_round,
+            "min_round_for_tier3": self.min_round_for_tier3(initial_trust),
+            "num_rounds": num_rounds,
+            "feasible": min_round < num_rounds,
+            "binding_constraint": max(bounds, key=bounds.get),
+            "bounds": bounds,
+        }

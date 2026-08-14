@@ -285,7 +285,7 @@ def test_results_json_roundtrips_dataclasses():
     payload = convert({"cfg": ComparisonConfig()})
     restored = _json.loads(_json.dumps(payload))
     assert isinstance(restored["cfg"], dict), "dataclass must become a dict"
-    assert restored["cfg"]["num_rounds"] == 15
+    assert restored["cfg"]["num_rounds"] == ComparisonConfig().num_rounds
 
 
 # ---------------------------------------------------------------------------
@@ -359,3 +359,134 @@ def test_extract_results_prefers_strategy_over_none_history():
     # Sorted by round, not insertion order.
     assert results.server_losses == [2.3, 1.8, 1.4]
     assert results.server_accuracies == [0.10, 0.29, 0.41]
+
+
+# ---------------------------------------------------------------------------
+# Promotion feasibility (Mechanism 3 trust ramp)
+# ---------------------------------------------------------------------------
+
+
+def test_paper_tau_ramp_makes_promotion_impossible_in_a_short_run():
+    """
+    The exact misconfiguration that produced a "1.0x efficiency" result.
+
+    With tau_ramp=30 and theta_high=0.7 the Mechanism 3 cap needs ~37 rounds to
+    even reach theta_high. In a 10-round run effective trust is capped at 0.283,
+    below theta_low=0.3, so every client stays Tier 1 and TAVS is bit-identical
+    to full verification -- while still reporting a plausible-looking number.
+    """
+    from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
+
+    scheduler = TavsScheduler(
+        gamma_budget=0.35, theta_low=0.3, theta_high=0.7,
+        alpha_trust=0.9, tau_ramp=30.0, k_trust=3,
+    )
+    report = scheduler.describe_promotion_feasibility(num_rounds=10)
+
+    assert report["feasible"] is False
+    # Promotion is gated by theta_low (Tier 2), not theta_high: escaping Tier 1
+    # is enough to skip verification. Tier 3 needs far longer still.
+    assert report["min_round_for_promotion"] == 11
+    assert report["min_round_for_tier3"] == 37
+    assert report["binding_constraint"] == "ramp_cap (tau_ramp)"
+
+
+def test_min_round_for_promotion_matches_the_simulated_scheduler():
+    """
+    The closed-form bound must agree with what the scheduler actually does.
+
+    Drives real trust dynamics with ideal behaviour and checks that no promotion
+    occurs before the predicted round.
+    """
+    from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
+
+    scheduler = TavsScheduler(
+        gamma_budget=1.0, theta_low=0.3, theta_high=0.7,
+        alpha_trust=0.9, tau_ramp=5.0, k_trust=3,
+    )
+    predicted = scheduler.min_round_for_promotion()
+    clients = [f"c{i}" for i in range(8)]
+
+    first_promotion = None
+    for rnd in range(predicted + 15):
+        _V, P, _D = scheduler.schedule_verifications(clients, rnd)
+        if P and first_promotion is None:
+            first_promotion = rnd
+        for cid in clients:
+            scheduler.update_trust(cid, 1.0, was_verified=cid not in P)
+
+    assert first_promotion is not None, "promotion never happened despite feasible config"
+    assert first_promotion >= predicted, (
+        f"promotion at round {first_promotion} precedes the predicted bound {predicted}"
+    )
+
+
+def test_comparison_config_permits_promotion():
+    """The shipped experiment config must be able to exercise TAVS at all."""
+    from experiments.verification_strategy_comparison import ComparisonConfig
+    from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
+
+    config = ComparisonConfig()
+    scheduler = TavsScheduler(
+        gamma_budget=config.tavs_budget, theta_low=config.tavs_theta_low,
+        theta_high=config.tavs_theta_high, alpha_trust=config.tavs_alpha,
+        tau_ramp=config.tavs_tau_ramp, k_trust=config.tavs_k_trust,
+    )
+    report = scheduler.describe_promotion_feasibility(config.num_rounds)
+
+    assert report["feasible"], (
+        f"ComparisonConfig cannot promote within {config.num_rounds} rounds: "
+        f"needs round {report['min_round_for_promotion']}, "
+        f"bound by {report['binding_constraint']}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Measured (not assumed) verification counts
+# ---------------------------------------------------------------------------
+
+
+def test_strategy_records_real_scheduling_counts():
+    """scheduling_history must exist so resource claims can be measurements."""
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig, TavsEspStrategy
+
+    strategy = TavsEspStrategy(config=TavsEspConfig(target_k=16))
+    assert hasattr(strategy, "scheduling_history")
+    assert strategy.scheduling_history == []
+
+
+def test_experiment_no_longer_hardcodes_verification_counts():
+    """
+    The old code wrote clients_per_round / num_clients into
+    clients_verified_per_round, yielding a fixed 2.5x "resource efficiency"
+    independent of what the scheduler did.
+    """
+    import inspect
+
+    from experiments import verification_strategy_comparison as vsc
+
+    source = inspect.getsource(vsc)
+    assert 'clients_verified_per_round=[self.config.num_clients] * self.config.num_rounds' not in source
+    assert 'scheduling_history' in source, "counts must come from measured scheduling_history"
+
+
+def test_summary_plot_has_no_hardcoded_claims():
+    """
+    The summary figure asserted "60% Resource Savings" and "No Accuracy Loss"
+    as string literals. On the last run both were false.
+    """
+    import inspect
+
+    from experiments import verification_strategy_comparison as vsc
+
+    fn = vsc.VerificationStrategyComparator._create_comparison_plots
+    # Strip the docstring: it legitimately quotes the retired claims to explain
+    # why they were removed.
+    raw = inspect.getsource(fn)
+    # Drop the leading docstring, which legitimately quotes the retired claims
+    # to explain why they were removed. getdoc() re-indents, so split on the
+    # literal delimiters instead.
+    parts = raw.split('"""')
+    plot_source = parts[0] + "".join(parts[2:]) if len(parts) >= 3 else raw
+    for claim in ("60% Resource", "8 vs 20", "No Accuracy", "2.5x fewer", "60% Reduction"):
+        assert claim not in plot_source, f"hardcoded claim still present: {claim!r}"
