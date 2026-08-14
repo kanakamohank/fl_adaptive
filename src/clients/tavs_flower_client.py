@@ -47,6 +47,11 @@ class TAVSClientConfig:
     # Attack-specific parameters
     attack_intensity: float = 1.0
     target_fraction: float = 0.001  # For layerwise attacks
+    # Adaptive adversary: attack only when the client believes it is unobserved.
+    # This is the threat model CSPRNG decoy verification is designed against; a
+    # non-adaptive attacker that poisons even under inspection is caught by any
+    # verification and makes decoys pointless. Set False for a naive adversary.
+    adaptive_evasion: bool = True
 
     # Training parameters
     epochs: int = 5
@@ -94,7 +99,8 @@ class TAVSFlowerClient(NumPyClient):
         self.trust_score = 0.5  # Current trust score from server
         self.tier = 1  # Current tier assignment
         self.round_number = 0
-        self.is_decoy = False  # Whether this is a decoy verification
+        self.is_decoy = False  # Server-side only; never revealed to the client
+        self.adaptive_evasion = getattr(config, "adaptive_evasion", True)
 
         # Performance tracking
         self.training_history = []
@@ -363,24 +369,29 @@ class TAVSFlowerClient(NumPyClient):
                 initial_params, training_config
             )
 
+        elif self.adaptive_evasion and self.current_assignment == "verified":
+            # Adaptive adversary: behaves honestly whenever it BELIEVES it is
+            # under inspection. `current_assignment` is what the server told this
+            # client, which for a decoy is deliberately "promoted" even though
+            # the server verifies it -- that asymmetry is what lets a decoy catch
+            # an evading attacker.
+            #
+            # Note this reads current_assignment only, not is_decoy: a client
+            # that could see its own decoy flag would evade every hidden check,
+            # which is precisely the leak the mechanism is designed to avoid.
+            trained_params, num_examples, metrics = self.underlying_client.behave_honestly(
+                initial_params, training_config
+            )
+            metrics = dict(metrics)
+            metrics["evaded_this_round"] = True
+
         else:
-            # Attack clients may modify behavior based on assignment
-            if self.current_assignment == "verified" or self.is_decoy:
-                # If verified or decoy, attackers may behave honestly to avoid detection
-                if hasattr(self.underlying_client, 'behave_honestly'):
-                    trained_params, num_examples, metrics = self.underlying_client.behave_honestly(
-                        initial_params, training_config
-                    )
-                else:
-                    # Fallback: train normally but with reduced intensity
-                    trained_params, num_examples, metrics = self.underlying_client.fit(
-                        initial_params, training_config
-                    )
-            else:
-                # If promoted, execute full attack
-                trained_params, num_examples, metrics = self.underlying_client.fit(
-                    initial_params, training_config
-                )
+            # Believes it is unobserved (or evasion disabled): full attack.
+            trained_params, num_examples, metrics = self.underlying_client.fit(
+                initial_params, training_config
+            )
+            metrics = dict(metrics)
+            metrics.setdefault("evaded_this_round", False)
 
         # Update our parameters
         self.set_parameters(trained_params)

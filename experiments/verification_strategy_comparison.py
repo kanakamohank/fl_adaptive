@@ -41,12 +41,13 @@ class ComparisonConfig:
 
     # Experiment settings.
     #
-    # num_rounds must exceed TavsScheduler.min_round_for_promotion(), which for
-    # these trust parameters is round 9 (bounded by EMA convergence at
-    # alpha=0.9). 30 rounds leaves ~21 rounds of promoted operation, which is
-    # the regime this experiment exists to measure. The pipeline validates this
-    # and refuses to run rather than silently producing a 1.0x result.
-    num_rounds: int = 30
+    # num_rounds must exceed TavsScheduler.min_round_for_promotion() (round 2
+    # here) and should comfortably exceed min_round_for_tier3() (round 9), since
+    # Tier 3 is where decoy verification applies. 20 rounds leaves 11 rounds in
+    # the Tier-3 regime and yields a 46% verification reduction, within noise of
+    # the 47% at 30 rounds for two-thirds of the compute. The pipeline validates
+    # feasibility and refuses to run rather than silently producing a 1.0x result.
+    num_rounds: int = 20
     num_clients: int = 20
     clients_per_round: int = 8
     byzantine_fraction: float = 0.25

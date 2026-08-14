@@ -490,3 +490,84 @@ def test_summary_plot_has_no_hardcoded_claims():
     plot_source = parts[0] + "".join(parts[2:]) if len(parts) >= 3 else raw
     for claim in ("60% Resource", "8 vs 20", "No Accuracy", "2.5x fewer", "60% Reduction"):
         assert claim not in plot_source, f"hardcoded claim still present: {claim!r}"
+
+
+# ---------------------------------------------------------------------------
+# Assignment integrity and decoy secrecy
+# ---------------------------------------------------------------------------
+
+
+def test_server_does_not_take_assignment_from_client_metrics():
+    """
+    aggregate_fit must not derive V/P from res.metrics["is_verified"].
+
+    Promoted clients are never projected and never reach the detector, so a
+    Byzantine client that self-reported is_verified=False opted straight out of
+    the defence with its poison still weighted by p_i.
+    """
+    import inspect
+
+    from src.tavs_v2.tavs_esp_strategy import TavsEspStrategy
+
+    source = inspect.getsource(TavsEspStrategy.aggregate_fit)
+    assert 'res.metrics.get("is_verified"' not in source, (
+        "assignment must come from the server's own _round_assignments record"
+    )
+    assert "_round_assignments" in source
+
+
+def test_decoys_are_told_they_were_promoted():
+    """
+    A decoy is verified server-side but must be told "promoted".
+
+    Announcing is_verified=True to a decoy hands an adaptive attacker the exact
+    signal it needs to behave honestly whenever it is being checked, which makes
+    the mechanism self-defeating.
+    """
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig, TavsEspStrategy
+
+    class _Proxy:
+        def __init__(self, cid): self.cid = cid
+
+    class _Manager:
+        def __init__(self, n): self._p = [_Proxy(f"c{i}") for i in range(n)]
+        def num_available(self): return len(self._p)
+        def all(self): return {p.cid: p for p in self._p}
+        def sample(self, num_clients, min_num_clients=None): return self._p[:num_clients]
+
+    strategy = TavsEspStrategy(
+        config=TavsEspConfig(min_fit_clients=6, min_available_clients=6, target_k=16)
+    )
+    # Force every client into Tier 3 with a certain decoy roll.
+    strategy.scheduler.p_decoy = 1.0
+    clients = [f"c{i}" for i in range(6)]
+    for cid in clients:
+        strategy.scheduler.trust_scores[cid] = 0.99
+        strategy.scheduler.join_rounds[cid] = 0
+        strategy.scheduler.clean_streaks[cid] = 99
+
+    fit_ins = strategy.configure_fit(50, None, _Manager(6))
+    record = strategy._round_assignments[50]
+
+    assert record["decoy"], "p_decoy=1.0 in Tier 3 must produce decoys"
+    for proxy, ins in fit_ins:
+        if proxy.cid in record["decoy"]:
+            assert ins.config["tavs_assignment"] == "promoted"
+            assert ins.config["is_verified"] is False
+            assert proxy.cid in record["verified"], "decoy must be verified server-side"
+
+
+def test_behave_honestly_exists_and_bypasses_the_attack():
+    """
+    The evasion branch called behave_honestly() on a method that existed
+    nowhere, so hasattr() always failed and both branches ran the attacking
+    fit(). Attackers never evaded and decoys defended against nobody.
+    """
+    from src.attacks.layerwise_attacks import LayerwiseBackdoorAttacker
+    from src.attacks.null_space_attack import NullSpaceAttacker
+    from src.clients.honest_client import HonestClient
+
+    for cls in (NullSpaceAttacker, LayerwiseBackdoorAttacker):
+        assert hasattr(cls, "behave_honestly"), f"{cls.__name__} cannot evade"
+        # Must reach the clean path, not the subclass's poisoning fit().
+        assert cls.behave_honestly is HonestClient.behave_honestly

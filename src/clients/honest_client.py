@@ -58,6 +58,24 @@ class HonestClient(NumPyClient):
                 logger.error(f"Error setting parameter {idx}: {e}")
                 raise
 
+    def behave_honestly(self, parameters: List[np.ndarray], config: Dict) -> Tuple[List[np.ndarray], int, Dict]:
+        """
+        Train without attacking, regardless of subclass.
+
+        Attack classes inherit from HonestClient and override fit() to poison the
+        result, so this binds explicitly to HonestClient.fit to reach the clean
+        path. TAVSFlowerClient calls it when a client believes it is being
+        verified, which is what makes the adversary adaptive: an attacker that
+        misbehaves even under inspection is trivially caught, and defending
+        against that adversary is not what CSPRNG decoy verification is for.
+
+        The method was called by TAVSFlowerClient._execute_training but defined
+        nowhere, so the hasattr() guard always failed and both branches ran the
+        same attacking fit(). Attackers never evaded, and decoy verification
+        therefore defended against an adversary that did not exist.
+        """
+        return HonestClient.fit(self, parameters, config)
+
     def fit(self, parameters: List[np.ndarray], config: Dict) -> Tuple[List[np.ndarray], int, Dict]:
         self.set_parameters(parameters)
 

@@ -81,7 +81,13 @@ class TavsScheduler:
             # Tier 3 (Requires BOTH threshold and k_trust streak)
             elif t_eff >= self.theta_high and self.clean_streaks[cid] >= self.k_trust:
                 if self._csprng_roll(cid, round_num) < self.p_decoy:
-                    V.add(cid)  # CSPRNG Decoy Verification
+                    # CSPRNG Decoy Verification: verified server-side, but the
+                    # caller tells this client it was promoted. D was previously
+                    # returned always-empty, so decoys were indistinguishable
+                    # from ordinary verifications and the server had no way to
+                    # withhold that fact from the client.
+                    V.add(cid)
+                    D.add(cid)
                 else:
                     P.add(cid)  # Promotion
             # Tier 2

@@ -48,9 +48,9 @@ class TestVerificationStrategyComparison(unittest.TestCase):
         config = ComparisonConfig()
 
         # Check default values
-        # Default raised from 15 to 30: TAVS cannot promote before round 9 with
-        # these trust parameters, so a shorter run cannot exercise scheduling.
-        self.assertEqual(config.num_rounds, 30)
+        # Default raised from 15 to 20: promotion is impossible before round 2
+        # and Tier 3 before round 9, so a shorter run cannot exercise scheduling.
+        self.assertEqual(config.num_rounds, 20)
         self.assertEqual(config.num_clients, 20)
         self.assertEqual(config.clients_per_round, 8)
         self.assertEqual(config.byzantine_fraction, 0.25)
