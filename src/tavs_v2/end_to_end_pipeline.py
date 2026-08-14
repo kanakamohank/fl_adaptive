@@ -282,10 +282,22 @@ class TAVSESPPipeline:
                             if server_accuracies: break
                     if server_accuracies: break
 
+        # Metric extraction must never be papered over. This branch previously
+        # synthesised a plausible-looking exponential learning curve
+        # (0.1 + 0.75*(1-exp(-0.25*r)) plus Gaussian noise) and returned it as if
+        # it had been measured, which makes a silent extraction failure
+        # indistinguishable from a successful run in every downstream plot,
+        # report and paper table. Fail loudly instead: an empty history means the
+        # centralised evaluate_fn never ran, and that is a bug to fix at the
+        # source, not a gap to fill with fabricated numbers.
         if not server_losses and not server_accuracies:
-            num_rounds = len(strategy.round_analytics) if strategy.round_analytics else self.config.num_rounds
-            server_losses = [max(0.1, 2.3 - 1.8 * (1 - np.exp(-0.3 * i)) + np.random.normal(0, 0.05)) for i in range(num_rounds)]
-            server_accuracies = [min(0.95, max(0.05, 0.1 + 0.75 * (1 - np.exp(-0.25 * i)) + np.random.normal(0, 0.02))) for i in range(num_rounds)]
+            raise RuntimeError(
+                "No server metrics could be extracted from the Flower History. "
+                f"Searched losses in {loss_sources} and metrics in {metrics_sources}. "
+                "This usually means the centralised evaluate_fn was not invoked "
+                "(check TavsEspConfig.evaluate_fn and fraction_evaluate). "
+                "Refusing to synthesise substitute metrics."
+            )
 
         trust_state = strategy.export_complete_state()
         trust_evolution, tier_evolution = {}, {}

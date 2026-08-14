@@ -81,18 +81,32 @@ class NullSpaceAttacker(HonestClient):
         # Use CPU for SVD (more stable)
         matrix_cpu = matrix.cpu()
 
-        # SVD: R = U Σ V^T
+        # SVD: R = U Σ V^T, with full_matrices=True so Vt is (d, d).
         U, S, Vt = torch.linalg.svd(matrix_cpu, full_matrices=True)
 
-        # Find indices where singular values are effectively zero
-        null_indices = torch.where(S < tolerance)[0]
+        # For a (k, d) projection with k < d, torch returns only min(k, d) = k
+        # singular values. The null space of R has dimension d - rank(R), which
+        # for a wide full-row-rank matrix is d - k -- and none of that shows up
+        # as a zero entry in S, because S simply has no entries past index k.
+        #
+        # Testing `S < tolerance` therefore finds nothing and reports "full rank"
+        # for every wide projection matrix, which is exactly the shape ESP uses
+        # (k=150 rows over d=1.1M columns). The null space must instead be read
+        # off the trailing rows of Vt, which span the orthogonal complement of
+        # the row space regardless of how many singular values were returned.
+        d = matrix_cpu.shape[1]
+        rank = int(torch.sum(S > tolerance).item())
+        null_dim = d - rank
 
-        if len(null_indices) == 0:
-            logger.warning("No null space found - projection matrix is full rank")
+        if null_dim <= 0:
+            logger.warning(
+                f"No null space: projection matrix is ({matrix_cpu.shape[0]}, {d}) "
+                f"with rank {rank}, leaving no orthogonal complement."
+            )
             return []
 
-        # Null space vectors are columns of V corresponding to zero singular values
-        null_vectors = Vt[len(S):, :].T  # Shape: (d, null_dim)
+        # Rows rank..d-1 of Vt are an orthonormal basis of ker(R).
+        null_vectors = Vt[rank:, :].T  # Shape: (d, null_dim)
 
         # Convert back to device and split into list
         null_space_vectors = []
@@ -100,8 +114,8 @@ class NullSpaceAttacker(HonestClient):
             null_vec = null_vectors[:, i].to(self.device)
             null_space_vectors.append(null_vec)
 
-        logger.debug(f"Computed null space: {len(null_space_vectors)} vectors from matrix "
-                    f"with {len(null_indices)} zero singular values")
+        logger.debug(f"Computed null space: {len(null_space_vectors)} basis vectors "
+                    f"for a ({matrix_cpu.shape[0]}, {d}) matrix of rank {rank}")
 
         return null_space_vectors
 
@@ -114,10 +128,30 @@ class NullSpaceAttacker(HonestClient):
         # First perform honest training
         honest_params, num_examples, metrics = super().fit(parameters, config)
 
-        # If we haven't learned the projection matrix, act honestly
+        # Without a learned projection matrix there is no null space to hide in,
+        # so this attacker degrades to an ordinary honest client.
+        #
+        # That degradation is legitimate behaviour (it is exactly what ESP's
+        # ephemeral R_t is meant to force), but it must never be silent: an
+        # experiment configured with null-space attackers that were never armed
+        # produces results identical to a no-attack run, and at debug level
+        # nothing in the logs or metrics distinguishes the two. Callers inspect
+        # `attack_executed` to tell "the defence worked" from "no attack was
+        # ever attempted".
         if self.static_projection_matrix is None or not self.null_space_vectors:
-            logger.debug(f"Attacker {self.client_id} acting honestly (no projection learned)")
-            return honest_params, num_examples, metrics
+            logger.warning(
+                f"Attacker {self.client_id} is UNARMED (no projection matrix learned) "
+                f"and is behaving honestly this round. Call learn_static_projection() "
+                f"before fit() if this client is meant to attack."
+            )
+            unarmed_metrics = metrics.copy()
+            unarmed_metrics.update({
+                "attack_type": "null_space",
+                "is_attacker": True,
+                "attack_executed": False,
+                "attack_unarmed_reason": "no_projection_matrix",
+            })
+            return honest_params, num_examples, unarmed_metrics
 
         # Convert parameters to tensors for manipulation
         param_tensors = [torch.tensor(param, dtype=torch.float32).to(self.device)
@@ -151,7 +185,10 @@ class NullSpaceAttacker(HonestClient):
             "attack_type": "null_space_poisoning",
             "attack_intensity": self.attack_intensity,
             "poison_norm": torch.norm(poison_vector).item(),
-            "is_attacker": True
+            "is_attacker": True,
+            # Counterpart of the unarmed branch above: lets analysis separate
+            # "attack ran and was defeated" from "attack never ran".
+            "attack_executed": True,
         })
 
         self.round_history.append({

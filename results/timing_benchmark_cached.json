@@ -1,0 +1,150 @@
+{
+  "environment": {
+    "device": "cpu",
+    "torch": "2.13.0+cu130",
+    "platform": "Linux-6.18.5-fc-v20-x86_64-with-glibc2.39",
+    "threads": 4
+  },
+  "config": {
+    "num_clients": 20,
+    "byzantine_fraction": 0.25,
+    "byzantine_clients": [
+      "client_0",
+      "client_1",
+      "client_2",
+      "client_3",
+      "client_4"
+    ],
+    "model_parameters": 1147466,
+    "num_blocks": 10,
+    "target_k": 150,
+    "tau_z": 2.0,
+    "reps": 8,
+    "warmup": 2,
+    "fresh_projection_per_rep": false,
+    "seed": 42,
+    "warm_rounds": 60,
+    "measured_at_round": 60
+  },
+  "scheduling": {
+    "trust_scores": {
+      "client_0": 0.2000898505149957,
+      "client_1": 0.2000898505149957,
+      "client_10": 0.3253908153161503,
+      "client_11": 0.36159414304054627,
+      "client_12": 0.3614331956485173,
+      "client_13": 0.29262264522345194,
+      "client_14": 0.29248752539297124,
+      "client_15": 0.36140838687552435,
+      "client_16": 0.3612883429956913,
+      "client_17": 0.36106756468015083,
+      "client_18": 0.3253908153161503,
+      "client_19": 0.36159414304054627,
+      "client_2": 0.2000898505149957,
+      "client_3": 0.2000898505149957,
+      "client_4": 0.2000898505149957,
+      "client_5": 0.36159414304054627,
+      "client_6": 0.3612883429956913,
+      "client_7": 0.3614331956485173,
+      "client_8": 0.32558951580013656,
+      "client_9": 0.3614331956485173
+    },
+    "verified": [
+      "client_0",
+      "client_1",
+      "client_13",
+      "client_14",
+      "client_2",
+      "client_3",
+      "client_4"
+    ],
+    "promoted": [
+      "client_10",
+      "client_11",
+      "client_12",
+      "client_15",
+      "client_16",
+      "client_17",
+      "client_18",
+      "client_19",
+      "client_5",
+      "client_6",
+      "client_7",
+      "client_8",
+      "client_9"
+    ],
+    "num_verified": 7,
+    "num_promoted": 13,
+    "verification_reduction_vs_full": 0.65
+  },
+  "measurements": {
+    "fedavg": {
+      "name": "fedavg",
+      "median_ms": 37.61299500001769,
+      "ci95_low_ms": 20.32345999998597,
+      "ci95_high_ms": 122.94381799995335,
+      "n": 8,
+      "min_ms": 19.538852999971823,
+      "max_ms": 144.57012400004032
+    },
+    "full_verify": {
+      "name": "full_verify",
+      "median_ms": 205.31231149996643,
+      "ci95_low_ms": 202.06928599998264,
+      "ci95_high_ms": 219.59875099997817,
+      "n": 8,
+      "min_ms": 194.69580200001246,
+      "max_ms": 223.74585300002536
+    },
+    "tavs_esp": {
+      "name": "tavs_esp",
+      "median_ms": 77.68212850001532,
+      "ci95_low_ms": 73.53578800001515,
+      "ci95_high_ms": 80.68433200003255,
+      "n": 8,
+      "min_ms": 71.2821340000005,
+      "max_ms": 84.54371199997013
+    },
+    "stage_schedule": {
+      "name": "stage_schedule",
+      "median_ms": 0.012741999995569131,
+      "ci95_low_ms": 0.011771999993470672,
+      "ci95_high_ms": 0.014352000050621427,
+      "n": 8,
+      "min_ms": 0.011330999996062019,
+      "max_ms": 0.028305999990152486
+    },
+    "stage_project": {
+      "name": "stage_project",
+      "median_ms": 68.23682249998342,
+      "ci95_low_ms": 67.473710999991,
+      "ci95_high_ms": 72.84558199995672,
+      "n": 8,
+      "min_ms": 64.52542099998482,
+      "max_ms": 76.82506399999056
+    },
+    "stage_detect": {
+      "name": "stage_detect",
+      "median_ms": 0.6076795000069524,
+      "ci95_low_ms": 0.5750299999931485,
+      "ci95_high_ms": 0.7133309999858284,
+      "n": 8,
+      "min_ms": 0.5577649999963796,
+      "max_ms": 0.8353810000016892
+    }
+  },
+  "client_reference": {
+    "per_batch_ms": 33.561093000002984,
+    "per_client_round_ms": 2617.7652540002327,
+    "samples_per_client": 2500,
+    "batch_size": 32,
+    "local_epochs": 1
+  },
+  "analysis": {
+    "tavs_minus_fedavg_ms": 40.06913349999763,
+    "full_minus_fedavg_ms": 167.69931649994874,
+    "tavs_speedup_vs_full": 2.6429799937823013,
+    "server_overhead_pct_of_round_tavs": 1.5089802560175243,
+    "server_overhead_pct_of_round_full": 6.315458694560276
+  }
+}

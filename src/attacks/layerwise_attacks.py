@@ -81,9 +81,24 @@ class LayerwiseBackdoorAttacker(HonestClient):
         # First perform honest training
         honest_params, num_examples, metrics = super().fit(parameters, config)
 
+        # No resolvable target layers means no backdoor can be injected, so this
+        # attacker silently becomes an honest client. Same hazard as the
+        # null-space case: a typo in target_layers turns an "attack" scenario
+        # into a no-attack scenario with nothing in the results to show for it.
         if not self.backdoor_patterns:
-            logger.debug(f"Attacker {self.client_id} acting honestly (no valid targets)")
-            return honest_params, num_examples, metrics
+            logger.warning(
+                f"Attacker {self.client_id} is UNARMED: none of target_layers="
+                f"{self.target_layers} matched a block in the model structure, "
+                f"so no backdoor patterns were built. Behaving honestly."
+            )
+            unarmed_metrics = metrics.copy()
+            unarmed_metrics.update({
+                "attack_type": "layerwise_backdoor",
+                "is_attacker": True,
+                "attack_executed": False,
+                "attack_unarmed_reason": "no_matching_target_layers",
+            })
+            return honest_params, num_examples, unarmed_metrics
 
         # Convert to tensors and inject backdoors
         param_tensors = [torch.tensor(param, dtype=torch.float32).to(self.device)
@@ -105,6 +120,7 @@ class LayerwiseBackdoorAttacker(HonestClient):
             "target_layers": self.target_layers,
             "attack_intensity": self.attack_intensity,
             "is_attacker": True,
+            "attack_executed": True,
             **attack_stats
         })
 
