@@ -242,4 +242,7 @@ def test_strategy_defaults_to_clipping_enabled():
 
     config = TavsEspConfig()
     assert config.clip_promoted_updates is True
-    assert config.promoted_clip_factor == 1.0
+    # 2.0, not 1.0: measured selectivity of 0/57 honest clipped vs 16/48 under
+    # attack, where 1.0 clipped ~97% in both cases and acted as blanket
+    # normalisation rather than an outlier filter.
+    assert config.promoted_clip_factor == 2.0
