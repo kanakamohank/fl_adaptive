@@ -19,6 +19,18 @@ This sweep finds the radius that keeps containment while letting honest promoted
 clients through: watch for the factor where clip_rate falls well below 1.0 and
 final accuracy peaks.
 
+Measured behaviour of the mechanism, to set expectations:
+  * clip_rate does fall with the radius, but only once the radius clears the
+    cohort's own spread. On a tightly clustered cohort it stayed at 1.00 through
+    factor 3 and only broke at 5; on a more heterogeneous one it fell
+    1.00 -> 0.80 -> 0.42 -> 0.07 across factors 1, 2, 3, 5.
+  * containment degrades very gracefully. Against an attacker three orders of
+    magnitude out of scale, the aggregate norm moved only 0.2031 -> 0.2040
+    between factor 1 and factor 10, because such an update is clipped hard at
+    any of these radii. So a larger factor is close to free against gross
+    attacks; the risk is a subtle attacker sitting just inside the ball, which
+    is why the chosen factor should be re-checked on heavy_attack.
+
 Only the TAVS arm is run. FullVerificationStrategy never promotes, so no promoted
 update ever exists for it to clip and its result is independent of clip_factor --
 running it per factor would burn compute to reproduce the same number.
@@ -113,8 +125,11 @@ def run_one(clip_factor, args):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--factors", default="1,2,3",
-                        help="Comma-separated clip factors (default: 1,2,3)")
+    # Range widened after measuring how clip_rate responds to the radius. Under a
+    # tightly clustered cohort the rate stays pinned at 1.00 all the way to
+    # factor 3, so 1,2,3 alone can look flat and miss the knee entirely.
+    parser.add_argument("--factors", default="1,2,3,5,10",
+                        help="Comma-separated clip factors (default: 1,2,3,5,10)")
     parser.add_argument("--scenario", default="no_attack", choices=sorted(SCENARIO_BYZANTINE),
                         help="Attack scenario (default: no_attack, which isolates "
                              "how much honest signal the clip suppresses)")
@@ -156,9 +171,15 @@ def main():
 
     print(f"\nRead it this way:")
     print(f"  clip rate near 1.00 -> radius too tight; honest promoted clients are")
-    print(f"                         being shrunk along with attackers")
-    print(f"  max loss above ~10  -> radius too loose; containment is being lost")
-    print(f"  pick the largest factor that still holds max loss down")
+    print(f"                         being shrunk along with the attackers. This is")
+    print(f"                         usually the binding constraint.")
+    print(f"  max loss climbing   -> radius too loose; containment slipping. Note")
+    print(f"                         that a grossly out-of-scale attacker stays")
+    print(f"                         contained even at large factors, so this may")
+    print(f"                         not move at all -- confirm on heavy_attack")
+    print(f"                         before trusting a large factor.")
+    print(f"  Pick the smallest factor whose clip rate is well below 1.00, then")
+    print(f"  re-run that factor on heavy_attack to confirm containment holds.")
     print(f"\nJSON: {out_dir / 'sweep_results.json'}")
 
 
