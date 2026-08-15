@@ -1,4 +1,5 @@
 import logging
+import random
 import time
 from typing import Dict, List, Optional, Tuple, Union, Callable
 from dataclasses import dataclass
@@ -44,6 +45,12 @@ class TavsEspConfig:
     master_key: bytes = b'default_key'
     evaluate_fn: Optional[Callable] = None
     min_inlier_fraction_for_agg: float = 0.25
+
+    # Re-draw the per-round cohort with our own seeded RNG instead of relying on
+    # Flower's module-level one, which the run seed does not reach. Without this
+    # the same seed produced different cohorts across runs.
+    deterministic_sampling: bool = True
+    sampling_seed: int = 0
 
     # Bound how far an unverified (promoted) update may deviate from the verified
     # consensus before it is projected back onto that ball. gamma_budget bounds
@@ -144,6 +151,9 @@ class TavsEspStrategy(Strategy):
         # aggregate_fit never has to trust a client's self-report.
         self._round_assignments: Dict[int, Dict[str, set]] = {}
 
+        # Round index, set by configure_fit so cohort sampling can be keyed on it.
+        self._current_round = 0
+
     def initialize_parameters(self, client_manager):
         from src.core.models import get_model
         
@@ -172,9 +182,25 @@ class TavsEspStrategy(Strategy):
         min_num = min(getattr(self.config, "min_available_clients", sample_size), num_available)
 
         sampled = client_manager.sample(num_clients=sample_size, min_num_clients=min_num)
+
+        # Flower samples with its own module-level RNG, which our seed never
+        # touches. That is why re-running the same seed changed verification
+        # counts (107 -> 112) and moved late accuracy by up to 0.092. Re-select
+        # deterministically from the returned pool instead: sort by client id so
+        # the order does not depend on Flower's internal state, then draw with a
+        # generator keyed on (round, seed).
+        if getattr(self.config, "deterministic_sampling", True) and hasattr(client_manager, "all"):
+            pool = sorted(client_manager.all().values(), key=lambda p: p.cid)
+            if len(pool) >= sample_size:
+                rng = random.Random(
+                    f"{getattr(self.config, 'sampling_seed', 0)}_{self._current_round}"
+                )
+                sampled = rng.sample(pool, sample_size)
+
         return {proxy.cid: proxy for proxy in sampled}
 
     def configure_fit(self, server_round: int, parameters: Parameters, client_manager: fl.server.client_manager.ClientManager):
+        self._current_round = server_round
         # Sample the per-round cohort BEFORE scheduling.
         #
         # This previously used client_manager.all(), which made every client in
@@ -432,6 +458,7 @@ class FullVerificationStrategy(TavsEspStrategy):
 
     def configure_fit(self, server_round: int, parameters: Parameters,
                       client_manager: fl.server.client_manager.ClientManager):
+        self._current_round = server_round
         sampled = list(self._sample_cohort(client_manager).values())
         if not sampled:
             return []

@@ -33,6 +33,7 @@ import argparse
 import json
 import logging
 import os
+import math
 import statistics
 import sys
 import time
@@ -42,6 +43,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 import numpy as np
+from scipy import stats
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -69,7 +71,10 @@ def run_one(arm, strategy_class, seed, args):
         strategy_class=strategy_class,
         data_alpha=args.data_alpha,
         seed=seed,
-        output_dir=str(Path(args.results_dir) / f"{arm}_seed{seed}"),
+        # Round count is part of the path. Without it a 100-round run would
+        # overwrite the 20-round results for the same seed, and the summary JSON
+        # with them, destroying the dataset it is meant to be compared against.
+        output_dir=str(Path(args.results_dir) / f"r{args.rounds}" / f"{arm}_seed{seed}"),
     )
 
     print(f"\n{'=' * 70}\n{arm}  seed={seed}  ({args.rounds} rounds, no attack)\n{'=' * 70}")
@@ -89,6 +94,60 @@ def run_one(arm, strategy_class, seed, args):
         "total_promoted": sum(s["num_promoted"] for s in sched),
         "elapsed_seconds": time.time() - started,
     }
+
+
+def paired_difference(rows, seeds, key, arm_a="tavs", arm_b="full_verification"):
+    """
+    Paired statistics for arm_a minus arm_b, matched by seed.
+
+    The design is paired by construction: both arms at a given seed share the
+    same client split, the same model initialisation and the same local training
+    order, so the seed-level variation cancels in the difference. Comparing the
+    two group means against a within-arm standard deviation -- which this script
+    originally did -- throws that cancellation away and is the wrong test.
+
+    On the first 3-seed run the difference was concrete: the largest within-arm
+    sd was 0.039 while the sd of the paired differences was 0.022, so the
+    unpaired yardstick was ~1.8x too wide and reported "consistent with no
+    accuracy cost" for a gap that was negative in all three seeds.
+
+    Also returns the number of seeds needed for 80% power at the observed effect
+    size, since with a handful of seeds "not significant" usually means
+    underpowered rather than absent.
+    """
+    a = [next(r[key] for r in rows if r["arm"] == arm_a and r["seed"] == s) for s in seeds]
+    b = [next(r[key] for r in rows if r["arm"] == arm_b and r["seed"] == s) for s in seeds]
+    diffs = [x - y for x, y in zip(a, b)]
+
+    n = len(diffs)
+    mean = statistics.mean(diffs)
+    out = {
+        "per_seed": {str(s): d for s, d in zip(seeds, diffs)},
+        "mean": mean,
+        "n": n,
+        # Sign consistency carries real information at small n even when the
+        # p-value does not clear 0.05.
+        "n_negative": sum(1 for d in diffs if d < 0),
+        "n_positive": sum(1 for d in diffs if d > 0),
+    }
+
+    if n < 2:
+        out.update({"sd": 0.0, "stderr": 0.0, "t": None, "p": None,
+                    "ci95": (None, None), "seeds_for_80pct_power": None})
+        return out
+
+    sd = statistics.stdev(diffs)
+    stderr = sd / math.sqrt(n)
+    t_stat, p_value = stats.ttest_rel(a, b)
+    ci = stats.t.interval(0.95, n - 1, loc=mean, scale=stderr) if stderr > 0 else (mean, mean)
+
+    # Two-sided, alpha=0.05, power=0.80 -> (z_{a/2} + z_beta)^2 * sd^2 / mean^2.
+    power_n = math.ceil(((1.96 + 0.84) * sd / abs(mean)) ** 2) if mean else None
+
+    out.update({"sd": sd, "stderr": stderr,
+                "t": float(t_stat), "p": float(p_value),
+                "ci95": (ci[0], ci[1]), "seeds_for_80pct_power": power_n})
+    return out
 
 
 def summarise(rows, arm, key):
@@ -152,7 +211,7 @@ def make_plot(rows, args, out_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--seeds", default="1,2,3,4,5")
+    parser.add_argument("--seeds", default="1,2,3")
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--num-clients", type=int, default=20)
     parser.add_argument("--clients-per-round", type=int, default=8)
@@ -170,17 +229,22 @@ def main():
             for seed in args.seed_list
             for arm, cls in ARMS.items()]
 
-    out_dir = Path(args.results_dir)
+    paired_stats = {m: paired_difference(rows, args.seed_list, m)
+                    for m in ("late_accuracy", "final_accuracy", "total_verified")}
+
+    out_dir = Path(args.results_dir) / f"r{args.rounds}"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "seeded_results.json").write_text(json.dumps(
         {"config": {k: v for k, v in vars(args).items() if k != "seed_list"},
-         "seeds": args.seed_list, "runs": rows}, indent=2))
+         "seeds": args.seed_list, "runs": rows,
+         "paired_statistics": paired_stats}, indent=2))
 
     plot_path = out_dir / "tavs_vs_full_no_attack.png"
     make_plot(rows, args, plot_path)
 
     acc = {a: summarise(rows, a, "late_accuracy") for a in ARMS}
     ver = {a: summarise(rows, a, "total_verified") for a in ARMS}
+    paired = paired_stats
 
     print(f"\n{'=' * 76}")
     print(f"TAVS vs FULL VERIFICATION - no attack, {len(args.seed_list)} seeds")
@@ -190,49 +254,43 @@ def main():
         print(f"{a:>20} {acc[a]['mean']:>15.3f} +-{acc[a]['std']:.3f} "
               f"{ver[a]['mean']:>16.0f}")
 
-    # d = acc["tavs"]["mean"] - acc["full_verification"]["mean"]
-    # pooled = max(acc["tavs"]["std"], acc["full_verification"]["std"])
-    # saving = 1 - ver["tavs"]["mean"] / ver["full_verification"]["mean"]
-    #
-    # print(f"\n  verification saving : {saving * 100:.0f}%")
-    # print(f"  accuracy difference : {d:+.3f}  (largest within-arm std {pooled:.3f})")
-    # if abs(d) < pooled:
-    #     print(f"  -> difference is SMALLER than the seed-to-seed spread: with "
-    #           f"{len(args.seed_list)} seeds\n     this is consistent with no accuracy cost, "
-    #           f"but does not prove equivalence.")
-    # else:
-    #     print(f"  -> difference EXCEEDS the seed spread; likely real, but "
-    #           f"{len(args.seed_list)} seeds\n     is thin evidence -- confirm with more before "
-    #           f"citing the magnitude.")
-    # print(f"\nPlot: {plot_path}\nJSON: {out_dir / 'seeded_results.json'}")
-
-    d = acc["tavs"]["mean"] - acc["full_verification"]["mean"]
     saving = 1 - ver["tavs"]["mean"] / ver["full_verification"]["mean"]
+    print(f"\n  verification saving : {saving * 100:.1f}%")
 
-    # --- MINIMAL FIX: Calculate Standard Error of Paired Differences ---
-    t_acc = {r["seed"]: r["late_accuracy"] for r in rows if r["arm"] == "tavs"}
-    f_acc = {r["seed"]: r["late_accuracy"] for r in rows if r["arm"] == "full_verification"}
+    # Paired analysis. Both arms at a given seed share the split, the init and
+    # the training order, so the seed-level variance cancels in the difference.
+    for metric, label in (("late_accuracy", "late accuracy"),
+                          ("final_accuracy", "final accuracy")):
+        st_ = paired[metric]
+        print(f"\n  {label} (TAVS - Full, paired by seed)")
+        print("    per seed: " + "  ".join(
+            f"s{k}:{v:+.3f}" for k, v in st_["per_seed"].items()))
+        if st_["p"] is None:
+            print(f"    mean {st_['mean']:+.4f}  (need >=2 seeds for a test)")
+            continue
+        print(f"    mean {st_['mean']:+.4f}   sd {st_['sd']:.4f}   "
+              f"95% CI [{st_['ci95'][0]:+.4f}, {st_['ci95'][1]:+.4f}]")
+        print(f"    paired t = {st_['t']:.3f},  p = {st_['p']:.4f},  "
+              f"same-sign seeds: {max(st_['n_negative'], st_['n_positive'])}/{st_['n']}")
 
-    diffs = [t_acc[s] - f_acc[s] for s in args.seed_list if s in t_acc and s in f_acc]
-    n = len(diffs)
-    std_diff = (sum((x - d) ** 2 for x in diffs) / (n - 1)) ** 0.5 if n > 1 else 0
-    sem_diff = std_diff / (n ** 0.5)
-    # -------------------------------------------------------------------
+        if st_["p"] < 0.05:
+            print(f"    -> SIGNIFICANT at alpha=0.05. TAVS is "
+                  f"{'lower' if st_['mean'] < 0 else 'higher'} by "
+                  f"{abs(st_['mean']):.3f} on this metric.")
+        else:
+            # Not significant is not the same as no effect, especially here.
+            consistent = max(st_["n_negative"], st_["n_positive"]) == st_["n"]
+            print(f"    -> not significant at alpha=0.05.", end=" ")
+            if consistent:
+                print(f"But the sign is consistent across ALL {st_['n']} seeds,")
+                print(f"       which points at an underpowered look rather than no effect.")
+            else:
+                print(f"Sign is not consistent across seeds either.")
+            if st_["seeds_for_80pct_power"]:
+                print(f"       ~{st_['seeds_for_80pct_power']} seeds would give 80% power "
+                      f"at this effect size.")
 
-    print(f"\n  verification saving : {saving * 100:.0f}%")
-    print(f"  accuracy difference : {d:+.3f}  (SEM of paired diffs {sem_diff:.3f})")
-
-    # 2 * SEM is a rough 95% confidence interval for the true mean difference
-    if abs(d) < (2 * sem_diff):
-        print(f"  -> difference is SMALLER than the seed-to-seed spread: with "
-              f"{len(args.seed_list)} seeds\n     this is consistent with no accuracy cost, "
-              f"but does not prove equivalence.")
-    else:
-        print(f"  -> difference EXCEEDS the seed spread; likely real, but "
-              f"{len(args.seed_list)} seeds\n     is thin evidence -- confirm with more before "
-              f"citing the magnitude.")
     print(f"\nPlot: {plot_path}\nJSON: {out_dir / 'seeded_results.json'}")
-
 
 
 if __name__ == "__main__":
