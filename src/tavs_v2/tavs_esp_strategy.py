@@ -52,9 +52,21 @@ class TavsEspConfig:
     # dominate the aggregate outright. Exposed as a flag so the clipped and
     # unclipped variants can be run as a controlled ablation.
     clip_promoted_updates: bool = True
-    # Radius as a multiple of the verified cohort's median deviation. 1.0 reads
-    # as "a promoted client may deviate as much as a typical verified client".
-    promoted_clip_factor: float = 1.0
+    # Radius as a multiple of the verified cohort's median deviation.
+    #
+    # 2.0 measured on CIFAR-10 at data_alpha=0.3 with layerwise/distributed
+    # attackers: it clipped 0 of 57 promoted updates with no attacker present
+    # and 16 of 48 under a 25% Byzantine fraction, i.e. it fires on roughly the
+    # attacker population and is inert on honest cohorts. At 1.0 it clipped
+    # ~97% in BOTH cases, behaving as blanket normalisation rather than an
+    # outlier filter. Containment is nearly independent of the factor in this
+    # range, so the looser radius costs nothing against gross attacks.
+    #
+    # This is an empirical value for that setup, not a universal constant: it
+    # depends on the ratio between honest heterogeneity and attack magnitude.
+    # The radius itself is self-calibrating (a multiple of the cohort's own
+    # median deviation), which is what makes it transfer at all.
+    promoted_clip_factor: float = 2.0
 
 class LegacyAnalyticsBridge:
     def __init__(self, round_num, outliers, trust_scores, p_ids, execution_time_ms):

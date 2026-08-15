@@ -53,6 +53,16 @@ class PipelineConfig:
     output_dir: str = "tavs_esp_results"
     save_client_data: bool = False
 
+    # Master seed for this run. Controls model initialisation, DataLoader
+    # shuffling, local SGD ordering and the Dirichlet client split.
+    #
+    # Note this does NOT control the ESP projection matrices: those are derived
+    # deterministically from SHA-256(master_key || round || block), so they are
+    # identical across runs sharing a master_key and contribute no run-to-run
+    # variance. Vary master_key separately to test sensitivity to the projection
+    # draw -- that is a different question from statistical significance.
+    seed: int = 42
+
     # Refuse to run when TAVS cannot promote within num_rounds. Disable only for
     # tests that build deliberately tiny pipelines to exercise plumbing; a real
     # experiment with this off silently reports a 1.0x efficiency result.
@@ -98,14 +108,25 @@ class TAVSESPPipeline:
         self.client_configs = None
 
     def setup_data_and_model(self):
+        # Seed before anything stochastic. torch covers model init, DataLoader
+        # shuffling and local SGD; numpy covers client sampling.
+        torch.manual_seed(self.config.seed)
+        np.random.seed(self.config.seed)
+
         if self.config.dataset == "cifar10":
             train_dataset, self.test_dataset = load_cifar10()
         else:
             raise ValueError(f"Unsupported dataset: {self.config.dataset}")
 
+        # create_dirichlet_splits resets the global numpy seed internally, so the
+        # run seed must be passed explicitly or every run gets the same split.
         self.client_datasets = create_dirichlet_splits(
-            train_dataset, num_clients=self.config.num_clients, alpha=self.config.data_alpha
+            train_dataset, num_clients=self.config.num_clients,
+            alpha=self.config.data_alpha, seed=self.config.seed
         )
+        # Restore the run seed: the split helper left the global RNG at its own
+        # state, which would otherwise be identical for every seed value.
+        np.random.seed(self.config.seed)
 
         model = get_model(self.config.model_type, num_classes=10)
         if hasattr(model, 'structure'):
