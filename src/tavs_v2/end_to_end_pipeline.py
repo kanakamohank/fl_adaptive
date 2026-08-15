@@ -25,7 +25,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class PipelineConfig:
-    num_rounds: int = 50
+    num_rounds: int = 100
     num_clients: int = 20
     clients_per_round: int = 10
     byzantine_fraction: float = 0.25
@@ -42,7 +42,7 @@ class PipelineConfig:
     # keeps the two arms from silently becoming the same algorithm.
     strategy_class: type = None
 
-    client_epochs: int = 5
+    client_epochs: int = 2
     client_batch_size: int = 32
     client_learning_rate: float = 0.01
 
@@ -280,7 +280,7 @@ class TAVSESPPipeline:
                     param.data = torch.tensor(new_param, dtype=param.dtype)
 
                 _, test_data = load_cifar10()
-                test_subset = torch.utils.data.Subset(test_data, range(min(1000, len(test_data))))
+                test_subset = torch.utils.data.Subset(test_data, range(min(10000, len(test_data))))
                 test_loader = torch.utils.data.DataLoader(test_subset, batch_size=64, shuffle=False)
 
                 model.eval()
