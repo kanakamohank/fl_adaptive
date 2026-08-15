@@ -152,7 +152,7 @@ def make_plot(rows, args, out_path):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--seeds", default="1,2,3")
+    parser.add_argument("--seeds", default="1,2,3,4,5")
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--num-clients", type=int, default=20)
     parser.add_argument("--clients-per-round", type=int, default=8)
@@ -190,13 +190,40 @@ def main():
         print(f"{a:>20} {acc[a]['mean']:>15.3f} +-{acc[a]['std']:.3f} "
               f"{ver[a]['mean']:>16.0f}")
 
+    # d = acc["tavs"]["mean"] - acc["full_verification"]["mean"]
+    # pooled = max(acc["tavs"]["std"], acc["full_verification"]["std"])
+    # saving = 1 - ver["tavs"]["mean"] / ver["full_verification"]["mean"]
+    #
+    # print(f"\n  verification saving : {saving * 100:.0f}%")
+    # print(f"  accuracy difference : {d:+.3f}  (largest within-arm std {pooled:.3f})")
+    # if abs(d) < pooled:
+    #     print(f"  -> difference is SMALLER than the seed-to-seed spread: with "
+    #           f"{len(args.seed_list)} seeds\n     this is consistent with no accuracy cost, "
+    #           f"but does not prove equivalence.")
+    # else:
+    #     print(f"  -> difference EXCEEDS the seed spread; likely real, but "
+    #           f"{len(args.seed_list)} seeds\n     is thin evidence -- confirm with more before "
+    #           f"citing the magnitude.")
+    # print(f"\nPlot: {plot_path}\nJSON: {out_dir / 'seeded_results.json'}")
+
     d = acc["tavs"]["mean"] - acc["full_verification"]["mean"]
-    pooled = max(acc["tavs"]["std"], acc["full_verification"]["std"])
     saving = 1 - ver["tavs"]["mean"] / ver["full_verification"]["mean"]
 
+    # --- MINIMAL FIX: Calculate Standard Error of Paired Differences ---
+    t_acc = {r["seed"]: r["late_accuracy"] for r in rows if r["arm"] == "tavs"}
+    f_acc = {r["seed"]: r["late_accuracy"] for r in rows if r["arm"] == "full_verification"}
+
+    diffs = [t_acc[s] - f_acc[s] for s in args.seed_list if s in t_acc and s in f_acc]
+    n = len(diffs)
+    std_diff = (sum((x - d) ** 2 for x in diffs) / (n - 1)) ** 0.5 if n > 1 else 0
+    sem_diff = std_diff / (n ** 0.5)
+    # -------------------------------------------------------------------
+
     print(f"\n  verification saving : {saving * 100:.0f}%")
-    print(f"  accuracy difference : {d:+.3f}  (largest within-arm std {pooled:.3f})")
-    if abs(d) < pooled:
+    print(f"  accuracy difference : {d:+.3f}  (SEM of paired diffs {sem_diff:.3f})")
+
+    # 2 * SEM is a rough 95% confidence interval for the true mean difference
+    if abs(d) < (2 * sem_diff):
         print(f"  -> difference is SMALLER than the seed-to-seed spread: with "
               f"{len(args.seed_list)} seeds\n     this is consistent with no accuracy cost, "
               f"but does not prove equivalence.")
@@ -205,6 +232,7 @@ def main():
               f"{len(args.seed_list)} seeds\n     is thin evidence -- confirm with more before "
               f"citing the magnitude.")
     print(f"\nPlot: {plot_path}\nJSON: {out_dir / 'seeded_results.json'}")
+
 
 
 if __name__ == "__main__":
