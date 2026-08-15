@@ -71,7 +71,10 @@ def run_one(arm, strategy_class, seed, args):
         strategy_class=strategy_class,
         data_alpha=args.data_alpha,
         seed=seed,
-        output_dir=str(Path(args.results_dir) / f"{arm}_seed{seed}"),
+        # Round count is part of the path. Without it a 100-round run would
+        # overwrite the 20-round results for the same seed, and the summary JSON
+        # with them, destroying the dataset it is meant to be compared against.
+        output_dir=str(Path(args.results_dir) / f"r{args.rounds}" / f"{arm}_seed{seed}"),
     )
 
     print(f"\n{'=' * 70}\n{arm}  seed={seed}  ({args.rounds} rounds, no attack)\n{'=' * 70}")
@@ -229,7 +232,7 @@ def main():
     paired_stats = {m: paired_difference(rows, args.seed_list, m)
                     for m in ("late_accuracy", "final_accuracy", "total_verified")}
 
-    out_dir = Path(args.results_dir)
+    out_dir = Path(args.results_dir) / f"r{args.rounds}"
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "seeded_results.json").write_text(json.dumps(
         {"config": {k: v for k, v in vars(args).items() if k != "seed_list"},
