@@ -35,10 +35,15 @@ Only the TAVS arm is run. FullVerificationStrategy never promotes, so no promote
 update ever exists for it to clip and its result is independent of clip_factor --
 running it per factor would burn compute to reproduce the same number.
 
+Results are written under <results-dir>/<scenario>/, so sweeps on different
+scenarios do not overwrite each other.
+
 Usage:
-    python -m experiments.clip_factor_sweep
-    python -m experiments.clip_factor_sweep --factors 1,2,3,5 --scenario no_attack
-    python -m experiments.clip_factor_sweep --include-unclipped   # adds a control arm
+    # Step 1: find the radius, with no adversary to confound the measurement
+    python -m experiments.clip_factor_sweep --include-unclipped
+
+    # Step 2: confirm the chosen radius still contains a real attack
+    python -m experiments.clip_factor_sweep --factors 3 --scenario heavy_attack
 """
 
 import argparse
@@ -93,7 +98,10 @@ def run_one(clip_factor, args):
         attack_types=["layerwise", "distributed"],
         attack_intensities=[1.5, 2.0],
         data_alpha=0.3,
-        output_dir=str(Path(args.results_dir) / f"clip_{label}"),
+        # Scenario is part of the path: without it a heavy_attack sweep would
+        # overwrite a no_attack sweep run earlier at the same factor, silently
+        # destroying the comparison the two runs exist to make.
+        output_dir=str(Path(args.results_dir) / args.scenario / f"clip_{label}"),
     )
 
     print(f"\n{'=' * 70}\nclip_factor = {label}  ({args.scenario}, {args.rounds} rounds)\n{'=' * 70}")
@@ -151,7 +159,7 @@ def main():
 
     rows = [run_one(f, args) for f in factors]
 
-    out_dir = Path(args.results_dir)
+    out_dir = Path(args.results_dir) / args.scenario
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "sweep_results.json").write_text(json.dumps(
         {"config": vars(args), "runs": rows}, indent=2
