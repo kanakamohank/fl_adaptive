@@ -1,0 +1,88 @@
+{
+  "experiment_config": {
+    "num_rounds": 20,
+    "num_clients": 20,
+    "clients_per_round": 8,
+    "byzantine_fraction": 0.25,
+    "model_type": "cifar_cnn",
+    "dataset": "cifar10",
+    "data_alpha": 0.3,
+    "tavs_config": {
+      "gamma_budget": 0.35,
+      "theta_low": 0.3,
+      "theta_high": 0.7,
+      "alpha_trust": 0.9,
+      "tau_ramp": 5.0,
+      "k_trust": 3,
+      "p_decoy": 0.15,
+      "decoy_probability": 0.15,
+      "detection_threshold": 2.0,
+      "target_k": 150,
+      "projection_type": "structured",
+      "scheduling_type": "csprng",
+      "min_fit_clients": 8,
+      "min_available_clients": 8,
+      "master_key": "b'default_key'",
+      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x109b26200>",
+      "min_inlier_fraction_for_agg": 0.25,
+      "clip_promoted_updates": true,
+      "promoted_clip_factor": 1.0
+    },
+    "strategy_class": null,
+    "client_epochs": 5,
+    "client_batch_size": 32,
+    "client_learning_rate": 0.01,
+    "attack_types": [
+      "layerwise",
+      "distributed"
+    ],
+    "attack_intensities": [
+      1.5,
+      2.0
+    ],
+    "simulation_backend": "ray",
+    "ray_init_args": {
+      "ignore_reinit_error": true,
+      "include_dashboard": false
+    },
+    "output_dir": "results/clip_factor_sweep/heavy_attack/clip_1",
+    "save_client_data": false,
+    "validate_promotion_feasibility": true
+  },
+  "final_metrics": {
+    "loss": 1.900713749229908,
+    "accuracy": 0.292,
+    "total_time": 130.8362979888916,
+    "avg_round_time": 967.4085259437561
+  },
+  "trust_summary": {
+    "final_trust_distribution": {
+      "7600815629902289865": 0.31273102981142004,
+      "1994835259201238033": 0.28925688130799,
+      "14470268934792852292": 0.2651732102992792,
+      "6815003839218526474": 0.28188986607505945,
+      "10155405547118488014": 0.2912800427824787,
+      "18185391414210709603": 0.33074907731727415,
+      "10417907763979282154": 0.3149766512662361,
+      "1877235920456640318": 0.31008127254827167,
+      "2082263605043792781": 0.3071160689384098,
+      "14639658710064027329": 0.27886953918891905,
+      "4013327390500990058": 0.3306473903508565,
+      "10874692206895461794": 0.30579096570669806,
+      "15221142979487201565": 0.3006511976500618,
+      "7026644661769203901": 0.2938082460990745,
+      "9053973195283675486": 0.30256508595189474,
+      "847459231419486974": 0.28224944713509453,
+      "3228620291878270916": 0.3022659029284786,
+      "9337857478531363269": 0.26924662145743516,
+      "10203674366956472630": 0.3303426401260033,
+      "6400117657687930083": 0.2949940640215831
+    },
+    "trust_convergence": "analyzed"
+  },
+  "security_summary": {
+    "total_byzantine_detections": 16,
+    "consensus_rate": 1.0,
+    "avg_detections_per_round": 0.8
+  }
+}
