@@ -155,6 +155,21 @@ def paired_difference(rows, seeds, key, arm_a="tavs", arm_b="full_verification")
 
     sd = statistics.stdev(diffs)
     stderr = sd / math.sqrt(n)
+
+    # Degenerate case: every paired difference identical, so sd is 0 and the
+    # t statistic diverges. scipy returns +/-inf with p=0.0, which downstream
+    # reads as overwhelming significance when in fact the input carries no
+    # information about variability at all. Report it as degenerate instead of
+    # letting a zero-variance artifact print as a confident result.
+    if sd <= 1e-12:
+        out.update({
+            "sd": sd, "stderr": stderr, "t": None, "p": None,
+            "ci95": (mean, mean), "seeds_for_80pct_power": None,
+            "degenerate": "all paired differences identical (zero variance); "
+                          "no test is meaningful",
+        })
+        return out
+
     t_stat, p_value = stats.ttest_rel(a, b)
     ci = stats.t.interval(0.95, n - 1, loc=mean, scale=stderr) if stderr > 0 else (mean, mean)
 
@@ -291,7 +306,8 @@ def main():
         print("    per seed: " + "  ".join(
             f"s{k}:{v:+.3f}" for k, v in oos["per_seed"].items()))
         print(f"    mean {oos['mean']:+.4f}"
-              + (f"   p = {oos['p']:.4f}" if oos["p"] is not None else ""))
+              + (f"   p = {oos['p']:.4f}" if oos["p"] is not None
+                 else f"   ({oos.get('degenerate') or 'no test possible'})"))
         print(f"    -> this is the confirmatory result; the all-seed test below "
               f"reuses\n       the seeds that selected the window and is therefore "
               f"partly in-sample.")
@@ -305,7 +321,8 @@ def main():
         print("    per seed: " + "  ".join(
             f"s{k}:{v:+.3f}" for k, v in st_["per_seed"].items()))
         if st_["p"] is None:
-            print(f"    mean {st_['mean']:+.4f}  (need >=2 seeds for a test)")
+            reason = st_.get("degenerate") or "need >=2 seeds for a test"
+            print(f"    mean {st_['mean']:+.4f}  ({reason})")
             continue
         print(f"    mean {st_['mean']:+.4f}   sd {st_['sd']:.4f}   "
               f"95% CI [{st_['ci95'][0]:+.4f}, {st_['ci95'][1]:+.4f}]")
