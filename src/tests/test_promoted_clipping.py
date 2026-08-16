@@ -246,3 +246,131 @@ def test_strategy_defaults_to_clipping_enabled():
     # attack, where 1.0 clipped ~97% in both cases and acted as blanket
     # normalisation rather than an outlier filter.
     assert config.promoted_clip_factor == 2.0
+
+
+# ---------------------------------------------------------------------------
+# Cosine gate: bounding DIRECTION, which clipping cannot do
+# ---------------------------------------------------------------------------
+
+
+def _learning_setup(n_verified=6, d=200, seed=0):
+    """Model at the origin; verified cohort all step along one shared direction."""
+    gen = torch.Generator().manual_seed(seed)
+    prev = {"fc1": torch.zeros(d)}
+    direction = torch.randn(d, generator=gen)
+    direction = direction / direction.norm()
+    verified = {
+        f"v{i}": {"fc1": prev["fc1"] + direction * 0.1 + torch.randn(d, generator=gen) * 0.01}
+        for i in range(n_verified)
+    }
+    return prev, direction, verified
+
+
+def test_honest_client_following_consensus_is_not_rejected():
+    prev, direction, verified = _learning_setup()
+    honest = {"p0": {"fc1": prev["fc1"] + direction * 0.1
+                     + torch.randn(200, generator=torch.Generator().manual_seed(9)) * 0.01}}
+
+    rejected, stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+        verified, honest, prev, cosine_min=0.0)
+
+    assert rejected == set()
+    assert stats["min_cosine_seen"] > 0
+
+
+@pytest.mark.parametrize("scale", [0.05, 1.0, 1e4])
+def test_backwards_client_is_rejected_at_any_magnitude(scale):
+    """
+    Direction is judged independently of size. A small backwards update sits
+    comfortably inside the clip ball and would otherwise pass untouched.
+    """
+    prev, direction, verified = _learning_setup()
+    attacker = {"a0": {"fc1": prev["fc1"] - direction * scale}}
+
+    rejected, stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+        verified, attacker, prev, cosine_min=0.0)
+
+    assert rejected == {"a0"}
+    assert stats["min_cosine_seen"] < 0
+
+
+def test_cosine_gate_does_not_catch_aligned_large_updates():
+    """
+    States the limit explicitly: an attacker pointing the RIGHT way but scaled up
+    passes the cosine gate. That case is clipping's job, which is why both bounds
+    are needed and neither replaces the other.
+    """
+    prev, direction, verified = _learning_setup()
+    attacker = {"a0": {"fc1": prev["fc1"] + direction * 1e4}}
+
+    rejected, stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+        verified, attacker, prev, cosine_min=0.0)
+
+    assert rejected == set(), "cosine cannot see magnitude"
+    assert stats["min_cosine_seen"] > 0
+
+
+def test_each_defence_covers_what_the_other_misses():
+    """The complementarity claim, as a test rather than an assertion."""
+    prev, direction, verified = _learning_setup()
+    weights = {cid: 1.0 for cid in verified}
+    # Backwards AND huge: either defence alone should contain it.
+    attacker = {"a0": {"fc1": prev["fc1"] - direction * 1e4}}
+
+    def agg_norm(clip, cosine):
+        out = UnifiedBayesianAggregator.aggregate(
+            verified, weights, dict(attacker), {"a0": 0.9},
+            clip_promoted=clip, clip_factor=2.0,
+            cosine_filter=cosine, cosine_min=0.0, previous_global=prev)
+        return math.sqrt(sum((v ** 2).sum().item() for v in out.values()))
+
+    assert agg_norm(False, False) > 100, "undefended aggregate should blow up"
+    assert agg_norm(True, False) < 1, "clipping alone contains it"
+    assert agg_norm(False, True) < 1, "cosine alone contains it"
+    assert agg_norm(True, True) < 1, "both together contain it"
+
+
+def test_cosine_gate_reports_why_it_skipped():
+    """Degenerate inputs must be visible, never silently treated as 'all clear'."""
+    prev, _direction, verified = _learning_setup()
+    promoted = {"p0": {"fc1": torch.ones(200)}}
+
+    for kwargs, reason in (
+        (dict(verified_updates={}, promoted_updates=promoted, previous_global=prev),
+         "no_verified_clients_for_reference"),
+        (dict(verified_updates=verified, promoted_updates={}, previous_global=prev),
+         "no_promoted_clients"),
+        (dict(verified_updates=verified, promoted_updates=promoted, previous_global={}),
+         "no_previous_global_parameters"),
+    ):
+        rejected, stats = UnifiedBayesianAggregator.cosine_gate_promoted(**kwargs)
+        assert rejected == set()
+        assert stats["skipped_reason"] == reason
+        assert stats["cosine_applied"] is False
+
+
+def test_static_verified_cohort_gives_no_reference_direction():
+    """
+    If the verified cohort proposes no movement there is nothing to agree with,
+    so the gate must stand down rather than reject everyone on a zero reference.
+    """
+    prev = {"fc1": torch.zeros(200)}
+    verified = {f"v{i}": {"fc1": torch.zeros(200)} for i in range(4)}
+    promoted = {"p0": {"fc1": torch.ones(200)}}
+
+    rejected, stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+        verified, promoted, prev, cosine_min=0.0)
+
+    assert rejected == set()
+    assert stats["skipped_reason"] == "verified_cohort_proposes_no_movement"
+
+
+def test_strategy_defaults_enable_both_bounds():
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig
+
+    config = TavsEspConfig()
+    assert config.clip_promoted_updates is True
+    assert config.cosine_filter_promoted is True
+    # 0.0 rejects only updates actively pulling backwards. Higher values start
+    # rejecting merely-orthogonal updates, i.e. honest heterogeneity.
+    assert config.promoted_cosine_min == 0.0

@@ -250,6 +250,97 @@ class UnifiedBayesianAggregator:
         return clipped, stats
 
     @staticmethod
+    def cosine_gate_promoted(
+        verified_updates: Dict[str, Dict[str, torch.Tensor]],
+        promoted_updates: Dict[str, Dict[str, torch.Tensor]],
+        previous_global: Dict[str, torch.Tensor],
+        cosine_min: float = 0.0,
+    ) -> Tuple[Set[str], Dict[str, object]]:
+        r"""
+        Reject unverified updates that pull the model AGAINST the verified cohort.
+
+        Why this is needed on top of clipping
+        -------------------------------------
+        Clipping bounds \|g_i - c\|: how FAR an update sits from consensus. It says
+        nothing about WHICH WAY it points. Measured directly, an attacker at
+        cosine +1.00 to the honest direction but three orders of magnitude out of
+        scale drove the unclipped aggregate norm to 364 while clipping held it at
+        0.137 -- and conversely, an update sitting comfortably inside the clip
+        ball can point in exactly the opposite direction and pass untouched.
+        The two bounds constrain orthogonal quantities and neither subsumes the
+        other; an attacker only needs the axis left unguarded.
+
+        Why the previous global model is the origin
+        -------------------------------------------
+        Clients submit full parameters, not deltas, so "direction" is only
+        meaningful relative to where the model started this round. The update
+        client i proposes is (g_i - w_prev). The direction the verified cohort
+        wants is (mean_verified - w_prev). Comparing deviations from the current
+        consensus instead would be useless: honest deviations are roughly
+        isotropic noise around that point, so their mean is ~0 and there is no
+        reference direction to compare against.
+
+        This is FLTrust's ReLU-clipped cosine with the verified cohort standing
+        in for a server-held root dataset -- which is precisely what TAVS already
+        produces, so the trust anchor costs nothing extra.
+
+        Returns:
+            (rejected_ids, stats). Rejection is a hard gate rather than a
+            re-weighting: a client actively pushing backwards is not a client
+            whose contribution should merely be scaled down.
+        """
+        stats: Dict[str, object] = {
+            "cosine_applied": False, "num_rejected": 0,
+            "min_cosine_seen": None, "skipped_reason": None,
+        }
+        if not promoted_updates:
+            stats["skipped_reason"] = "no_promoted_clients"
+            return set(), stats
+        if not verified_updates:
+            # No vetted cohort means no trustworthy reference direction.
+            stats["skipped_reason"] = "no_verified_clients_for_reference"
+            return set(), stats
+        if not previous_global:
+            stats["skipped_reason"] = "no_previous_global_parameters"
+            return set(), stats
+
+        blocks = set(previous_global) & set(next(iter(verified_updates.values())))
+        for u in verified_updates.values():
+            blocks &= set(u)
+        if not blocks:
+            stats["skipped_reason"] = "no_common_blocks"
+            return set(), stats
+
+        def flat_delta(update):
+            return torch.cat([(update[b] - previous_global[b]).flatten()
+                              for b in sorted(blocks) if b in update])
+
+        # Reference: the movement the verified cohort proposes this round.
+        reference = torch.stack([flat_delta(u) for u in verified_updates.values()]).mean(0)
+        ref_norm = reference.norm().item()
+        if ref_norm <= 1e-12:
+            # Verified clients propose no net movement, so there is no direction
+            # to agree or disagree with.
+            stats["skipped_reason"] = "verified_cohort_proposes_no_movement"
+            return set(), stats
+
+        rejected, min_cos = set(), None
+        for cid, update in promoted_updates.items():
+            delta = flat_delta(update)
+            if delta.norm().item() <= 1e-12:
+                continue  # Proposes nothing; harmless, and cosine is undefined.
+            cos = torch.nn.functional.cosine_similarity(
+                delta.unsqueeze(0), reference.unsqueeze(0)
+            ).item()
+            min_cos = cos if min_cos is None else min(min_cos, cos)
+            if cos < cosine_min:
+                rejected.add(cid)
+
+        stats.update({"cosine_applied": True, "num_rejected": len(rejected),
+                      "min_cosine_seen": min_cos})
+        return rejected, stats
+
+    @staticmethod
     def aggregate(
         verified_updates: Dict[str, Dict[str, torch.Tensor]], 
         verified_weights: Dict[str, float],
@@ -258,7 +349,23 @@ class UnifiedBayesianAggregator:
         clip_promoted: bool = True,
         clip_factor: float = 1.0,
         clip_stats_out: Dict[str, object] = None,
+        cosine_filter: bool = True,
+        cosine_min: float = 0.0,
+        previous_global: Dict[str, torch.Tensor] = None,
+        cosine_stats_out: Dict[str, object] = None,
     ) -> Dict[str, torch.Tensor]:
+
+        # Bound unverified influence in DIRECTION. Runs before clipping so a
+        # rejected client is dropped outright rather than clipped and kept.
+        if cosine_filter and promoted_updates and previous_global:
+            rejected, cos_stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+                verified_updates, promoted_updates, previous_global, cosine_min
+            )
+            if cosine_stats_out is not None:
+                cosine_stats_out.update(cos_stats)
+            if rejected:
+                promoted_updates = {k: v for k, v in promoted_updates.items() if k not in rejected}
+                promoted_weights = {k: v for k, v in promoted_weights.items() if k not in rejected}
 
         # Bound unverified influence in MAGNITUDE before weighting. gamma_budget
         # bounds only the weight these clients carry; without this an unverified

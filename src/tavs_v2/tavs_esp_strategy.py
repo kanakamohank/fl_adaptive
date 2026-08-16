@@ -52,6 +52,15 @@ class TavsEspConfig:
     deterministic_sampling: bool = True
     sampling_seed: int = 0
 
+    # Reject unverified updates pointing against the verified cohort's proposed
+    # direction. Complements clipping, which bounds distance but not direction:
+    # an update inside the clip ball can still point the opposite way.
+    cosine_filter_promoted: bool = True
+    # Minimum cosine to the verified movement. 0.0 rejects only updates actively
+    # pulling backwards, which is the unambiguous case; raising it also rejects
+    # merely-orthogonal updates and will start catching honest heterogeneity.
+    promoted_cosine_min: float = 0.0
+
     # Bound how far an unverified (promoted) update may deviate from the verified
     # consensus before it is projected back onto that ball. gamma_budget bounds
     # only the WEIGHT promoted clients carry, never the MAGNITUDE of what they
@@ -154,6 +163,11 @@ class TavsEspStrategy(Strategy):
         # Round index, set by configure_fit so cohort sampling can be keyed on it.
         self._current_round = 0
 
+        # Global parameters handed out this round, kept as blocks. The cosine
+        # gate needs them as the origin: clients send full parameters, so a
+        # "direction" only exists relative to where the round started.
+        self._previous_global: Dict[str, torch.Tensor] = {}
+
     def initialize_parameters(self, client_manager):
         from src.core.models import get_model
         
@@ -165,6 +179,41 @@ class TavsEspStrategy(Strategy):
         return ndarrays_to_parameters(
             [np.array(p.detach().cpu().numpy(), dtype=np.float32, copy=True) for p in model.parameters()]
         ) 
+
+    def _parameters_to_blocks(self, parameters) -> Dict[str, torch.Tensor]:
+        """
+        Split the global parameter vector into the same blocks client updates use.
+
+        Kept so the cosine gate has an origin: clients submit full parameters, so
+        the update client i proposes is (g_i - w_prev), and without w_prev there
+        is no direction to compare.
+        """
+        if parameters is None:
+            return {}
+        try:
+            ndarrays = parameters_to_ndarrays(parameters)
+        except Exception:
+            return {}
+
+        blocks: Dict[str, torch.Tensor] = {}
+        items = list(self.model_blocks.items())
+        if len(ndarrays) == 1:
+            flat = np.asarray(ndarrays[0], dtype=np.float32).flatten()
+            if flat.size != sum(sz for _, sz in items):
+                return {}
+            off = 0
+            for name, size in items:
+                blocks[name] = torch.tensor(flat[off:off + size], dtype=torch.float32)
+                off += size
+        else:
+            for i, (name, size) in enumerate(items):
+                if i >= len(ndarrays):
+                    break
+                arr = np.asarray(ndarrays[i], dtype=np.float32).flatten()
+                if arr.size != size:
+                    return {}
+                blocks[name] = torch.tensor(arr, dtype=torch.float32)
+        return blocks
 
     def _sample_cohort(self, client_manager) -> Dict[str, ClientProxy]:
         """
@@ -201,6 +250,7 @@ class TavsEspStrategy(Strategy):
 
     def configure_fit(self, server_round: int, parameters: Parameters, client_manager: fl.server.client_manager.ClientManager):
         self._current_round = server_round
+        self._previous_global = self._parameters_to_blocks(parameters)
         # Sample the per-round cohort BEFORE scheduling.
         #
         # This previously used client_manager.all(), which made every client in
@@ -344,13 +394,24 @@ class TavsEspStrategy(Strategy):
             for cid in verified_updates.keys()
         }
         clip_stats: Dict[str, object] = {}
+        cosine_stats: Dict[str, object] = {}
         aggregated_blocks = UnifiedBayesianAggregator.aggregate(
             verified_updates, verified_weights,
             promoted_updates, promoted_weights,
             clip_promoted=getattr(self.config, "clip_promoted_updates", True),
             clip_factor=getattr(self.config, "promoted_clip_factor", 1.0),
             clip_stats_out=clip_stats,
+            cosine_filter=getattr(self.config, "cosine_filter_promoted", True),
+            cosine_min=getattr(self.config, "promoted_cosine_min", 0.0),
+            previous_global=self._previous_global,
+            cosine_stats_out=cosine_stats,
         )
+        if cosine_stats.get("num_rejected"):
+            logger.info(
+                f"Round {server_round} Cosine gate: rejected "
+                f"{cosine_stats['num_rejected']} promoted update(s) pointing against "
+                f"the verified direction (min cosine {cosine_stats['min_cosine_seen']:.3f})"
+            )
         if clip_stats.get("num_clipped"):
             logger.info(
                 f"Round {server_round} Clipping: {clip_stats['num_clipped']} promoted "
@@ -382,6 +443,7 @@ class TavsEspStrategy(Strategy):
             "num_inliers": len(inliers),
             "num_outliers": len(outliers),
             "num_clipped": int(clip_stats.get("num_clipped") or 0),
+            "num_cosine_rejected": int(cosine_stats.get("num_rejected") or 0),
             "clip_radius": clip_stats.get("clip_radius"),
         })
 
@@ -459,6 +521,7 @@ class FullVerificationStrategy(TavsEspStrategy):
     def configure_fit(self, server_round: int, parameters: Parameters,
                       client_manager: fl.server.client_manager.ClientManager):
         self._current_round = server_round
+        self._previous_global = self._parameters_to_blocks(parameters)
         sampled = list(self._sample_cohort(client_manager).values())
         if not sampled:
             return []
