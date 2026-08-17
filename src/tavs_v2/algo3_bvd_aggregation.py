@@ -292,6 +292,12 @@ class UnifiedBayesianAggregator:
         stats: Dict[str, object] = {
             "cosine_applied": False, "num_rejected": 0,
             "min_cosine_seen": None, "skipped_reason": None,
+            # Observed cosines, logged so the threshold can be chosen from the
+            # data instead of guessed. promoted_cosines is what the gate judges;
+            # verified_cosines is the honest-client baseline it should be judged
+            # AGAINST -- verified clients are vetted, so their spread measures
+            # how much directional disagreement this dataset produces naturally.
+            "promoted_cosines": {}, "verified_cosines": {},
         }
         if not promoted_updates:
             stats["skipped_reason"] = "no_promoted_clients"
@@ -324,17 +330,41 @@ class UnifiedBayesianAggregator:
             stats["skipped_reason"] = "verified_cohort_proposes_no_movement"
             return set(), stats
 
+        def cos_to(vec, ref):
+            return torch.nn.functional.cosine_similarity(
+                vec.unsqueeze(0), ref.unsqueeze(0)
+            ).item()
+
         rejected, min_cos = set(), None
         for cid, update in promoted_updates.items():
             delta = flat_delta(update)
             if delta.norm().item() <= 1e-12:
                 continue  # Proposes nothing; harmless, and cosine is undefined.
-            cos = torch.nn.functional.cosine_similarity(
-                delta.unsqueeze(0), reference.unsqueeze(0)
-            ).item()
+            cos = cos_to(delta, reference)
+            stats["promoted_cosines"][cid] = cos
             min_cos = cos if min_cos is None else min(min_cos, cos)
             if cos < cosine_min:
                 rejected.add(cid)
+
+        # Baseline: how concordant is a VERIFIED client with the same reference?
+        #
+        # Leave-one-out is required, not cosmetic. Each verified client is itself
+        # part of the reference mean -- with n=3 it contributes a third of it --
+        # so scoring it against the full mean measures partly its agreement with
+        # itself and inflates the baseline. Promoted clients are not in the
+        # reference, so only the leave-one-out figure is a like-for-like
+        # comparison. Using the inflated one would set the threshold too high and
+        # make honest promoted clients look anomalous.
+        n_ver = len(verified_updates)
+        if n_ver >= 2:
+            for cid, update in verified_updates.items():
+                delta = flat_delta(update)
+                if delta.norm().item() <= 1e-12:
+                    continue
+                loo_ref = (reference * n_ver - delta) / (n_ver - 1)
+                if loo_ref.norm().item() <= 1e-12:
+                    continue
+                stats["verified_cosines"][cid] = cos_to(delta, loo_ref)
 
         stats.update({"cosine_applied": True, "num_rejected": len(rejected),
                       "min_cosine_seen": min_cos})

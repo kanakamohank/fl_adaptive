@@ -445,6 +445,12 @@ class TavsEspStrategy(Strategy):
             "num_clipped": int(clip_stats.get("num_clipped") or 0),
             "num_cosine_rejected": int(cosine_stats.get("num_rejected") or 0),
             "clip_radius": clip_stats.get("clip_radius"),
+            # Raw cosines, so a threshold can be calibrated post hoc from logged
+            # runs rather than by re-running a sweep per candidate value. Sorted
+            # lists rather than per-client dicts: client ids add no analysis value
+            # here and would bloat the results file every round.
+            "promoted_cosines": sorted(cosine_stats.get("promoted_cosines", {}).values()),
+            "verified_cosines": sorted(cosine_stats.get("verified_cosines", {}).values()),
         })
 
         aggregated_ndarrays = []

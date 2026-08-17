@@ -374,3 +374,60 @@ def test_strategy_defaults_enable_both_bounds():
     # 0.0 rejects only updates actively pulling backwards. Higher values start
     # rejecting merely-orthogonal updates, i.e. honest heterogeneity.
     assert config.promoted_cosine_min == 0.0
+
+
+# ---------------------------------------------------------------------------
+# Cosine logging: the raw values needed to calibrate the threshold from data.
+# ---------------------------------------------------------------------------
+
+def test_cosine_logs_promoted_and_verified_values():
+    """Both cohorts' cosines are logged, so a threshold can be chosen post hoc."""
+    prev = {"w": torch.zeros(20)}
+    d = torch.ones(20) / math.sqrt(20)
+    verified = {f"v{i}": {"w": 0.1 * (d + 0.3 * torch.randn(20))} for i in range(4)}
+    promoted = {"p0": {"w": 0.1 * d}, "p1": {"w": -0.1 * d}}
+
+    _, stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+        verified, promoted, prev, cosine_min=0.0)
+
+    assert set(stats["promoted_cosines"]) == {"p0", "p1"}
+    assert set(stats["verified_cosines"]) == set(verified)
+    assert all(-1.0 <= c <= 1.0 for c in stats["promoted_cosines"].values())
+    assert all(-1.0 <= c <= 1.0 for c in stats["verified_cosines"].values())
+
+
+def test_verified_cosines_use_leave_one_out():
+    """
+    A verified client must not be scored against a reference containing itself.
+
+    With a small cohort the self-contribution dominates: including it pushes the
+    baseline far above what a promoted client (never in the reference) could
+    score, which would calibrate the threshold much too high.
+    """
+    prev = {"w": torch.zeros(30)}
+    # Deliberately heterogeneous, so self-inclusion is the dominant effect.
+    verified = {f"v{i}": {"w": torch.randn(30)} for i in range(3)}
+    promoted = {"p0": {"w": torch.randn(30)}}
+
+    _, stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+        verified, promoted, prev, cosine_min=-2.0)  # -2.0 => reject nothing
+
+    reference = torch.stack([u["w"] for u in verified.values()]).mean(0)
+    for cid, u in verified.items():
+        naive = torch.nn.functional.cosine_similarity(
+            u["w"].unsqueeze(0), reference.unsqueeze(0)).item()
+        # Leave-one-out removes the self-agreement, so it must be strictly lower.
+        assert stats["verified_cosines"][cid] < naive
+
+
+def test_verified_cosines_absent_for_single_verified_client():
+    """Leave-one-out is undefined at n=1; the baseline is omitted, not faked."""
+    prev = {"w": torch.zeros(10)}
+    verified = {"v0": {"w": torch.ones(10)}}
+    promoted = {"p0": {"w": torch.ones(10)}}
+
+    _, stats = UnifiedBayesianAggregator.cosine_gate_promoted(
+        verified, promoted, prev, cosine_min=0.0)
+
+    assert stats["verified_cosines"] == {}
+    assert stats["promoted_cosines"]           # promoted still logged
