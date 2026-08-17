@@ -35,8 +35,8 @@ Only the TAVS arm is run. FullVerificationStrategy never promotes, so no promote
 update ever exists for it to clip and its result is independent of clip_factor --
 running it per factor would burn compute to reproduce the same number.
 
-Results are written under <results-dir>/<scenario>/, so sweeps on different
-scenarios do not overwrite each other.
+Results are written under <results-dir>/<scenario>/<cosine-setting>/, so sweeps
+on different scenarios or different cosine settings do not overwrite each other.
 
 Usage:
     # Step 1: find the radius, with no adversary to confound the measurement
@@ -44,6 +44,11 @@ Usage:
 
     # Step 2: confirm the chosen radius still contains a real attack
     python -m experiments.clip_factor_sweep --factors 3 --scenario heavy_attack
+
+    # Cosine false-positive rate: no attacker, so every rejection is honest
+    # signal thrown away. Compare the two runs' accuracy and cos rate.
+    python -m experiments.clip_factor_sweep --factors 2 --scenario no_attack --cosine on
+    python -m experiments.clip_factor_sweep --factors 2 --scenario no_attack --cosine off
 """
 
 import argparse
@@ -62,6 +67,19 @@ logger = logging.getLogger(__name__)
 
 # Byzantine fraction per scenario, matching verification_strategy_comparison.
 SCENARIO_BYZANTINE = {"no_attack": 0.0, "light_attack": 0.15, "heavy_attack": 0.25}
+
+
+def _cosine_tag(args):
+    """
+    Path component identifying the cosine setting, e.g. 'cos_on_min0' / 'cos_off'.
+
+    The threshold is in the tag, not just the on/off state: a sweep over
+    --cosine-min would otherwise write every threshold to the same directory and
+    leave only the last one on disk.
+    """
+    if not args.cosine:
+        return "cos_off"
+    return f"cos_on_min{args.cosine_min:g}"
 
 
 def run_one(clip_factor, args):
@@ -87,6 +105,12 @@ def run_one(clip_factor, args):
         detection_threshold=2.0,
         clip_promoted_updates=clipping_on,
         promoted_clip_factor=clip_factor if clipping_on else 1.0,
+        # Direction gate, independent of the magnitude clip above. Exposed here
+        # so the two can be turned on and off separately -- with cosine wired to
+        # its default the sweep would silently measure clip+cosine together and
+        # attribute the combined effect to the radius alone.
+        cosine_filter_promoted=args.cosine,
+        promoted_cosine_min=args.cosine_min,
     )
 
     pipeline_config = PipelineConfig(
@@ -101,7 +125,11 @@ def run_one(clip_factor, args):
         # Scenario is part of the path: without it a heavy_attack sweep would
         # overwrite a no_attack sweep run earlier at the same factor, silently
         # destroying the comparison the two runs exist to make.
-        output_dir=str(Path(args.results_dir) / args.scenario / f"clip_{label}"),
+        # The cosine setting is part of the path for the same reason the scenario
+        # is: a --cosine off run would otherwise overwrite the --cosine on run at
+        # the same factor, destroying the ablation the pair exists to make.
+        output_dir=str(Path(args.results_dir) / args.scenario /
+                       _cosine_tag(args) / f"clip_{label}"),
     )
 
     print(f"\n{'=' * 70}\nclip_factor = {label}  ({args.scenario}, {args.rounds} rounds)\n{'=' * 70}")
@@ -112,10 +140,18 @@ def run_one(clip_factor, args):
     scheduling = results.scheduling_history
     promoted = sum(s["num_promoted"] for s in scheduling)
     clipped = sum(s.get("num_clipped") or 0 for s in scheduling)
+    rejected = sum(s.get("num_cosine_rejected") or 0 for s in scheduling)
 
     return {
         "clip_factor": clip_factor,
         "clipping_enabled": clipping_on,
+        "cosine_enabled": args.cosine,
+        "cosine_min": args.cosine_min,
+        "total_cosine_rejected": rejected,
+        # Under --scenario no_attack every promoted client is honest, so this
+        # rate IS the false-positive rate of the gate. Anything much above zero
+        # there means the gate is discarding honest signal.
+        "cosine_rejection_rate": (rejected / promoted) if promoted else None,
         "final_accuracy": results.server_accuracies[-1],
         "peak_accuracy": max(results.server_accuracies),
         "max_loss": max(results.server_losses),
@@ -143,12 +179,26 @@ def main():
                              "how much honest signal the clip suppresses)")
     parser.add_argument("--include-unclipped", action="store_true",
                         help="Also run with clipping disabled, as a control")
+    # Cosine gate: rejects a promoted update whose movement direction disagrees
+    # with the verified cohort's mean movement. Orthogonal to the clip, which
+    # only bounds magnitude -- an attacker inside the clip radius but pointing
+    # backwards is invisible to the clip and caught here.
+    parser.add_argument("--cosine", default="on", choices=("on", "off"),
+                        help="Direction gate on promoted updates (default: on). "
+                             "Run 'off' to attribute an effect to the clip alone.")
+    parser.add_argument("--cosine-min", type=float, default=0.0,
+                        help="Reject a promoted update below this cosine "
+                             "(default 0.0 = reject only actively opposing "
+                             "directions). Negative values tolerate the "
+                             "directional spread that non-IID data creates "
+                             "among honest clients.")
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--num-clients", type=int, default=20)
     parser.add_argument("--clients-per-round", type=int, default=8)
     parser.add_argument("--target-k", type=int, default=150)
     parser.add_argument("--results-dir", default="results/clip_factor_sweep")
     args = parser.parse_args()
+    args.cosine = args.cosine == "on"   # config field is a bool; the flag is a word
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -159,7 +209,7 @@ def main():
 
     rows = [run_one(f, args) for f in factors]
 
-    out_dir = Path(args.results_dir) / args.scenario
+    out_dir = Path(args.results_dir) / args.scenario / _cosine_tag(args)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "sweep_results.json").write_text(json.dumps(
         {"config": vars(args), "runs": rows}, indent=2
@@ -168,14 +218,17 @@ def main():
     print(f"\n{'=' * 78}")
     print(f"CLIP FACTOR SWEEP - {args.scenario}, {args.rounds} rounds")
     print(f"{'=' * 78}")
+    print(f"cosine gate: {'on' if args.cosine else 'off'} (min={args.cosine_min:g})")
     print(f"{'factor':>8} {'final acc':>10} {'peak acc':>9} {'max loss':>10} "
-          f"{'promoted':>9} {'clipped':>8} {'clip rate':>10}")
+          f"{'promoted':>9} {'clipped':>8} {'clip rate':>10} {'cos rej':>8} {'cos rate':>9}")
     for r in rows:
         label = "off" if not r["clipping_enabled"] else f"{r['clip_factor']:g}"
         rate = "-" if r["clip_rate"] is None else f"{r['clip_rate']:.2f}"
+        cos_rate = "-" if r["cosine_rejection_rate"] is None else f"{r['cosine_rejection_rate']:.2f}"
         print(f"{label:>8} {r['final_accuracy']:>10.3f} {r['peak_accuracy']:>9.3f} "
               f"{r['max_loss']:>10.2f} {r['total_promoted']:>9d} "
-              f"{r['total_clipped']:>8d} {rate:>10}")
+              f"{r['total_clipped']:>8d} {rate:>10} "
+              f"{r['total_cosine_rejected']:>8d} {cos_rate:>9}")
 
     print(f"\nRead it this way:")
     print(f"  clip rate near 1.00 -> radius too tight; honest promoted clients are")
