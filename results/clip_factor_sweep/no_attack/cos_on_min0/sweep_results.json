@@ -1,0 +1,55 @@
+{
+  "config": {
+    "factors": "2",
+    "scenario": "no_attack",
+    "include_unclipped": false,
+    "cosine": true,
+    "cosine_min": 0.0,
+    "rounds": 20,
+    "num_clients": 20,
+    "clients_per_round": 8,
+    "target_k": 150,
+    "results_dir": "results/clip_factor_sweep"
+  },
+  "runs": [
+    {
+      "clip_factor": 2.0,
+      "clipping_enabled": true,
+      "cosine_enabled": true,
+      "cosine_min": 0.0,
+      "total_cosine_rejected": 17,
+      "cosine_rejection_rate": 0.40476190476190477,
+      "final_accuracy": 0.176,
+      "peak_accuracy": 0.2249,
+      "max_loss": 2.5754752842484008,
+      "total_verified": 118,
+      "total_promoted": 42,
+      "total_clipped": 0,
+      "clip_rate": 0.0,
+      "accuracy_trajectory": [
+        0.1372,
+        0.1,
+        0.1384,
+        0.1,
+        0.1097,
+        0.1465,
+        0.1,
+        0.1859,
+        0.1,
+        0.2249,
+        0.1318,
+        0.1664,
+        0.2161,
+        0.1766,
+        0.214,
+        0.2049,
+        0.1876,
+        0.1826,
+        0.1647,
+        0.1566,
+        0.176
+      ],
+      "elapsed_seconds": 168.62847518920898
+    }
+  ]
+}
