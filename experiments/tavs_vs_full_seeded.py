@@ -55,12 +55,28 @@ logger = logging.getLogger(__name__)
 ARMS = {"tavs": None, "full_verification": FullVerificationStrategy}
 
 
+def _cosine_tag(args):
+    """
+    Path component identifying the cosine setting, e.g. 'cos_on_min0' / 'cos_off'.
+
+    The threshold is in the tag, not just the on/off state, so runs at different
+    thresholds do not overwrite each other.
+    """
+    if not args.cosine:
+        return "cos_off"
+    return f"cos_on_min{args.cosine_min:g}"
+
+
 def run_one(arm, strategy_class, seed, args):
     """One pipeline. Identical config across arms except the strategy."""
     tavs_config = TavsEspConfig(
         theta_low=0.3, theta_high=0.7, alpha_trust=0.9, gamma_budget=0.35,
         tau_ramp=5.0, k_trust=3, target_k=args.target_k, detection_threshold=2.0,
         clip_promoted_updates=True, promoted_clip_factor=args.clip_factor,
+        # Exposed so this comparison states which defences were active rather
+        # than inheriting a default. The published 43.3%/-0.0297 figures predate
+        # the cosine gate, so a rerun is only comparable to them at --cosine off.
+        cosine_filter_promoted=args.cosine, promoted_cosine_min=args.cosine_min,
     )
     config = PipelineConfig(
         num_rounds=args.rounds,
@@ -74,7 +90,8 @@ def run_one(arm, strategy_class, seed, args):
         # Round count is part of the path. Without it a 100-round run would
         # overwrite the 20-round results for the same seed, and the summary JSON
         # with them, destroying the dataset it is meant to be compared against.
-        output_dir=str(Path(args.results_dir) / f"r{args.rounds}" / f"{arm}_seed{seed}"),
+        output_dir=str(Path(args.results_dir) / f"r{args.rounds}" /
+                       _cosine_tag(args) / f"{arm}_seed{seed}"),
     )
 
     print(f"\n{'=' * 70}\n{arm}  seed={seed}  ({args.rounds} rounds, no attack)\n{'=' * 70}")
@@ -109,6 +126,8 @@ def run_one(arm, strategy_class, seed, args):
         "accuracy_trajectory": results.server_accuracies,
         "total_verified": sum(s["num_verified"] for s in sched),
         "total_promoted": sum(s["num_promoted"] for s in sched),
+        # byzantine_fraction is 0 here, so every rejection is a false positive.
+        "total_cosine_rejected": sum(s.get("num_cosine_rejected") or 0 for s in sched),
         "elapsed_seconds": time.time() - started,
     }
 
@@ -249,6 +268,14 @@ def main():
     parser.add_argument("--clients-per-round", type=int, default=8)
     parser.add_argument("--target-k", type=int, default=150)
     parser.add_argument("--clip-factor", type=float, default=2.0)
+    # Only the TAVS arm is affected: FullVerificationStrategy never promotes, so
+    # there is no unverified update for either defence to act on.
+    parser.add_argument("--cosine", default="on", choices=("on", "off"),
+                        help="Direction gate on promoted updates (default: on). "
+                             "Use 'off' to reproduce the pre-cosine baseline.")
+    parser.add_argument("--cosine-min", type=float, default=0.0,
+                        help="Reject a promoted update below this cosine "
+                             "(default 0.0).")
     parser.add_argument("--late-window-frac", type=float, default=0.25,
                         help="Fraction of trailing rounds averaged for the "
                              "pre-specified primary metric (default 0.25). Do not "
@@ -257,6 +284,7 @@ def main():
     parser.add_argument("--data-alpha", type=float, default=0.3)
     parser.add_argument("--results-dir", default="results/tavs_vs_full_seeded")
     args = parser.parse_args()
+    args.cosine = args.cosine == "on"   # config field is a bool; the flag is a word
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
 
     logging.basicConfig(level=logging.INFO,
@@ -269,7 +297,11 @@ def main():
     paired_stats = {m: paired_difference(rows, args.seed_list, m)
                     for m in ("late_accuracy", "final_accuracy", "total_verified")}
 
-    out_dir = Path(args.results_dir) / f"r{args.rounds}"
+    # Cosine setting joins the round count in the path, for the same reason: a
+    # --cosine off rerun must not overwrite the --cosine on results it is meant
+    # to be compared against. Pre-cosine results already sit at r<N>/ and are
+    # left untouched by either setting.
+    out_dir = Path(args.results_dir) / f"r{args.rounds}" / _cosine_tag(args)
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "seeded_results.json").write_text(json.dumps(
         {"config": {k: v for k, v in vars(args).items() if k != "seed_list"},
