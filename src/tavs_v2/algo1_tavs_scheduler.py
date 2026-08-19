@@ -58,6 +58,22 @@ class TavsScheduler:
         t_max = 1.0 - math.exp(-(round_num - r_0) / self.tau_ramp)
         return min(raw_trust, t_max)
 
+    def get_tier(self, client_id: str, round_num: int) -> int:
+        """
+        The client's actual tier, using the same conditions as Phase 1 below.
+
+        Exists because tier was previously logged as `3 if promoted else 1`,
+        a promoted/verified flag wearing tier numerals. That made real tier
+        state unobservable: a run in which Tier 3 never fired was
+        indistinguishable from one in which it fired constantly.
+        """
+        t_eff = self.get_effective_trust(client_id, round_num)
+        if t_eff < self.theta_low:
+            return 1
+        if t_eff >= self.theta_high and self.clean_streaks.get(client_id, 0) >= self.k_trust:
+            return 3
+        return 2
+
     def schedule_verifications(
         self, available_clients: List[str], round_num: int
     ) -> Tuple[Set[str], Set[str], Set[str]]:
