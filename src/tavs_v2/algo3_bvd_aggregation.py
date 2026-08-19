@@ -96,12 +96,29 @@ class BlockVarianceDetector:
                 old_sigma = self.sigma_sq[m]
                 self.sigma_sq[m] = (self.alpha_sigma * old_sigma) + ((1.0 - self.alpha_sigma) * inlier_variance)
 
-        # 4. Calculate continuous behavior scores \varphi_i(r) for trust EMA
-        max_overall_dist = max(client_max_distances.values()) if client_max_distances else 0.0
+        # 4. Calculate continuous behavior scores \varphi_i(r) for trust EMA.
+        #
+        # ABSOLUTE, not relative to the cohort. The previous version divided by
+        # the round's worst client, so the worst client scored 0.0 even when
+        # every client was honest, and the cohort mean was pinned near
+        # 1 - mean(d)/max(d) ~ 0.3. Since the trust EMA converges to this score,
+        # trust plateaued at ~0.29 and theta_high=0.7 was unreachable at ANY
+        # round count -- Tier 3 never fired in any experiment.
+        #
+        # max_z is already the detector's absolute anomaly measure and tau_z is
+        # already its "this client is Byzantine" line, so they are reused rather
+        # than introducing a new threshold to calibrate: a client the detector
+        # does not consider anomalous gets full credit, and credit decays to
+        # zero over one further tau_z beyond it. Under non-IID data honest
+        # clients are legitimately spread out, so distance alone -- short of the
+        # anomaly threshold -- is not evidence of misbehaviour.
         behavior_scores = {}
         for cid in verified_clients:
-            normalized_penalty = client_max_distances[cid] / (max_overall_dist + self.epsilon_stab)
-            behavior_scores[cid] = max(0.0, 1.0 - normalized_penalty)
+            excess = client_max_distances[cid] - self.tau_z
+            if excess <= 0.0:
+                behavior_scores[cid] = 1.0
+            else:
+                behavior_scores[cid] = max(0.0, 1.0 - excess / self.tau_z)
 
         return inliers, outliers, behavior_scores
 

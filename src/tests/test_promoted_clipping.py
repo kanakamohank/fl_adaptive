@@ -431,3 +431,88 @@ def test_verified_cosines_absent_for_single_verified_client():
 
     assert stats["verified_cosines"] == {}
     assert stats["promoted_cosines"]           # promoted still logged
+
+
+# ---------------------------------------------------------------------------
+# Behaviour score: absolute, not relative to the round's worst client.
+# ---------------------------------------------------------------------------
+
+def _detector(tau_z=2.0):
+    from src.tavs_v2.algo3_bvd_aggregation import BlockVarianceDetector
+    return BlockVarianceDetector(tau_z=tau_z)
+
+
+def test_honest_cohort_all_score_full_credit():
+    """
+    No client is penalised merely for being the furthest of several honest ones.
+
+    The previous relative score divided by the round's worst client, so someone
+    always scored ~0.0 even in a clean cohort. That pinned the trust EMA near
+    0.3 and made theta_high=0.7 unreachable at any round count.
+    """
+    torch.manual_seed(0)
+    updates = {f"c{i}": {"m": torch.randn(20) * 0.1} for i in range(6)}
+    _, outliers, scores = _detector().detect_outliers(updates, set(updates))
+
+    assert not outliers
+    assert all(s == 1.0 for s in scores.values())
+
+
+def test_trust_ema_reaches_theta_high_on_honest_scores():
+    """The property that was actually broken: honest trust must cross 0.7."""
+    torch.manual_seed(0)
+    updates = {f"c{i}": {"m": torch.randn(20) * 0.1} for i in range(6)}
+    _, _, scores = _detector().detect_outliers(updates, set(updates))
+
+    trust, alpha = 0.25, 0.9
+    for _ in range(15):
+        trust = alpha * trust + (1 - alpha) * min(scores.values())
+    assert trust >= 0.7
+
+
+def test_score_unaffected_by_adding_a_well_behaved_client():
+    """
+    Scores must not move because a different client joined the cohort.
+
+    Under the relative score, adding any client could change every other
+    client's score by shifting the max used as the denominator.
+    """
+    torch.manual_seed(1)
+    base = {f"c{i}": {"m": torch.randn(20) * 0.1} for i in range(4)}
+    extra = dict(base, extra={"m": torch.randn(20) * 0.1})
+
+    _, _, s_base = _detector().detect_outliers(base, set(base))
+    _, _, s_extra = _detector().detect_outliers(extra, set(extra))
+
+    for cid in base:
+        assert s_base[cid] == pytest.approx(s_extra[cid], abs=1e-9)
+
+
+def test_scores_stay_in_unit_range_with_an_extreme_outlier():
+    """A grossly out-of-scale client scores 0.0, and never below."""
+    torch.manual_seed(2)
+    updates = {f"c{i}": {"m": torch.randn(20) * 0.1} for i in range(5)}
+    updates["attacker"] = {"m": torch.randn(20) * 1e4}
+    _, _, scores = _detector().detect_outliers(updates, set(updates))
+
+    assert scores["attacker"] == 0.0
+    assert all(0.0 <= s <= 1.0 for s in scores.values())
+
+
+def test_get_tier_reports_real_tier_not_promoted_flag():
+    """Tier must come from trust and streak, not from promoted/verified status."""
+    from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
+    s = TavsScheduler(gamma_budget=0.35, theta_low=0.3, theta_high=0.7,
+                      alpha_trust=0.9, tau_ramp=5.0, k_trust=3, p_decoy=0.0,
+                      master_key=b"k")
+    for cid, trust, streak in (("low", 0.1, 0), ("mid", 0.5, 0),
+                               ("high_no_streak", 0.9, 0), ("high", 0.9, 5)):
+        s.trust_scores[cid] = trust
+        s.join_rounds[cid] = 0
+        s.clean_streaks[cid] = streak
+
+    assert s.get_tier("low", 50) == 1
+    assert s.get_tier("mid", 50) == 2
+    # High trust alone is not Tier 3; the k_trust streak is also required.
+    assert s.get_tier("high_no_streak", 50) == 2
+    assert s.get_tier("high", 50) == 3

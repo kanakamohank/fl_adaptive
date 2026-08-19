@@ -26,7 +26,7 @@ class TavsEspConfig:
     theta_low: float = 0.3
     theta_high: float = 0.7
     alpha_trust: float = 0.9
-    tau_ramp: float = 30.0
+    tau_ramp: float = 5.0
     k_trust: int = 10
     p_decoy: float = 0.15
     decoy_probability: float = 0.15 
@@ -85,7 +85,8 @@ class TavsEspConfig:
     promoted_clip_factor: float = 2.0
 
 class LegacyAnalyticsBridge:
-    def __init__(self, round_num, outliers, trust_scores, p_ids, execution_time_ms):
+    def __init__(self, round_num, outliers, trust_scores, p_ids, execution_time_ms,
+                 tiers=None):
         self.round_number = round_num
         self.byzantine_detected = list(outliers)
         self.consensus_achieved = True
@@ -95,11 +96,15 @@ class LegacyAnalyticsBridge:
         self.promoted_count = len(p_ids)
         
         class MockSchedulingDecision:
-            def __init__(self, scores, p_ids):
+            def __init__(self, scores, p_ids, tiers):
                 self.trust_scores = scores.copy()
-                self.tier_assignments = {cid: (3 if cid in p_ids else 1) for cid in scores.keys()}
-                
-        self.scheduling_decision = MockSchedulingDecision(trust_scores, p_ids)
+                # Real tier from the scheduler when available. The old fallback
+                # (3 if promoted else 1) is kept only for callers that cannot
+                # supply it, and is a promoted flag, NOT a tier.
+                self.tier_assignments = dict(tiers) if tiers else {
+                    cid: (3 if cid in p_ids else 1) for cid in scores.keys()}
+
+        self.scheduling_decision = MockSchedulingDecision(trust_scores, p_ids, tiers)
 
 class TavsEspStrategy(Strategy):
     def __init__(self, config, model_structure=None):
@@ -123,7 +128,7 @@ class TavsEspStrategy(Strategy):
             theta_low=getattr(self.config, 'theta_low', 0.3),
             theta_high=getattr(self.config, 'theta_high', 0.8),
             alpha_trust=getattr(self.config, 'alpha_trust', 0.9),
-            tau_ramp=getattr(self.config, 'tau_ramp', 30.0),
+            tau_ramp=getattr(self.config, 'tau_ramp', 5.0),
             k_trust=getattr(self.config, 'k_trust', 10),
             p_decoy=getattr(self.config, 'p_decoy', getattr(self.config, 'decoy_probability', 0.15)),
             master_key=getattr(self.config, 'master_key', b'default_key')
@@ -426,7 +431,10 @@ class TavsEspStrategy(Strategy):
         if not aggregated_blocks:
             return None, {}
 
-        analytics = LegacyAnalyticsBridge(server_round, outliers, self.scheduler.trust_scores, P_ids, execution_time_ms)
+        tiers = {cid: self.scheduler.get_tier(cid, server_round)
+                 for cid in self.scheduler.trust_scores}
+        analytics = LegacyAnalyticsBridge(server_round, outliers, self.scheduler.trust_scores,
+                                          P_ids, execution_time_ms, tiers=tiers)
         self.round_analytics.append(analytics)
 
         # Actual per-round scheduling counts, measured rather than assumed.
