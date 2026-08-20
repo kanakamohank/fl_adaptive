@@ -136,7 +136,8 @@ class TavsScheduler:
 
         return V, P, D
 
-    def update_trust(self, client_id: str, behavior_score: float, was_verified: bool):
+    def update_trust(self, client_id: str, behavior_score: float, was_verified: bool,
+                     is_outlier: bool = False):
         """
         Section 4.2: T_i(r) = \alpha \cdot T_i(r-1) + (1-\alpha) \cdot \varphi_i(r)
         """
@@ -145,11 +146,17 @@ class TavsScheduler:
         if was_verified:
             new_trust = (self.alpha_trust * old_trust) + ((1.0 - self.alpha_trust) * behavior_score)
             
-            # Update k_trust streak
-            if behavior_score > 0.8:  # Assuming clean verification
-                self.clean_streaks[client_id] = self.clean_streaks.get(client_id, 0) + 1
-            else:
+            # Update k_trust streak.
+            #
+            # The detector's own verdict is authoritative, not a score cutoff.
+            # Under the absolute behaviour score a client just past the anomaly
+            # threshold (max_z = 1.1 * tau_z) scores 0.9, so a client the
+            # detector FLAGGED as Byzantine would still have cleared a 0.8 cutoff
+            # and kept accumulating its clean streak towards Tier 3 promotion.
+            if is_outlier or behavior_score <= 0.8:
                 self.clean_streaks[client_id] = 0
+            else:
+                self.clean_streaks[client_id] = self.clean_streaks.get(client_id, 0) + 1
         else:
             # Decay for promoted clients
             new_trust = self.alpha_trust * old_trust

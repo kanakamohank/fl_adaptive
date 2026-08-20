@@ -381,7 +381,8 @@ class TavsEspStrategy(Strategy):
             inliers_for_agg = set(V_ids)
 
         for cid in V_ids:
-            self.scheduler.update_trust(cid, behavior_score=behavior_scores.get(cid, 0.0), was_verified=True)
+            self.scheduler.update_trust(cid, behavior_score=behavior_scores.get(cid, 0.0),
+                                        was_verified=True, is_outlier=cid in outliers)
         for cid in P_ids:
             self.scheduler.update_trust(cid, behavior_score=0.0, was_verified=False)
 
