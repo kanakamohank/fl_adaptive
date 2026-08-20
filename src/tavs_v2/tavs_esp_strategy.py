@@ -27,6 +27,23 @@ class TavsEspConfig:
     theta_high: float = 0.7
     alpha_trust: float = 0.9
     tau_ramp: float = 5.0
+
+    # Staleness caps: how long a promoted client may go unverified before it is
+    # forced back to verification regardless of trust. Trust no longer decays on
+    # promotion, so without these a client that once earned high trust would stay
+    # promoted forever and never be checked again.
+    #
+    # These are a SAFETY bound, not a throughput dial. s_max binds only when
+    # s_max < gamma_budget/(1-gamma_budget); at gamma_budget=0.35 that needs
+    # s_max < 0.54, which is impossible. So the budget sets the saving and these
+    # caps set the worst-case exposure window. Both are wanted.
+    s_max_appearances: int = 4
+    s_max_rounds: int = 10
+    # Restores the pre-split trust decay, for before/after comparison only.
+    decay_trust_on_promotion: bool = False
+    # Bayesian weight steepness. Previously hardcoded at the scheduler default
+    # and unreachable from config, despite governing the budget arithmetic.
+    c_lambda: float = 8.0
     k_trust: int = 10
     p_decoy: float = 0.15
     decoy_probability: float = 0.15 
@@ -131,7 +148,11 @@ class TavsEspStrategy(Strategy):
             tau_ramp=getattr(self.config, 'tau_ramp', 5.0),
             k_trust=getattr(self.config, 'k_trust', 10),
             p_decoy=getattr(self.config, 'p_decoy', getattr(self.config, 'decoy_probability', 0.15)),
-            master_key=getattr(self.config, 'master_key', b'default_key')
+            c_lambda=getattr(self.config, 'c_lambda', 8.0),
+            master_key=getattr(self.config, 'master_key', b'default_key'),
+            s_max_appearances=getattr(self.config, 's_max_appearances', 4),
+            s_max_rounds=getattr(self.config, 's_max_rounds', 10),
+            decay_trust_on_promotion=getattr(self.config, 'decay_trust_on_promotion', False),
         )
         
         self.projector = EphemeralStructuredProjection(
@@ -382,9 +403,11 @@ class TavsEspStrategy(Strategy):
 
         for cid in V_ids:
             self.scheduler.update_trust(cid, behavior_score=behavior_scores.get(cid, 0.0),
-                                        was_verified=True, is_outlier=cid in outliers)
+                                        was_verified=True, is_outlier=cid in outliers,
+                                        round_num=server_round)
         for cid in P_ids:
-            self.scheduler.update_trust(cid, behavior_score=0.0, was_verified=False)
+            self.scheduler.update_trust(cid, behavior_score=0.0, was_verified=False,
+                                        round_num=server_round)
 
         verified_updates = {cid: all_updates[cid] for cid in inliers_for_agg if cid in all_updates}
         promoted_updates = {cid: all_updates[cid] for cid in P_ids if cid in all_updates}
@@ -453,6 +476,11 @@ class TavsEspStrategy(Strategy):
             "num_outliers": len(outliers),
             "num_clipped": int(clip_stats.get("num_clipped") or 0),
             "num_cosine_rejected": int(cosine_stats.get("num_rejected") or 0),
+            # Clients forced back to verification by the staleness cap. Recorded
+            # because an expiry that never fires is otherwise invisible -- the
+            # same way Tier 3 silently never fired.
+            "num_forced_stale": sum(
+                1 for cid in V_ids if self.scheduler.is_stale(cid, server_round)),
             "clip_radius": clip_stats.get("clip_radius"),
             # Raw cosines, so a threshold can be calibrated post hoc from logged
             # runs rather than by re-running a sweep per candidate value. Sorted

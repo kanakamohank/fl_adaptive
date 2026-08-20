@@ -52,6 +52,10 @@ def test_tier_3_promotion_and_decoy(baseline_scheduler, monkeypatch):
     cid = "trusted_client"
     # Artificially inject high trust and long streak
     baseline_scheduler.trust_scores[cid] = 0.9
+    # A client with earned trust has necessarily been verified. Without this the
+    # staleness cap correctly refuses to promote a client never looked at.
+    baseline_scheduler.last_verified_round[cid] = 0
+    baseline_scheduler.appearances_since_verified[cid] = 0
     baseline_scheduler.join_rounds[cid] = -100  # Bypass Mech 3 cap
     baseline_scheduler.clean_streaks[cid] = 15  # Surpasses k_trust = 10
     baseline_scheduler.gamma_budget = 1.0  # isolate Tier 3 / decoy from Mechanism 1 demotion
@@ -76,6 +80,8 @@ def test_mechanism_1_budget_constraint(baseline_scheduler):
     for i, cid in enumerate(clients):
         # Give them staggered trust scores: 0.70, 0.71, ..., 0.79
         baseline_scheduler.trust_scores[cid] = 0.70 + (i * 0.01)
+        baseline_scheduler.last_verified_round[cid] = 0
+        baseline_scheduler.appearances_since_verified[cid] = 0
         baseline_scheduler.join_rounds[cid] = -100
         baseline_scheduler.clean_streaks[cid] = 10
         
@@ -107,14 +113,23 @@ def test_trust_ema_update_and_streaks(baseline_scheduler):
     assert math.isclose(baseline_scheduler.trust_scores[cid], 0.55)
     assert baseline_scheduler.clean_streaks[cid] == 6, "Clean streak did not increment"
     
-    # 2. Promoted Decay (No verification)
+    # 2. Promotion: trust is UNCHANGED, staleness advances instead.
+    #
+    # Previously this decayed trust to 0.495. That made the EMA converge to
+    # f * phi (the verification RATE) rather than to phi, capping trust at ~0.3
+    # and putting theta_high=0.7 out of reach at any round count. Not being
+    # checked is not evidence of misbehaviour; it is a reason to check again,
+    # which the staleness counter now expresses.
     baseline_scheduler.update_trust(cid, behavior_score=0.0, was_verified=False)
-    # expected: 0.9 * 0.55 = 0.495
-    assert math.isclose(baseline_scheduler.trust_scores[cid], 0.495)
+    assert math.isclose(baseline_scheduler.trust_scores[cid], 0.55)
+    assert baseline_scheduler.appearances_since_verified[cid] == 1
     assert baseline_scheduler.clean_streaks[cid] == 6, "Clean streak should pause, not reset, during promotion"
-    
+
     # 3. Byzantine Verification (Attack detected)
-    baseline_scheduler.update_trust(cid, behavior_score=0.1, was_verified=True)
-    # expected: 0.9 * 0.495 + 0.1 * 0.1 = 0.4455 + 0.01 = 0.4555
-    assert math.isclose(baseline_scheduler.trust_scores[cid], 0.4555)
+    baseline_scheduler.update_trust(cid, behavior_score=0.1, was_verified=True, round_num=7)
+    # expected: 0.9 * 0.55 + 0.1 * 0.1 = 0.495 + 0.01 = 0.505
+    assert math.isclose(baseline_scheduler.trust_scores[cid], 0.505)
+    # Verification is fresh evidence: both staleness clocks reset.
+    assert baseline_scheduler.appearances_since_verified[cid] == 0
+    assert baseline_scheduler.last_verified_round[cid] == 7
     assert baseline_scheduler.clean_streaks[cid] == 0, "Clean streak did not reset after bad behavior"
