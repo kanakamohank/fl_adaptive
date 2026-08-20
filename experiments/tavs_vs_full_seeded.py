@@ -71,7 +71,28 @@ def run_one(arm, strategy_class, seed, args):
     """One pipeline. Identical config across arms except the strategy."""
     tavs_config = TavsEspConfig(
         theta_low=0.3, theta_high=0.7, alpha_trust=0.9, gamma_budget=0.35,
-        tau_ramp=5.0, k_trust=3, target_k=args.target_k, detection_threshold=2.0,
+        # tau_z = 5.0, not the 2.0 used previously.
+        #
+        # 2.0 flagged 39.9% of VERIFIED clients as Byzantine in a run with ZERO
+        # attackers, escalating 4.8% -> 73.5% across 60 rounds. The escalation is a
+        # feedback loop: sigma^2 is re-estimated from inliers ONLY, so flagging
+        # clients shrinks the variance estimate, which raises everyone's z, which
+        # flags more. Four rounds ended with every verified client flagged.
+        #
+        # max_z is a MAX over 10 parameter blocks, so it needs headroom that a
+        # single-statistic threshold does not. Measured ROC on honest-vs-attacker
+        # cohorts at realistic heterogeneity:
+        #
+        #     tau_z   honest FP   TP@3x   TP@10x   TP@100x
+        #       2.0        66%     100%     100%      100%
+        #       5.0         0%     100%     100%      100%
+        #      10.0         0%      80%     100%      100%
+        #      20.0         0%       3%     100%      100%
+        #
+        # 5.0 strictly dominates 2.0: no false positives AND full detection of even a
+        # modest 3x attacker. It is also already the TavsEspConfig default -- these
+        # scripts were overriding a correct default with a broken value.
+        tau_ramp=5.0, k_trust=3, target_k=args.target_k, detection_threshold=5.0,
         clip_promoted_updates=True, promoted_clip_factor=args.clip_factor,
         # Exposed so this comparison states which defences were active rather
         # than inheriting a default. The published 43.3%/-0.0297 figures predate
