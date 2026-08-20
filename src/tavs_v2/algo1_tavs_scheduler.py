@@ -21,7 +21,10 @@ class TavsScheduler:
         k_trust: int,
         p_decoy: float = 0.15,
         c_lambda: float = 8.0,
-        master_key: bytes = b'default_paper_key'
+        master_key: bytes = b'default_paper_key',
+        s_max_appearances: int = 4,
+        s_max_rounds: int = 10,
+        decay_trust_on_promotion: bool = False,
     ):
         # 1-to-1 Notation Mapping with Paper
         self.gamma_budget = gamma_budget  # \gamma_{budget}: Max unverified influence
@@ -33,11 +36,27 @@ class TavsScheduler:
         self.p_decoy = p_decoy            # p_{decoy}: CSPRNG decoy probability
         self.c_lambda = c_lambda          # c_\lambda: Bayesian weight steepness
         self.master_key = master_key
-        
+
+        # Staleness caps. Trust answers "how well has this client behaved"; these
+        # answer "how long since we last looked". Conflating the two -- decaying
+        # trust because a client was promoted -- made the trust EMA converge to
+        # the verification rate f rather than to the behaviour score, pinning
+        # trust at ~0.3 and putting theta_high=0.7 permanently out of reach.
+        #
+        # Two caps because they measure different things. Appearances drive the
+        # trust cadence; wall-clock rounds bound actual exposure. At 40%
+        # participation 4 appearances is ~10 rounds, so neither implies the other.
+        self.s_max_appearances = s_max_appearances
+        self.s_max_rounds = s_max_rounds
+        # Reproduces the pre-split behaviour for before/after comparison only.
+        self.decay_trust_on_promotion = decay_trust_on_promotion
+
         # State tracking
         self.trust_scores: Dict[str, float] = {}       # T_i(r)
         self.join_rounds: Dict[str, int] = {}          # r_0 (for Mechanism 3)
         self.clean_streaks: Dict[str, int] = {}        # Track k_trust
+        self.appearances_since_verified: Dict[str, int] = {}
+        self.last_verified_round: Dict[str, int] = {}
         
     def _csprng_roll(self, client_id: str, round_num: int) -> float:
         """Cryptographically secure pseudorandomness under TSA (Assumption 1)."""
@@ -74,6 +93,27 @@ class TavsScheduler:
             return 3
         return 2
 
+    def is_stale(self, client_id: str, round_num: int) -> bool:
+        """
+        Has this client gone too long without verification?
+
+        A hard expiry, deliberately independent of trust: without it, removing
+        the promotion decay would let a client that once earned high trust stay
+        promoted indefinitely and never be checked again. Trust says how well a
+        client behaved when we last looked; this says the last look is too old
+        to rely on.
+
+        Either cap alone is insufficient. A rarely-sampled client trips the
+        wall-clock cap long before it accumulates appearances, and a heavily
+        sampled one trips the appearance cap first.
+        """
+        if client_id not in self.last_verified_round:
+            return True     # never verified: cannot be promoted on no evidence
+        appearances = self.appearances_since_verified.get(client_id, 0)
+        if appearances >= self.s_max_appearances:
+            return True
+        return (round_num - self.last_verified_round[client_id]) >= self.s_max_rounds
+
     def schedule_verifications(
         self, available_clients: List[str], round_num: int
     ) -> Tuple[Set[str], Set[str], Set[str]]:
@@ -84,13 +124,24 @@ class TavsScheduler:
                 self.trust_scores[cid] = 0.25
                 self.join_rounds[cid] = round_num
                 self.clean_streaks[cid] = 0
-                
+                self.appearances_since_verified[cid] = 0
+                # last_verified_round is deliberately left unset: is_stale()
+                # treats "never verified" as stale, so a fresh client cannot be
+                # promoted before it has been looked at even once.
+
         V, P, D = set(), set(), set()
         
         # --- PHASE 1: SEGMENTATION & DECOY INJECTION (Section 4.2) ---
         for cid in available_clients:
             t_eff = self.get_effective_trust(cid, round_num)
-            
+
+            # Hard expiry outranks tier. Placed before the tier branches AND
+            # before the Phase 2 budget loop so it acts as a floor the budget
+            # cannot trade away: the budget may only ever move clients INTO V.
+            if self.is_stale(cid, round_num):
+                V.add(cid)
+                continue
+
             # Tier 1
             if t_eff < self.theta_low:
                 V.add(cid)
@@ -136,24 +187,52 @@ class TavsScheduler:
 
         return V, P, D
 
-    def update_trust(self, client_id: str, behavior_score: float, was_verified: bool):
+    def update_trust(self, client_id: str, behavior_score: float, was_verified: bool,
+                     is_outlier: bool = False, round_num: int = None):
         """
         Section 4.2: T_i(r) = \alpha \cdot T_i(r-1) + (1-\alpha) \cdot \varphi_i(r)
+
+        Trust moves ONLY on verification. Promotion advances the staleness
+        counters instead of decaying trust: not being checked is not evidence of
+        misbehaviour, and treating it as such made the EMA converge to the
+        verification rate f (T* = f * phi) instead of to the behaviour score.
+        That capped trust at ~0.3 and made theta_high=0.7 unreachable at any
+        round count.
+
+        round_num is optional so existing callers keep working, but without it
+        the wall-clock staleness cap cannot be enforced.
         """
         old_trust = self.trust_scores.get(client_id, 0.25)
         
         if was_verified:
             new_trust = (self.alpha_trust * old_trust) + ((1.0 - self.alpha_trust) * behavior_score)
             
-            # Update k_trust streak
-            if behavior_score > 0.8:  # Assuming clean verification
-                self.clean_streaks[client_id] = self.clean_streaks.get(client_id, 0) + 1
-            else:
+            # Update k_trust streak.
+            #
+            # The detector's own verdict is authoritative, not a score cutoff.
+            # Under the absolute behaviour score a client just past the anomaly
+            # threshold (max_z = 1.1 * tau_z) scores 0.9, so a client the
+            # detector FLAGGED as Byzantine would still have cleared a 0.8 cutoff
+            # and kept accumulating its clean streak towards Tier 3 promotion.
+            if is_outlier or behavior_score <= 0.8:
                 self.clean_streaks[client_id] = 0
+            else:
+                self.clean_streaks[client_id] = self.clean_streaks.get(client_id, 0) + 1
+
+            # Fresh evidence: both staleness clocks reset. Decoys reach here too
+            # (D is a subset of V), so a decoy counts as a real check.
+            self.appearances_since_verified[client_id] = 0
+            if round_num is not None:
+                self.last_verified_round[client_id] = round_num
+        elif self.decay_trust_on_promotion:
+            new_trust = self.alpha_trust * old_trust        # pre-split behaviour
+            self.appearances_since_verified[client_id] = \
+                self.appearances_since_verified.get(client_id, 0) + 1
         else:
-            # Decay for promoted clients
-            new_trust = self.alpha_trust * old_trust
-            
+            new_trust = old_trust                            # unchanged, not decayed
+            self.appearances_since_verified[client_id] = \
+                self.appearances_since_verified.get(client_id, 0) + 1
+
         self.trust_scores[client_id] = new_trust
 
     def _min_round_to_reach(self, threshold: float, initial_trust: float) -> float:

@@ -516,3 +516,26 @@ def test_get_tier_reports_real_tier_not_promoted_flag():
     # High trust alone is not Tier 3; the k_trust streak is also required.
     assert s.get_tier("high_no_streak", 50) == 2
     assert s.get_tier("high", 50) == 3
+
+
+def test_flagged_outlier_never_accumulates_clean_streak():
+    """
+    A client the detector flagged must not progress towards Tier 3.
+
+    Under the absolute score a client just past the anomaly threshold scores
+    ~0.9, which cleared the old 0.8 cutoff -- so a flagged Byzantine client kept
+    building the streak that Tier 3 promotion requires.
+    """
+    from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
+    s = TavsScheduler(gamma_budget=0.35, theta_low=0.3, theta_high=0.7,
+                      alpha_trust=0.9, tau_ramp=5.0, k_trust=3, p_decoy=0.0,
+                      master_key=b"k")
+    s.trust_scores["c"], s.join_rounds["c"], s.clean_streaks["c"] = 0.9, 0, 5
+
+    s.update_trust("c", behavior_score=0.9, was_verified=True, is_outlier=True)
+    assert s.clean_streaks["c"] == 0        # flagged -> streak destroyed
+    assert s.get_tier("c", 50) == 2         # and Tier 3 lost immediately
+
+    # A clean client at the same score still accumulates.
+    s.update_trust("c", behavior_score=0.9, was_verified=True, is_outlier=False)
+    assert s.clean_streaks["c"] == 1

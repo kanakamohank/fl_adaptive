@@ -196,8 +196,16 @@ def test_disabling_tavs_by_config_verifies_nobody():
     Documents WHY FullVerificationStrategy has to be its own class.
 
     The old baseline was built by setting theta_low=0.0, theta_high=1.0,
-    gamma_budget=1.0 and calling it "verify everyone". Trace it through the real
-    scheduler: the intended meaning inverts and nothing is verified at all.
+    gamma_budget=1.0 and calling it "verify everyone". Traced through the real
+    scheduler the intended meaning inverts: on tier logic alone nothing is
+    verified at all.
+
+    The staleness cap now catches this. A client that has never been verified is
+    stale by definition and cannot be promoted on no evidence, so the
+    misconfiguration degrades to full verification instead of to zero
+    verification. That is a safety net, NOT a reason to trust the preset --
+    FullVerificationStrategy remains the correct way to express the baseline,
+    because this only holds while the clients have no verification history.
     """
     from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
 
@@ -208,8 +216,17 @@ def test_disabling_tavs_by_config_verifies_nobody():
     clients = [f"client_{i}" for i in range(20)]
     V, P, _ = scheduler.schedule_verifications(clients, round_num=5)
 
-    assert len(V) == 0, "the 'full verification' preset verifies nobody"
-    assert len(P) == 20, "it promotes everyone instead"
+    assert len(V) == 20, "never-verified clients must not be promoted"
+    assert len(P) == 0
+
+    # With a verification history the tier inversion reasserts itself, which is
+    # the pathology this test exists to document.
+    for cid in clients:
+        scheduler.last_verified_round[cid] = 5
+        scheduler.appearances_since_verified[cid] = 0
+    V2, P2, _ = scheduler.schedule_verifications(clients, round_num=6)
+    assert len(V2) == 0, "the 'full verification' preset verifies nobody"
+    assert len(P2) == 20, "it promotes everyone instead"
 
 
 def test_full_verification_strategy_verifies_every_sampled_client():
@@ -413,7 +430,8 @@ def test_min_round_for_promotion_matches_the_simulated_scheduler():
         if P and first_promotion is None:
             first_promotion = rnd
         for cid in clients:
-            scheduler.update_trust(cid, 1.0, was_verified=cid not in P)
+            scheduler.update_trust(cid, 1.0, was_verified=cid not in P,
+                                       round_num=rnd)
 
     assert first_promotion is not None, "promotion never happened despite feasible config"
     assert first_promotion >= predicted, (
@@ -545,6 +563,10 @@ def test_decoys_are_told_they_were_promoted():
         strategy.scheduler.trust_scores[cid] = 0.99
         strategy.scheduler.join_rounds[cid] = 0
         strategy.scheduler.clean_streaks[cid] = 99
+        # Tier 3 implies a recent verification; without it the staleness cap
+        # correctly forces the client back to V and no decoy arises.
+        strategy.scheduler.last_verified_round[cid] = 50
+        strategy.scheduler.appearances_since_verified[cid] = 0
 
     fit_ins = strategy.configure_fit(50, None, _Manager(6))
     record = strategy._round_assignments[50]
