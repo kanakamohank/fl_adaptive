@@ -13,17 +13,45 @@ class TavsScheduler:
     
     def __init__(
         self, 
-        gamma_budget: float, 
-        theta_low: float, 
-        theta_high: float, 
+        # Max share of AGGREGATE WEIGHT unverified clients may hold in a round.
+        # Not a headcount quota: gamma = sum(p_i) / (|V| + sum(p_i)). This is the
+        # constraint that actually sets the verification saving.
+        gamma_budget: float,
+        # Below this trust a client is Tier 1 and is always verified.
+        theta_low: float,
+        # At or above this trust (plus a k_trust streak) a client is Tier 3 and
+        # may skip verification. Between the two thresholds it is Tier 2.
+        theta_high: float,
+        # EMA momentum for trust. 0.9 means today's verification is 10% of the
+        # score, so trust reflects roughly the last 10 verifications.
         alpha_trust: float,
+        # Rate limit on how fast a NEWLY JOINED client may accrue trust:
+        # T_max(r) = 1 - exp(-(r - r_0)/tau_ramp). Anti-Sybil -- a fresh identity
+        # cannot buy influence quickly. Binds only for the first few rounds.
         tau_ramp: float,
+        # Consecutive clean verifications required before Tier 3. Gates ENTRY to
+        # promotion; it does nothing once a client is already promoted.
         k_trust: int,
+        # Probability a Tier 3 client is verified anyway while being TOLD it was
+        # promoted. Deterrence: a client cannot know it is unobserved, so it must
+        # behave as if watched. Probabilistic, so it gives no coverage guarantee.
         p_decoy: float = 0.15,
+        # Steepness of trust -> aggregation weight: p_i = sigmoid(c_lambda*(T-0.5)).
+        # Higher makes the weighting near-binary around T=0.5. Feeds gamma_budget,
+        # so it indirectly controls how much promotion the budget permits.
         c_lambda: float = 8.0,
+        # Seed for the CSPRNG decoy roll. Must be secret: a client that could
+        # predict the roll would know exactly when it is safe to misbehave.
         master_key: bytes = b'default_paper_key',
+        # Max APPEARANCES a client may be promoted before forced re-verification.
+        # Drives the trust-refresh cadence.
         s_max_appearances: int = 4,
+        # Max WALL-CLOCK ROUNDS unverified before forced re-verification. Bounds
+        # real exposure; a rarely-sampled client trips this long before it
+        # accumulates appearances, which is why both caps exist.
         s_max_rounds: int = 10,
+        # Restores the pre-split behaviour where promotion decayed trust. For
+        # before/after comparison only -- it makes Tier 3 unreachable.
         decay_trust_on_promotion: bool = False,
     ):
         # 1-to-1 Notation Mapping with Paper
