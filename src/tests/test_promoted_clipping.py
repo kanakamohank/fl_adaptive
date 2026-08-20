@@ -588,3 +588,62 @@ def test_cosine_gate_defaults_off():
     assert TavsEspConfig().cosine_filter_promoted is False
     # Clipping, which HAS measured selectivity, stays on.
     assert TavsEspConfig().clip_promoted_updates is True
+
+
+# ---------------------------------------------------------------------------
+# Detector calibration: tau_z must not flag honest clients.
+# ---------------------------------------------------------------------------
+
+def _hetero_cohort(n=5, blocks=10, het=0.6):
+    """Honest but heterogeneous clients, as non-IID data produces."""
+    return {f"c{i}": {f"b{m}": torch.randn(50) + het * torch.randn(1) * torch.ones(50)
+                      for m in range(blocks)} for i in range(n)}
+
+
+def test_detector_does_not_flag_honest_heterogeneous_clients():
+    """
+    At tau_z=5 an all-honest cohort produces no outliers, sustained over rounds.
+
+    At tau_z=2 this cohort produced a 50-70% false-positive rate that ESCALATED,
+    because sigma^2 is re-estimated from inliers only: flagging clients shrinks
+    the variance estimate, which raises everyone's z, which flags more. In the
+    real 60-round run that ran away from 4.8% to 73.5% with zero attackers,
+    and four rounds ended with every verified client flagged.
+    """
+    from src.tavs_v2.algo3_bvd_aggregation import BlockVarianceDetector
+    torch.manual_seed(0)
+    det = BlockVarianceDetector(tau_z=5.0)
+    flagged = 0
+    for _ in range(40):
+        u = _hetero_cohort()
+        _, outliers, _ = det.detect_outliers(u, set(u))
+        flagged += len(outliers)
+    # Allow a rare flag; what must not happen is a sustained or growing rate.
+    assert flagged <= 2, f"{flagged} honest clients flagged over 40 rounds"
+
+
+def test_detector_still_catches_a_scaled_attacker():
+    """
+    The looser threshold must not buy its clean false-positive rate by going
+    blind: a 3x-scaled update is still caught.
+    """
+    from src.tavs_v2.algo3_bvd_aggregation import BlockVarianceDetector
+    torch.manual_seed(0)
+    det = BlockVarianceDetector(tau_z=5.0)
+    for _ in range(20):                       # warm the variance estimate
+        u = _hetero_cohort()
+        det.detect_outliers(u, set(u))
+
+    caught = 0
+    for _ in range(20):
+        u = _hetero_cohort()
+        u["attacker"] = {m: v * 3.0 for m, v in u["c0"].items()}
+        _, outliers, _ = det.detect_outliers(u, set(u))
+        caught += ("attacker" in outliers)
+    assert caught >= 18, f"caught only {caught}/20 scaled attackers"
+
+
+def test_config_default_detection_threshold_is_calibrated():
+    """5.0 dominates 2.0 on both axes; scripts must not override it back down."""
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig
+    assert TavsEspConfig().detection_threshold == 5.0
