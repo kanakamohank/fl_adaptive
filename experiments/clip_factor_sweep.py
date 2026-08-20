@@ -204,7 +204,12 @@ def main():
     # with the verified cohort's mean movement. Orthogonal to the clip, which
     # only bounds magnitude -- an attacker inside the clip radius but pointing
     # backwards is invisible to the clip and caught here.
-    parser.add_argument("--cosine", default="on", choices=("on", "off"),
+    parser.add_argument("--cosine", default="off", choices=("on", "off"),
+                        # Defaults to off, matching TavsEspConfig. These
+                        # scripts defaulted to "on" and so silently kept the
+                        # gate active after the config default was flipped,
+                        # discarding 30.9% of promoted updates in a run with
+                        # no attacker.
                         help="Direction gate on promoted updates (default: on). "
                              "Run 'off' to attribute an effect to the clip alone.")
     parser.add_argument("--cosine-min", type=float, default=0.0,
