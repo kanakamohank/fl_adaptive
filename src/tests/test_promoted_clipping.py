@@ -370,7 +370,10 @@ def test_strategy_defaults_enable_both_bounds():
 
     config = TavsEspConfig()
     assert config.clip_promoted_updates is True
-    assert config.cosine_filter_promoted is True
+    # Cosine now defaults OFF: measured 25.8-42.9% rejection of honest promoted
+    # clients with no attacker present, against no measured benefit. The
+    # threshold is retained at its documented value for when it is re-enabled.
+    assert config.cosine_filter_promoted is False
     # 0.0 rejects only updates actively pulling backwards. Higher values start
     # rejecting merely-orthogonal updates, i.e. honest heterogeneity.
     assert config.promoted_cosine_min == 0.0
@@ -539,3 +542,49 @@ def test_flagged_outlier_never_accumulates_clean_streak():
     # A clean client at the same score still accumulates.
     s.update_trust("c", behavior_score=0.9, was_verified=True, is_outlier=False)
     assert s.clean_streaks["c"] == 1
+
+
+# ---------------------------------------------------------------------------
+# FedAvg sample-count weighting.
+# ---------------------------------------------------------------------------
+
+def test_aggregate_is_scale_invariant_in_weights():
+    """
+    Multiplying every weight by a constant must not change the aggregate.
+
+    This is what makes it safe to fold dataset size into the weights: clients
+    submit FULL PARAMETERS, so any change in overall scale would corrupt the
+    global model rather than merely re-balance it.
+    """
+    u = {"w": torch.ones(4) * 2.0}
+    small = UnifiedBayesianAggregator.aggregate(
+        {"a": u}, {"a": 1.0}, {}, {}, clip_promoted=False, cosine_filter=False)
+    large = UnifiedBayesianAggregator.aggregate(
+        {"a": u}, {"a": 4242.0}, {}, {}, clip_promoted=False, cosine_filter=False)
+    assert torch.allclose(small["w"], large["w"])
+    assert torch.allclose(large["w"], torch.ones(4) * 2.0)
+
+
+def test_larger_client_pulls_the_aggregate_further():
+    """A client with more data must carry proportionally more of the average."""
+    a = {"w": torch.ones(2) * 1.0}
+    b = {"w": torch.ones(2) * 3.0}
+    # Equal trust, 811 vs 5261 samples -- the measured spread at data_alpha=0.3.
+    out = UnifiedBayesianAggregator.aggregate(
+        {"a": a, "b": b}, {"a": 811.0, "b": 5261.0}, {}, {},
+        clip_promoted=False, cosine_filter=False)
+    expected = (811.0 * 1.0 + 5261.0 * 3.0) / (811.0 + 5261.0)
+    assert out["w"][0].item() == pytest.approx(expected)
+    # Equal weighting would have given a flat 2.0; it must not.
+    assert out["w"][0].item() > 2.0
+
+
+def test_cosine_gate_defaults_off():
+    """
+    Measured cost, unmeasured benefit: the gate stays off until an adversary
+    exists that it demonstrably catches and clipping demonstrably misses.
+    """
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig
+    assert TavsEspConfig().cosine_filter_promoted is False
+    # Clipping, which HAS measured selectivity, stays on.
+    assert TavsEspConfig().clip_promoted_updates is True
