@@ -182,6 +182,10 @@ class TavsEspStrategy(Strategy):
         # the comparison experiment so its resource claims are measurements.
         self.scheduling_history: List[Dict[str, int]] = []
 
+        # Per-round count of clients the staleness cap forced back to
+        # verification, keyed by round. Populated in configure_fit.
+        self._forced_stale: Dict[int, int] = {}
+
         # Server-side record of each round's verified/promoted/decoy sets, so
         # aggregate_fit never has to trust a client's self-report.
         self._round_assignments: Dict[int, Dict[str, set]] = {}
@@ -291,7 +295,14 @@ class TavsEspStrategy(Strategy):
         if not client_ids:
             return []
 
+        # Snapshot who the staleness cap forced into V, BEFORE aggregate_fit's
+        # update_trust resets the clocks. Measured after the fact this is always
+        # zero, because verification is exactly what clears staleness.
+        forced = sum(1 for cid in client_ids
+                     if self.scheduler.is_stale(cid, server_round))
+
         V, P, D = self.scheduler.schedule_verifications(client_ids, server_round)
+        self._forced_stale[server_round] = forced
         logger.info(
             f"Round {server_round} Scheduling: {len(V)} Verified "
             f"({len(D)} of them decoys), {len(P)} Promoted"
@@ -476,11 +487,14 @@ class TavsEspStrategy(Strategy):
             "num_outliers": len(outliers),
             "num_clipped": int(clip_stats.get("num_clipped") or 0),
             "num_cosine_rejected": int(cosine_stats.get("num_rejected") or 0),
-            # Clients forced back to verification by the staleness cap. Recorded
-            # because an expiry that never fires is otherwise invisible -- the
-            # same way Tier 3 silently never fired.
-            "num_forced_stale": sum(
-                1 for cid in V_ids if self.scheduler.is_stale(cid, server_round)),
+            # Clients forced back to verification by the staleness cap.
+            #
+            # Captured in configure_fit, BEFORE update_trust resets the staleness
+            # clocks. Evaluating it here always returned 0: by this point every
+            # verified client has had appearances_since_verified zeroed and
+            # last_verified_round set to the current round, so is_stale() is
+            # false for all of them by construction.
+            "num_forced_stale": self._forced_stale.get(server_round, 0),
             "clip_radius": clip_stats.get("clip_radius"),
             # Raw cosines, so a threshold can be calibrated post hoc from logged
             # runs rather than by re-running a sweep per candidate value. Sorted
