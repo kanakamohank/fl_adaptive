@@ -72,10 +72,23 @@ class TavsEspConfig:
     # Reject unverified updates pointing against the verified cohort's proposed
     # direction. Complements clipping, which bounds distance but not direction:
     # an update inside the clip ball can still point the opposite way.
-    cosine_filter_promoted: bool = True
+    # Default OFF on measured evidence. With zero attackers present the gate
+    # rejected 42.9% of promoted updates at 20 rounds and 25.8% at 60 -- all
+    # honest, since there was nothing else to reject. Logging the raw cosines
+    # showed why: the threshold of 0.0 would also reject 20.9% of VERIFIED
+    # clients, i.e. it cuts through the middle of the honest distribution rather
+    # than isolating anomalies (honest verified median was only +0.155 at
+    # data_alpha=0.3, so honest clients are near-orthogonal to their own
+    # consensus). Against that measured cost stands no measured benefit: the gate
+    # has never been observed catching an attack that clipping missed, because
+    # every attack in the suite is large-magnitude and clipping already contains
+    # it. Re-enable when there is an adversary it demonstrably catches.
+    cosine_filter_promoted: bool = False
     # Minimum cosine to the verified movement. 0.0 rejects only updates actively
     # pulling backwards, which is the unambiguous case; raising it also rejects
     # merely-orthogonal updates and will start catching honest heterogeneity.
+    # Calibrating from the logged distribution: admitting 95% of verified clients
+    # needs -0.152, not 0.0.
     promoted_cosine_min: float = 0.0
 
     # Bound how far an unverified (promoted) update may deviate from the verified
@@ -377,6 +390,11 @@ class TavsEspStrategy(Strategy):
 
         start_time = time.time()
         all_updates = self._parse_client_updates(results)
+
+        # Sample counts, for FedAvg-style weighting below. Flower already carries
+        # these in FitRes; they were simply never read.
+        num_examples = {proxy.cid: max(1, int(res.num_examples))
+                        for proxy, res in results}
         
         # Verified/promoted split comes from the SERVER's own record of what it
         # scheduled, never from the client.
@@ -423,14 +441,28 @@ class TavsEspStrategy(Strategy):
         verified_updates = {cid: all_updates[cid] for cid in inliers_for_agg if cid in all_updates}
         promoted_updates = {cid: all_updates[cid] for cid in P_ids if cid in all_updates}
         
+        # Aggregation weight = trust factor x dataset size.
+        #
+        # The dataset-size term is standard FedAvg (w_i proportional to n_i) and
+        # was missing: weighting came from trust alone, so a client holding 811
+        # samples had exactly the same vote as one holding 5261. Under a Dirichlet
+        # split at alpha=0.3 that spread is real -- measured 6.5x between the
+        # smallest and largest client -- and it systematically over-weights the
+        # small, label-skewed clients whose local optimum sits furthest from the
+        # global one.
+        #
+        # The trust factor is retained as a multiplier, so TAVS still discounts
+        # unverified clients; it now discounts them relative to a correct base
+        # weight instead of replacing it.
         promoted_weights = {
             cid: self.scheduler.bayesian_posterior_weight(
                 self.scheduler.get_effective_trust(cid, server_round)
-            ) for cid in P_ids
+            ) * num_examples.get(cid, 1)
+            for cid in P_ids
         }
-        
+
         verified_weights = {
-            cid: max(0.05, float(behavior_scores.get(cid, 0.0)))
+            cid: max(0.05, float(behavior_scores.get(cid, 0.0))) * num_examples.get(cid, 1)
             for cid in verified_updates.keys()
         }
         clip_stats: Dict[str, object] = {}
@@ -487,6 +519,11 @@ class TavsEspStrategy(Strategy):
             "num_outliers": len(outliers),
             "num_clipped": int(clip_stats.get("num_clipped") or 0),
             "num_cosine_rejected": int(cosine_stats.get("num_rejected") or 0),
+            # Decoys: Tier 3 clients verified server-side while being told they
+            # were promoted. This path sits inside the Tier 3 branch, and Tier 3
+            # never fired until the trust split, so it has never executed in any
+            # experiment. Recorded so "it ran" is a measurement, not a assumption.
+            "num_decoys": len((scheduled or {}).get("decoy", ())),
             # Clients forced back to verification by the staleness cap.
             #
             # Captured in configure_fit, BEFORE update_trust resets the staleness
