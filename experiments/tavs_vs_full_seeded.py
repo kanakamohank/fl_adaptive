@@ -291,7 +291,12 @@ def main():
     parser.add_argument("--clip-factor", type=float, default=2.0)
     # Only the TAVS arm is affected: FullVerificationStrategy never promotes, so
     # there is no unverified update for either defence to act on.
-    parser.add_argument("--cosine", default="on", choices=("on", "off"),
+    parser.add_argument("--cosine", default="off", choices=("on", "off"),
+                        # Defaults to off, matching TavsEspConfig. These
+                        # scripts defaulted to "on" and so silently kept the
+                        # gate active after the config default was flipped,
+                        # discarding 30.9% of promoted updates in a run with
+                        # no attacker.
                         help="Direction gate on promoted updates (default: on). "
                              "Use 'off' to reproduce the pre-cosine baseline.")
     parser.add_argument("--cosine-min", type=float, default=0.0,
