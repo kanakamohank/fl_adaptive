@@ -142,14 +142,14 @@ def run_one(clip_factor, args):
         tavs_config=tavs_config,
         attack_types=["layerwise", "distributed"],
         attack_intensities=[1.5, 2.0],
-        data_alpha=0.3,
+        data_alpha=args.data_alpha,
         # Scenario is part of the path: without it a heavy_attack sweep would
         # overwrite a no_attack sweep run earlier at the same factor, silently
         # destroying the comparison the two runs exist to make.
         # The cosine setting is part of the path for the same reason the scenario
         # is: a --cosine off run would otherwise overwrite the --cosine on run at
         # the same factor, destroying the ablation the pair exists to make.
-        output_dir=str(Path(args.results_dir) / args.scenario /
+        output_dir=str(Path(args.results_dir) / args.scenario / f"alpha{args.data_alpha:g}" /
                        _cosine_tag(args) / f"clip_{label}"),
     )
 
@@ -166,6 +166,7 @@ def run_one(clip_factor, args):
     return {
         "clip_factor": clip_factor,
         "clipping_enabled": clipping_on,
+        "data_alpha": args.data_alpha,
         "cosine_enabled": args.cosine,
         "cosine_min": args.cosine_min,
         "total_cosine_rejected": rejected,
@@ -218,6 +219,18 @@ def main():
                              "directions). Negative values tolerate the "
                              "directional spread that non-IID data creates "
                              "among honest clients.")
+    # Dirichlet concentration for the client split. 0.3 is strongly non-IID;
+    # a large value (100+) is effectively IID.
+    #
+    # Worth running as a control, not just a variation. Federated accuracy sat
+    # at 0.343 against a centralised ceiling of 0.743, and that gap has two very
+    # different possible causes: the genuine cost of heterogeneity, or a defect
+    # in the pipeline. An IID run separates them -- if the gap closes, what
+    # remains is non-IID cost and the pipeline is sound; if it does not, there is
+    # a second problem that has nothing to do with heterogeneity.
+    parser.add_argument("--data-alpha", type=float, default=0.3,
+                        help="Dirichlet alpha (default 0.3 = strongly non-IID; "
+                             "use 100 for effectively IID)")
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--num-clients", type=int, default=20)
     parser.add_argument("--clients-per-round", type=int, default=8)
@@ -235,7 +248,8 @@ def main():
 
     rows = [run_one(f, args) for f in factors]
 
-    out_dir = Path(args.results_dir) / args.scenario / _cosine_tag(args)
+    out_dir = (Path(args.results_dir) / args.scenario /
+               f"alpha{args.data_alpha:g}" / _cosine_tag(args))
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "sweep_results.json").write_text(json.dumps(
         {"config": vars(args), "runs": rows}, indent=2
