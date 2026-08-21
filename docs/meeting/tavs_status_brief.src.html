@@ -1,0 +1,328 @@
+<title>TAVS-ESP Status Review</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=Source+Serif+4:ital,opsz,wght@0,8..60,400;0,8..60,600;1,8..60,400&family=JetBrains+Mono:wght@400;600&display=swap">
+
+<style>
+:root{
+  --ink:#131a24; --ink-2:#3c4757; --ink-3:#68758a;
+  --paper:#f6f7f9; --surface:#ffffff; --line:#dfe4ea; --line-2:#eef1f5;
+  --teal:#0d6d6d; --teal-soft:#e2f0ef;
+  --clay:#a63d2f; --clay-soft:#f8e9e6;
+  --amber:#8a5710; --amber-soft:#f8efdf;
+  --good:#1f6b46; --good-soft:#e4f0e9;
+}
+:root:not([data-theme="light"]){ }
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --ink:#e6ebf2; --ink-2:#aeb9c9; --ink-3:#7d8a9d;
+    --paper:#0e141c; --surface:#151d27; --line:#2a3543; --line-2:#1d2732;
+    --teal:#4fbfb4; --teal-soft:#10312f;
+    --clay:#e08573; --clay-soft:#331d19;
+    --amber:#d6a25a; --amber-soft:#312614;
+    --good:#5fbf8c; --good-soft:#12291d;
+  }
+}
+:root[data-theme="dark"]{
+  --ink:#e6ebf2; --ink-2:#aeb9c9; --ink-3:#7d8a9d;
+  --paper:#0e141c; --surface:#151d27; --line:#2a3543; --line-2:#1d2732;
+  --teal:#4fbfb4; --teal-soft:#10312f;
+  --clay:#e08573; --clay-soft:#331d19;
+  --amber:#d6a25a; --amber-soft:#312614;
+  --good:#5fbf8c; --good-soft:#12291d;
+}
+
+*{box-sizing:border-box}
+body{
+  margin:0; background:var(--paper); color:var(--ink);
+  font-family:"Source Serif 4",Georgia,serif; font-size:17px; line-height:1.62;
+  -webkit-font-smoothing:antialiased;
+}
+.wrap{max-width:1080px; margin:0 auto; padding:56px 28px 96px}
+.col{max-width:68ch}
+
+h1,h2,h3,.eyebrow,.chip,th,.stat-v,.stat-k{font-family:Archivo,"Helvetica Neue",Arial,sans-serif}
+h1{font-size:2.55rem; line-height:1.08; letter-spacing:-.024em; font-weight:700; margin:.1em 0 .28em; text-wrap:balance}
+h2{font-size:1.42rem; letter-spacing:-.012em; font-weight:600; margin:0 0 .5em; text-wrap:balance}
+h3{font-size:1.02rem; letter-spacing:-.004em; font-weight:600; margin:1.9em 0 .35em}
+p{margin:0 0 1.05em}
+a{color:var(--teal)}
+
+.eyebrow{
+  font-size:.685rem; font-weight:600; letter-spacing:.13em; text-transform:uppercase;
+  color:var(--ink-3); margin:0 0 .2em;
+}
+.lede{font-size:1.14rem; color:var(--ink-2); margin-bottom:1.6em}
+.meta{
+  font-family:"JetBrains Mono",ui-monospace,monospace; font-size:.76rem;
+  color:var(--ink-3); letter-spacing:.02em;
+  border-top:1px solid var(--line); padding-top:14px; margin-top:26px;
+}
+
+section{margin-top:52px; padding-top:30px; border-top:1px solid var(--line)}
+section:first-of-type{border-top:0}
+
+/* section index encodes document order only where order is real; elsewhere a rule */
+.sec-head{display:flex; gap:14px; align-items:baseline; margin-bottom:1.1em}
+.sec-rule{width:34px; height:2px; background:var(--teal); flex:none; transform:translateY(-6px)}
+
+ul,ol{margin:0 0 1.05em; padding-left:1.15em}
+li{margin-bottom:.42em}
+strong{font-weight:600}
+code,.mono{font-family:"JetBrains Mono",ui-monospace,monospace; font-size:.86em}
+code{background:var(--line-2); padding:.1em .35em; border-radius:3px}
+
+/* stat band */
+.stats{display:grid; grid-template-columns:repeat(auto-fit,minmax(158px,1fr)); gap:1px;
+  background:var(--line); border:1px solid var(--line); margin:0 0 1.6em}
+.stat{background:var(--surface); padding:16px 18px}
+.stat-k{font-size:.66rem; letter-spacing:.1em; text-transform:uppercase; color:var(--ink-3); margin-bottom:6px}
+.stat-v{font-size:1.62rem; font-weight:700; letter-spacing:-.02em; font-variant-numeric:tabular-nums; line-height:1}
+.stat-n{font-size:.78rem; color:var(--ink-3); margin-top:5px; font-family:"Source Serif 4",serif}
+
+.tablewrap{overflow-x:auto; margin:0 0 1.5em; border:1px solid var(--line); background:var(--surface)}
+table{border-collapse:collapse; width:100%; font-size:.9rem}
+th{
+  font-size:.66rem; letter-spacing:.09em; text-transform:uppercase; font-weight:600;
+  text-align:left; color:var(--ink-3); padding:12px 14px; border-bottom:1px solid var(--line);
+  white-space:nowrap;
+}
+td{padding:11px 14px; border-bottom:1px solid var(--line-2); vertical-align:top}
+tr:last-child td{border-bottom:0}
+td.num{font-family:"JetBrains Mono",monospace; font-variant-numeric:tabular-nums; white-space:nowrap}
+
+.chip{
+  display:inline-block; font-size:.63rem; font-weight:600; letter-spacing:.07em;
+  text-transform:uppercase; padding:3px 8px; border-radius:2px; white-space:nowrap;
+}
+.c-good{background:var(--good-soft); color:var(--good)}
+.c-open{background:var(--amber-soft); color:var(--amber)}
+.c-bad{background:var(--clay-soft); color:var(--clay)}
+
+figure{margin:0 0 1.4em}
+figure img{width:100%; height:auto; display:block; border:1px solid var(--line); background:#fff}
+figcaption{font-size:.86rem; color:var(--ink-3); margin-top:10px}
+
+.callout{
+  border-left:3px solid var(--clay); background:var(--clay-soft);
+  padding:16px 20px; margin:0 0 1.4em;
+}
+.callout.warn{border-left-color:var(--amber); background:var(--amber-soft)}
+.callout p:last-child{margin-bottom:0}
+.callout .eyebrow{color:inherit; opacity:.75}
+
+/* pipeline: ordered because the stages genuinely run in sequence */
+.flow{list-style:none; padding:0; margin:0 0 1.4em; counter-reset:step}
+.flow li{
+  counter-increment:step; position:relative; padding-left:46px; margin-bottom:18px;
+}
+.flow li::before{
+  content:counter(step); position:absolute; left:0; top:1px;
+  font-family:Archivo,sans-serif; font-size:.72rem; font-weight:700; color:var(--teal);
+  width:28px; height:28px; border:1px solid var(--teal); border-radius:50%;
+  display:grid; place-items:center;
+}
+.flow b{display:block; font-family:Archivo,sans-serif; font-size:.95rem; letter-spacing:-.005em}
+.flow span{font-size:.94rem; color:var(--ink-2)}
+
+.layers{display:grid; gap:1px; background:var(--line); border:1px solid var(--line); margin:0 0 1.4em}
+.layer{background:var(--surface); padding:18px 20px; display:grid; grid-template-columns:130px 1fr; gap:20px}
+.layer b{font-family:Archivo,sans-serif; font-size:.82rem; letter-spacing:.04em; text-transform:uppercase; color:var(--teal)}
+.layer p{margin:0; font-size:.95rem; color:var(--ink-2)}
+@media (max-width:620px){ .layer{grid-template-columns:1fr; gap:6px} }
+
+.ask{border-left:3px solid var(--teal); padding-left:18px; margin-bottom:1.3em}
+.ask b{font-family:Archivo,sans-serif; font-size:.98rem; display:block; margin-bottom:.2em}
+.ask p{margin:0; color:var(--ink-2); font-size:.96rem}
+</style>
+
+<div class="wrap">
+
+<p class="eyebrow">Project status &middot; supervision meeting</p>
+<h1>TAVS&#8209;ESP Status Review</h1>
+<p class="lede col">Trust-adaptive verification scheduling for Byzantine-robust federated learning.
+This cycle was diagnostic: four defects found in the pipeline, three fixed, and the accuracy
+gap against a centralised ceiling is now decomposed rather than unexplained.</p>
+
+<div class="stats">
+  <div class="stat"><div class="stat-k">Verification saved</div><div class="stat-v">30.6%</div><div class="stat-n">vs. verifying every client</div></div>
+  <div class="stat"><div class="stat-k">Accuracy, IID</div><div class="stat-v">0.600</div><div class="stat-n">160 rounds, still rising</div></div>
+  <div class="stat"><div class="stat-k">Accuracy, non&#8209;IID</div><div class="stat-v">0.448</div><div class="stat-n">&alpha;&nbsp;=&nbsp;0.3, 150 rounds</div></div>
+  <div class="stat"><div class="stat-k">Centralised ceiling</div><div class="stat-v">0.743</div><div class="stat-n">same model &amp; hyperparameters</div></div>
+  <div class="stat"><div class="stat-k">Detector false positives</div><div class="stat-v">26.3%</div><div class="stat-n">with zero attackers &mdash; open bug</div></div>
+</div>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>Where things stand</h2></div>
+<div class="col">
+<ul>
+  <li><strong>The scheduler works.</strong> All three trust tiers now populate, decoy verifications execute, and the staleness cap fires. Measured saving of 30.6% matches the theoretical prediction from the budget constraint (&asymp;35%).</li>
+  <li><strong>The accuracy gap is now decomposed.</strong> Federated 0.448 against a centralised 0.743. Running IID splits the gap: <strong>~0.15 is genuine non-IID cost</strong>, the remainder is federation cost plus an unconverged run plus the detector bug below.</li>
+  <li><strong>One significant defect remains open.</strong> The outlier detector flags honest clients at a rate that <em>rises with round number</em> &mdash; 26.3% under IID data, where clients are near-identical and nothing should be flagged at all.</li>
+  <li><strong>Not yet tested: an adaptive adversary.</strong> Every attack in the suite is large-magnitude and is contained by norm clipping alone. All results to date measure the <em>cost</em> of the defences, not their <em>benefit</em>.</li>
+</ul>
+</div>
+</section>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>Evidence</h2></div>
+<figure>
+  <img src="{{FIGURE}}" alt="Four-panel figure: A, federated accuracy curves for IID and non-IID against centralised baseline points; B, detector false-positive rate rising with round for both data settings; C, per-block sigma-squared on a log axis showing the smallest block collapsing while the largest holds; D, stacked tier distribution over rounds.">
+  <figcaption>All panels from runs on CIFAR&#8209;10, 20 clients, 8 sampled per round, no attackers present.</figcaption>
+</figure>
+
+<figure>
+  <img src="{{FIGURE2}}" alt="Three-panel figure: E, bar chart of clipping rate at factor 1.0 and 2.0 with and without attackers; F, detector false-positive and true-positive rates against threshold on a log axis; G, mean client trust over rounds before and after the trust/staleness split.">
+  <figcaption>Mechanism panels. E and G are measured; F is simulated using the model's real per-block projection dimensions.</figcaption>
+</figure>
+
+<div class="col">
+<h3>A &mdash; Federated vs centralised ceiling</h3>
+<p>Centralised training reaches <strong>0.554 after one epoch</strong> and 0.743 after five, at roughly six federated rounds' worth of compute. This panel is the one that reframed the project: it established that the model, data and hyperparameters were never the problem, and sent us looking inside the federated pipeline.</p>
+
+<h3>B &mdash; The open defect</h3>
+<p>False-positive rate against round number. <strong>Zero attackers are present in either run</strong>, so every flagged client is an error. The rate is not constant &mdash; it escalates, reaching 48% (IID) and 69% (non&#8209;IID). At its worst the detector was discarding two-thirds of the honest updates it was asked to check.</p>
+
+<h3>C &mdash; Root cause</h3>
+<p>Per-block variance estimates on a log axis. The blocks <em>diverge</em>: the smallest collapses by a factor of 7300 while the largest holds, so the ratio between them reaches <strong>4000&times;</strong>. Because the anomaly score takes a maximum across blocks, the block with the smallest denominator decides every verdict.</p>
+
+<h3>D &mdash; Scheduler behaviour</h3>
+<p>Tier populations over rounds. Tier&nbsp;3 &mdash; the promoted clients that produce the saving &mdash; is populated throughout, which was <strong>not true before this cycle</strong>: it had never once fired.</p>
+
+<h3>E &mdash; Clipping discriminates; the detector does not</h3>
+<p>At radius 1.0 the clip fires on 96% of honest updates and 98% of attacked ones &mdash; indiscriminate, functionally a normalisation. At 2.0 it fires on <strong>0% honest and 33% under attack</strong>. This is the one defence mechanism we can show is selective, and it is worth contrasting with panel&nbsp;B.</p>
+
+<h3>F &mdash; The threshold has no good setting</h3>
+<p>False positives and detection power against the threshold, simulated with the model's <em>real</em> per-block projection dimensions. The current value of 5.0 still carries a <strong>16.9% false-positive rate</strong> &mdash; consistent with the 26.3% measured in panel&nbsp;B. A value near 10 would give &asymp;&nbsp;2% false positives while still catching a 3&times; attacker &gt;&nbsp;95% of the time.</p>
+<p>This corrects an earlier internal claim that 5.0 was well calibrated: that estimate used equal-sized blocks, whereas six of the model's ten blocks are projected to a <em>single</em> dimension, where the statistic is extremely heavy-tailed. Raising the threshold is an interim mitigation, not the fix &mdash; the underlying scale drift in panel&nbsp;C remains.</p>
+
+<h3>G &mdash; The trust fix, before and after</h3>
+<p>Mean client trust over rounds. Previously trust decayed whenever a client was promoted, so it converged to the <em>verification rate</em> rather than to behaviour and sat flat at 0.30 &mdash; below the 0.7 promotion threshold, permanently. After separating trust from staleness it climbs past 0.8. This is why Tier&nbsp;3 exists at all now.</p>
+</div>
+</section>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>Metrics</h2></div>
+<div class="tablewrap">
+<table>
+<thead><tr><th>Metric</th><th>IID (&alpha;=100)</th><th>non&#8209;IID (&alpha;=0.3)</th><th>Reading</th></tr></thead>
+<tbody>
+<tr><td>Rounds</td><td class="num">160</td><td class="num">150</td><td>Neither converged &mdash; both still climbing at cutoff</td></tr>
+<tr><td>Accuracy (last&nbsp;20 mean)</td><td class="num">0.600</td><td class="num">0.448</td><td>Heterogeneity costs &asymp;&nbsp;0.15</td></tr>
+<tr><td>Peak accuracy</td><td class="num">0.613</td><td class="num">0.503</td><td>&mdash;</td></tr>
+<tr><td>Verification saving</td><td class="num">30.6%</td><td class="num">32.1%</td><td>Matches budget-constraint prediction</td></tr>
+<tr><td>Tier&nbsp;3 client-rounds</td><td class="num">1247</td><td class="num">692</td><td>Was 0 before this cycle</td></tr>
+<tr><td>Decoy verifications</td><td class="num">67</td><td class="num">38</td><td>First execution in project history</td></tr>
+<tr><td>Detector false positives</td><td class="num">26.3%</td><td class="num">37.3%</td><td>Open bug &mdash; should be &asymp;&nbsp;0</td></tr>
+</tbody>
+</table>
+</div>
+<div class="col">
+<p class="mono" style="font-size:.8rem;color:var(--ink-3)">Single seed per configuration. Round-to-round accuracy noise is &sigma;&nbsp;&asymp;&nbsp;0.064, so differences below &asymp;&nbsp;0.13 are not interpretable without repeated seeds. The saving figures are near-deterministic and do not need this caveat.</p>
+</div>
+</section>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>The algorithm, in brief</h2></div>
+<div class="col">
+<p>The premise: verifying every client update every round is the dominant cost in a Byzantine-robust
+federated system. TAVS spends that budget selectively &mdash; clients that have behaved get checked
+less often &mdash; while bounding how much damage an unchecked client can do.</p>
+</div>
+
+<div class="layers">
+  <div class="layer"><b>Layer 1<br>Scheduler</b><p>Each client holds a trust score updated only when it is actually verified. Trust sorts clients into three tiers: always verified, budget-limited, or promoted (verification skipped). Two caps bound how long any client may go unchecked, and random <em>decoy</em> verifications mean a client can never know it is unobserved.</p></div>
+  <div class="layer"><b>Layer 2<br>Projection</b><p>Each update is compressed to a low-dimensional sketch using per-round random projections derived from a secret key. Distances survive the compression, so anomaly checks run on sketches instead of on millions of parameters.</p></div>
+  <div class="layer"><b>Layer 3<br>Detection &amp; aggregation</b><p>Verified updates are screened for outliers, then all surviving updates are combined weighted by trust and dataset size. Unverified updates are additionally clipped to a radius around the verified consensus, bounding their influence.</p></div>
+</div>
+
+<div class="col">
+<p><strong>The security argument has two halves.</strong> A budget constraint bounds the total aggregation
+<em>weight</em> unverified clients may hold in any round (35%). Clipping bounds the <em>magnitude</em> of what
+they contribute. Weight alone is insufficient &mdash; we measured a case where unverified clients held only
+11% of the weight while driving the aggregate norm to 10<sup>6</sup>.</p>
+</div>
+</section>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>Round flow</h2></div>
+<div class="col">
+<ol class="flow">
+  <li><b>Schedule</b><span>Server sorts the sampled cohort into verified / promoted by trust tier, staleness, and the weight budget. Some promoted clients are secretly verified as decoys.</span></li>
+  <li><b>Local training</b><span>Clients train on their own data and return full model parameters. Clients are not told whether they are being verified.</span></li>
+  <li><b>Project</b><span>Verified updates are compressed to sketches using that round's key-derived projection.</span></li>
+  <li><b>Detect</b><span>Sketches are screened for outliers against the cohort median. Flagged clients are excluded and lose trust.</span></li>
+  <li><b>Bound</b><span>Promoted updates are clipped to a radius set by the verified cohort's own spread.</span></li>
+  <li><b>Aggregate</b><span>Surviving updates are averaged, weighted by trust score &times; dataset size.</span></li>
+  <li><b>Update trust</b><span>Verified clients' scores move toward their observed behaviour; promoted clients' staleness counters advance.</span></li>
+</ol>
+</div>
+</section>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>Fixed this cycle</h2></div>
+<div class="tablewrap">
+<table>
+<thead><tr><th>Defect</th><th>Effect</th><th>Status</th></tr></thead>
+<tbody>
+<tr><td>Trust decayed whenever a client was promoted</td><td>Trust converged to the <em>verification rate</em>, not to behaviour, capping it at 0.29 against a 0.7 threshold. Tier&nbsp;3 was unreachable at any round count.</td><td><span class="chip c-good">Fixed</span></td></tr>
+<tr><td>Behaviour score computed relative to the round's worst client</td><td>Someone always scored 0.0, even in an all-honest cohort.</td><td><span class="chip c-good">Fixed</span></td></tr>
+<tr><td>Aggregation ignored client dataset size</td><td>A client with 811 samples had the same vote as one with 5261.</td><td><span class="chip c-good">Fixed</span></td></tr>
+<tr><td>Detection threshold set to 2.0 in experiment scripts</td><td>Flagged 39.9% of verified clients with no attackers present. Raised to 5.0, which still leaves &asymp;&nbsp;17% (panel&nbsp;F); &asymp;&nbsp;10 would be the better interim value.</td><td><span class="chip c-open">Partly &mdash; delayed, not cured</span></td></tr>
+<tr><td>Direction (cosine) gate on promoted updates</td><td>Rejected 26&ndash;43% of honest updates for no measured benefit.</td><td><span class="chip c-good">Disabled by default</span></td></tr>
+<tr><td>Per-block variance divergence in the detector</td><td>Escalating false positives, panel&nbsp;B.</td><td><span class="chip c-bad">Open</span></td></tr>
+</tbody>
+</table>
+</div>
+</section>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>Open risks</h2></div>
+<div class="col">
+
+<div class="callout">
+<p class="eyebrow">Primary</p>
+<p><strong>The detector's statistic has no stable scale.</strong> Its threshold is applied to a quantity whose
+scale drifts by three orders of magnitude during training, so no fixed threshold can hold. Raising it
+from 2.0 to 5.0 delayed the failure rather than removing it. An independent statistical review
+identified two specific causes in the code: a variance floor that is wrong at small scales, and a
+variance estimate updated only over clients already accepted &mdash; which biases it downward each round.
+Fix is scoped; not yet implemented.</p>
+</div>
+
+<div class="callout warn">
+<p class="eyebrow">Structural</p>
+<p><strong>No adaptive adversary has ever been tested.</strong> Norm clipping contains every attack currently
+implemented, which means the attack suite cannot distinguish between the defence mechanisms. Until an
+attacker exists that stays inside the clipping radius while pushing against consensus, claims about
+detection quality are untested in both directions.</p>
+</div>
+
+<div class="col">
+<p><strong>Also outstanding:</strong> single seed per configuration, so accuracy differences are not statistically
+supported; neither long run reached convergence; and all accuracy figures to date were measured while
+the detector was discarding honest updates, so they are lower bounds.</p>
+</div>
+</div>
+</section>
+
+<section>
+<div class="sec-head"><span class="sec-rule"></span><h2>For discussion</h2></div>
+<div class="col">
+<div class="ask"><b>Is the detector worth repairing, or replacing?</b>
+<p>The current statistic normalises each parameter block by its own variance and takes a maximum across blocks. An independent review argues the design is salvageable with three targeted fixes. The alternative is a within-round robust score, which is cleaner but noisy at cohorts of 3&ndash;6 clients.</p></div>
+
+<div class="ask"><b>How much does the adaptive-attack gap matter for the thesis?</b>
+<p>Building a constrain-and-scale adversary is the only way to demonstrate benefit rather than cost. It is real implementation work. Is it required for the contribution, or is the scheduling result sufficient on its own?</p></div>
+
+<div class="ask"><b>Is 30.6% verification saving a strong enough headline?</b>
+<p>It is bounded by the weight-budget parameter, which is a security setting. Relaxing it would raise the saving and weaken the guarantee &mdash; a trade we have deliberately not made.</p></div>
+
+<div class="ask"><b>What is the right accuracy target?</b>
+<p>Federated 0.448 non&#8209;IID against a 0.743 centralised ceiling. Some of the gap is expected; part is the open bug; part is simply that runs were stopped before convergence. What would be considered publishable here?</p></div>
+</div>
+</section>
+
+<p class="meta">CIFAR&#8209;10 &middot; 3-conv CNN, 1.1M parameters &middot; 20 clients, 8 sampled per round, 2 local epochs &middot; Dirichlet &alpha; as noted &middot; single seed per configuration</p>
+
+</div>
