@@ -96,6 +96,27 @@ class BlockVarianceDetector:
                 old_sigma = self.sigma_sq[m]
                 self.sigma_sq[m] = (self.alpha_sigma * old_sigma) + ((1.0 - self.alpha_sigma) * inlier_variance)
 
+        # Diagnostics for calibration. The outlier rate escalated 0% -> 48% over
+        # 160 rounds even on IID data, where clients are near-identical and
+        # nothing should be flagged. Three explanations (growing client spread,
+        # a feedback loop needing ignition, shrinking cohort size) each failed to
+        # reproduce it synthetically, so the mechanism is recorded rather than
+        # guessed at: max_z is the statistic the threshold is applied to, and
+        # sigma_sq is the denominator that sets its scale.
+        _mz = sorted(client_max_distances.values())
+        self.last_stats = {
+            "tau_z": self.tau_z,
+            "max_z_min": _mz[0] if _mz else None,
+            "max_z_median": _mz[len(_mz) // 2] if _mz else None,
+            "max_z_max": _mz[-1] if _mz else None,
+            # Denominator per block: if this drifts down while distances hold
+            # steady, z rises for everyone and the threshold silently tightens.
+            "sigma_sq_min": min(self.sigma_sq.values()) if self.sigma_sq else None,
+            "sigma_sq_median": sorted(self.sigma_sq.values())[len(self.sigma_sq) // 2]
+                               if self.sigma_sq else None,
+            "sigma_sq_max": max(self.sigma_sq.values()) if self.sigma_sq else None,
+        }
+
         # 4. Calculate continuous behavior scores \varphi_i(r) for trust EMA.
         #
         # ABSOLUTE, not relative to the cohort. The previous version divided by

@@ -124,6 +124,7 @@ def run_one(clip_factor, args):
         # modest 3x attacker. It is also already the TavsEspConfig default -- these
         # scripts were overriding a correct default with a broken value.
         detection_threshold=5.0,
+        enable_outlier_detection=args.detection,
         clip_promoted_updates=clipping_on,
         promoted_clip_factor=clip_factor if clipping_on else 1.0,
         # Direction gate, independent of the magnitude clip above. Exposed here
@@ -150,6 +151,7 @@ def run_one(clip_factor, args):
         # is: a --cosine off run would otherwise overwrite the --cosine on run at
         # the same factor, destroying the ablation the pair exists to make.
         output_dir=str(Path(args.results_dir) / args.scenario / f"alpha{args.data_alpha:g}" /
+                       f"det_{'on' if args.detection else 'off'}" /
                        _cosine_tag(args) / f"clip_{label}"),
     )
 
@@ -228,6 +230,13 @@ def main():
     # in the pipeline. An IID run separates them -- if the gap closes, what
     # remains is non-IID cost and the pipeline is sound; if it does not, there is
     # a second problem that has nothing to do with heterogeneity.
+    # Detection off gives a true centralised-vs-federated comparison: with it on
+    # the federated arm discards updates, so the comparison measures the detector
+    # as much as it measures federation. It also disables the Byzantine defence,
+    # so it is only valid on no_attack.
+    parser.add_argument("--detection", default="on", choices=("on", "off"),
+                        help="BVD outlier detection (default on). 'off' removes "
+                             "the Byzantine defence -- no_attack runs only.")
     parser.add_argument("--data-alpha", type=float, default=0.3,
                         help="Dirichlet alpha (default 0.3 = strongly non-IID; "
                              "use 100 for effectively IID)")
@@ -237,7 +246,8 @@ def main():
     parser.add_argument("--target-k", type=int, default=150)
     parser.add_argument("--results-dir", default="results/clip_factor_sweep")
     args = parser.parse_args()
-    args.cosine = args.cosine == "on"   # config field is a bool; the flag is a word
+    args.cosine = args.cosine == "on"
+    args.detection = args.detection == "on"   # config field is a bool; the flag is a word
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
@@ -249,7 +259,8 @@ def main():
     rows = [run_one(f, args) for f in factors]
 
     out_dir = (Path(args.results_dir) / args.scenario /
-               f"alpha{args.data_alpha:g}" / _cosine_tag(args))
+               f"alpha{args.data_alpha:g}" /
+               f"det_{'on' if args.detection else 'off'}" / _cosine_tag(args))
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "sweep_results.json").write_text(json.dumps(
         {"config": vars(args), "runs": rows}, indent=2

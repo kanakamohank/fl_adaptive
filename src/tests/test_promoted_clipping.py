@@ -647,3 +647,29 @@ def test_config_default_detection_threshold_is_calibrated():
     """5.0 dominates 2.0 on both axes; scripts must not override it back down."""
     from src.tavs_v2.tavs_esp_strategy import TavsEspConfig
     assert TavsEspConfig().detection_threshold == 5.0
+
+
+def test_detection_can_be_disabled():
+    """
+    The master switch must make every verified client an inlier at full trust.
+
+    Needed for a true centralised-vs-federated comparison: with detection on the
+    federated arm discards updates, so the comparison measures the detector as
+    much as it measures federation.
+    """
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig
+    assert TavsEspConfig().enable_outlier_detection is True   # secure by default
+    assert TavsEspConfig(enable_outlier_detection=False).enable_outlier_detection is False
+
+
+def test_detector_records_diagnostics():
+    """max_z and sigma_sq are logged, so the threshold can be judged from data."""
+    from src.tavs_v2.algo3_bvd_aggregation import BlockVarianceDetector
+    torch.manual_seed(0)
+    det = BlockVarianceDetector(tau_z=5.0)
+    u = {f"c{i}": {f"b{m}": torch.randn(20) for m in range(3)} for i in range(4)}
+    det.detect_outliers(u, set(u))
+    s = det.last_stats
+    assert s["tau_z"] == 5.0
+    assert s["max_z_min"] <= s["max_z_median"] <= s["max_z_max"]
+    assert s["sigma_sq_min"] <= s["sigma_sq_max"]
