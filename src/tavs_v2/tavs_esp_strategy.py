@@ -63,6 +63,21 @@ class TavsEspConfig:
     evaluate_fn: Optional[Callable] = None
     min_inlier_fraction_for_agg: float = 0.25
 
+    # Master switch for BVD outlier detection.
+    #
+    # Off means every verified client is treated as an inlier and scores 1.0.
+    # Two uses:
+    #   1. A true centralised-vs-federated comparison. With detection on, the
+    #      federated arm discards updates, so the comparison measures the
+    #      detector as much as it measures federation.
+    #   2. Isolating the detector's cost. With zero attackers every rejection is
+    #      a false positive by construction -- 26.3% of verified clients under
+    #      IID data, where clients are near-identical and nothing should be
+    #      flagged at all.
+    # Leave ON for any run making a security claim: this disables the Byzantine
+    # defence entirely.
+    enable_outlier_detection: bool = True
+
     # Re-draw the per-round cohort with our own seeded RNG instead of relying on
     # Flower's module-level one, which the run seed does not reach. Without this
     # the same seed produced different cohorts across runs.
@@ -422,7 +437,13 @@ class TavsEspStrategy(Strategy):
             if cid in all_updates:
                 projected_updates[cid] = self.projector.project_client_update(all_updates[cid], server_round)
         
-        inliers, outliers, behavior_scores = self.detector.detect_outliers(projected_updates, V_ids)
+        if getattr(self.config, "enable_outlier_detection", True):
+            inliers, outliers, behavior_scores = self.detector.detect_outliers(
+                projected_updates, V_ids)
+        else:
+            # Detection disabled: everyone verified is an inlier at full trust.
+            inliers, outliers = set(V_ids), set()
+            behavior_scores = {cid: 1.0 for cid in V_ids}
         logger.info(f"Round {server_round} Detection: {len(inliers)} Inliers, {len(outliers)} Outliers")
 
         min_frac = getattr(self.config, "min_inlier_fraction_for_agg", 0.25)
@@ -532,6 +553,10 @@ class TavsEspStrategy(Strategy):
             # last_verified_round set to the current round, so is_stale() is
             # false for all of them by construction.
             "num_forced_stale": self._forced_stale.get(server_round, 0),
+            # Detector diagnostics: the statistic the threshold acts on, and the
+            # denominator that sets its scale. Empty when detection is disabled.
+            **{f"det_{k}": v for k, v in
+               (getattr(self.detector, "last_stats", None) or {}).items()},
             "clip_radius": clip_stats.get("clip_radius"),
             # Raw cosines, so a threshold can be calibrated post hoc from logged
             # runs rather than by re-running a sweep per candidate value. Sorted
