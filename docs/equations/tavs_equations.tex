@@ -1,0 +1,418 @@
+% ============================================================================
+%  TAVS-ESP : formal specification
+%
+%  These equations describe the system AS IMPLEMENTED, which differs from the
+%  original manuscript in four places. Each divergence is marked with a
+%  \changed{} note giving the reason, so the corresponding manuscript sections
+%  can be revised rather than silently contradicted.
+%
+%  Standalone: pdflatex tavs_equations.tex
+%  Or drop into a thesis with \input{tavs_equations} (then delete the preamble
+%  and \begin{document}/\end{document}).
+% ============================================================================
+\documentclass[11pt]{article}
+
+\usepackage[margin=1in]{geometry}
+\usepackage{amsmath,amssymb,amsthm}
+\DeclareMathOperator*{\argmin}{arg\,min}  % not provided by amsmath
+\usepackage{booktabs}
+\usepackage{xcolor}
+\usepackage[colorlinks=true,linkcolor=black,citecolor=black]{hyperref}
+
+% Divergences from the original formulation are flagged, not hidden.
+\newcommand{\changed}[1]{%
+  \par\vspace{2pt}\noindent
+  \textcolor{red!65!black}{\small\textbf{Differs from manuscript:} #1}\par\vspace{2pt}}
+
+% ---- notation shorthands -----------------------------------------------------
+\newcommand{\round}{r}
+\newcommand{\Vset}{\mathcal{V}}          % verified
+\newcommand{\Pset}{\mathcal{P}}          % promoted
+\newcommand{\Dset}{\mathcal{D}}          % decoys
+\newcommand{\Lset}{\mathcal{L}}          % inliers
+\newcommand{\Oset}{\mathcal{O}}          % outliers
+\newcommand{\Teff}{\widetilde{T}}        % effective (ramp-capped) trust
+\newcommand{\gproj}{\hat{g}}             % projected update
+\newcommand{\sigsq}{\hat{\sigma}}
+\newcommand{\1}[1]{\mathbf{1}\!\left[#1\right]}  % amssymb \mathbb covers uppercase only
+
+\title{\textbf{TAVS--ESP: Formal Specification}\\[2pt]
+       \large Trust-Adaptive Verification Scheduling with Ephemeral Structured Projection}
+\author{}
+\date{}
+
+\begin{document}
+\maketitle
+\vspace{-3em}
+
+% =============================================================================
+\section{Notation}
+
+\begin{center}
+\begin{tabular}{@{}ll@{\qquad}ll@{}}
+\toprule
+$\round$ & round index & $i$ & client index \\
+$m$ & parameter block index & $g_i$ & parameters submitted by client $i$ \\
+$n_i$ & size of client $i$'s dataset & $d_m$ & dimension of block $m$ \\
+$T_i(\round)$ & trust score & $\Teff_i(\round)$ & effective (ramp-capped) trust \\
+$c_i$ & consecutive clean verifications & $a_i$ & appearances since last verified \\
+$\ell_i$ & round of last verification & $r_0^i$ & round client $i$ joined \\
+$\Vset(\round)$ & verified set & $\Pset(\round)$ & promoted set \\
+$\Dset(\round)\subseteq\Vset(\round)$ & decoys & $\Lset(\round)$ & inliers \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent
+Parameters: $\theta_{\mathrm{low}},\theta_{\mathrm{high}}$ (tier thresholds),
+$\alpha$ (trust EMA), $\tau_{\mathrm{ramp}}$, $k_{\mathrm{trust}}$,
+$p_{\mathrm{decoy}}$, $c_\lambda$, $\gamma_{\mathrm{budget}}$,
+$s^{\mathrm{app}}_{\max}$, $s^{\mathrm{rnd}}_{\max}$,
+$\tau_z$, $\alpha_\sigma$, $\kappa$ (clip factor), $k$ (projection budget).
+
+% =============================================================================
+\section{Layer 1 --- Trust-Adaptive Verification Scheduling}
+
+\subsection{Effective trust}
+
+A newly joined client cannot accrue influence quickly, regardless of behaviour
+(Sybil resistance):
+\begin{align}
+T^{\max}_i(\round) &= 1 - \exp\!\left(-\frac{\round - r_0^i}{\tau_{\mathrm{ramp}}}\right),
+\label{eq:ramp}\\[2pt]
+\Teff_i(\round)    &= \min\!\bigl(T_i(\round),\, T^{\max}_i(\round)\bigr).
+\label{eq:efftrust}
+\end{align}
+
+\subsection{Tier assignment}
+
+\begin{equation}
+\mathrm{tier}_i(\round)=
+\begin{cases}
+1, & \Teff_i(\round) < \theta_{\mathrm{low}},\\[2pt]
+3, & \Teff_i(\round) \ge \theta_{\mathrm{high}} \ \wedge\  c_i \ge k_{\mathrm{trust}},\\[2pt]
+2, & \text{otherwise.}
+\end{cases}
+\label{eq:tier}
+\end{equation}
+
+Tier~3 requires \emph{both} conditions: a trust threshold alone would let a
+single favourable round grant promotion.
+
+\subsection{Staleness}
+
+Trust states how well a client behaved when last observed; staleness states
+whether that observation is still current. The two are tracked separately.
+\begin{equation}
+\mathrm{stale}_i(\round)=
+\1{a_i \ge s^{\mathrm{app}}_{\max}}
+\ \vee\
+\1{\round - \ell_i \ge s^{\mathrm{rnd}}_{\max}}
+\ \vee\
+\1{\text{$i$ never verified}}.
+\label{eq:stale}
+\end{equation}
+
+Both caps are required: they measure different quantities. At $40\%$
+participation, $s^{\mathrm{app}}_{\max}=4$ appearances corresponds to roughly
+ten wall-clock rounds, so neither bound implies the other. A client that has
+never been verified is stale by definition and cannot be promoted on no
+evidence.
+
+\subsection{Assignment rule}
+
+\begin{equation}
+i \longmapsto
+\begin{cases}
+\Vset, & \mathrm{stale}_i(\round) \quad \text{(hard expiry, outranks tier)},\\[2pt]
+\Vset, & \mathrm{tier}_i = 1,\\[2pt]
+\Vset \ \text{and} \ \Dset, & \mathrm{tier}_i = 3 \ \wedge\ \mathrm{CSPRNG}(\mathrm{key},i,\round) < p_{\mathrm{decoy}},\\[2pt]
+\Pset, & \mathrm{tier}_i = 3 \ \wedge\ \text{otherwise},\\[2pt]
+\Pset, & \mathrm{tier}_i = 2 \quad \text{(tentative; see \eqref{eq:budget})}.
+\end{cases}
+\label{eq:assign}
+\end{equation}
+
+Decoys are verified server-side while the client is told it was promoted, so no
+client can determine whether it is being observed. The expiry check precedes
+the budget loop of \eqref{eq:budget}, making it a floor the budget cannot trade
+away.
+
+\subsection{Mechanism 1 --- aggregate budget constraint}
+
+\begin{align}
+p_i(\round) &= \sigma\!\bigl(c_\lambda (\Teff_i(\round) - \tfrac{1}{2})\bigr),
+\qquad \sigma(x)=\bigl(1+e^{-x}\bigr)^{-1},
+\label{eq:posterior}\\[4pt]
+\gamma(\round) &= \frac{\sum_{i \in \Pset} p_i(\round)}
+                       {\lvert \Vset(\round)\rvert + \sum_{i \in \Pset} p_i(\round)}
+\ \le\ \gamma_{\mathrm{budget}}.
+\label{eq:budget}
+\end{align}
+
+While \eqref{eq:budget} is violated, the lowest-trust promoted client is moved
+to $\Vset$:
+\begin{equation}
+i^\star = \argmin_{i \in \Pset} \Teff_i(\round),
+\qquad
+\Pset \leftarrow \Pset \setminus \{i^\star\},
+\quad
+\Vset \leftarrow \Vset \cup \{i^\star\}.
+\label{eq:demote}
+\end{equation}
+
+Since demotion increases $\lvert\Vset\rvert$, the loop is monotone decreasing in
+$\gamma$ and terminates. Because the ordering is ascending in trust and Tier~2
+lies below $\theta_{\mathrm{high}}$ by construction, Tier~2 clients are demoted
+before any Tier~3 client --- which is the sense in which Tier~2 is
+\emph{budget-limited}.
+
+Note that \eqref{eq:budget} bounds aggregation \emph{weight}, not the number of
+clients and not the \emph{magnitude} of what they contribute; the latter
+requires \eqref{eq:clip}.
+
+\subsection{Trust and counter updates}
+
+\begin{equation}
+T_i(\round+1)=
+\begin{cases}
+\alpha\, T_i(\round) + (1-\alpha)\,\varphi_i(\round), & i \in \Vset(\round),\\[2pt]
+T_i(\round), & i \in \Pset(\round).
+\end{cases}
+\label{eq:trust}
+\end{equation}
+
+\changed{The promoted branch was $T_i(\round+1)=\alpha T_i(\round)$. Under that
+rule, a client verified a fraction $f$ of the rounds it appears in has EMA fixed
+point $T^\star = f\varphi$ --- the \emph{verification rate}, not its behaviour.
+Since promotion reduces $f$, trust was self-limiting: measured $T^\star \approx
+0.29$ against $\theta_{\mathrm{high}}=0.7$, making Tier~3 unreachable at any
+round count. Not being observed is not evidence of misbehaviour; it is a reason
+to observe again, which \eqref{eq:stale} now expresses. The fixed point is now
+$T^\star=\varphi$.}
+
+\begin{align}
+i \in \Vset:&\quad a_i \leftarrow 0,\qquad \ell_i \leftarrow \round,
+\label{eq:reset}\\
+i \in \Pset:&\quad a_i \leftarrow a_i + 1.
+\label{eq:advance}
+\end{align}
+
+The clean streak is updated \emph{only} for verified clients; it is neither
+advanced nor reset while a client is promoted, since no evidence is observed:
+\begin{equation}
+c_i \leftarrow
+\begin{cases}
+c_i + 1, & i \in \Vset \ \wedge\ i \notin \Oset \ \wedge\ \varphi_i > 0.8,\\[2pt]
+0,       & i \in \Vset \ \wedge\ \bigl(i \in \Oset \ \vee\ \varphi_i \le 0.8\bigr),\\[2pt]
+c_i,     & i \in \Pset \quad\text{(unchanged).}
+\end{cases}
+\label{eq:streak}
+\end{equation}
+
+The outlier condition in \eqref{eq:streak} is the detector's own verdict, not a
+score cutoff: under \eqref{eq:phi} a client marginally past the anomaly
+threshold still scores above $0.8$, so a flagged client would otherwise
+continue accumulating the streak that Tier~3 requires.
+
+% =============================================================================
+\section{Layer 2 --- Ephemeral Structured Projection}
+
+Per-round, per-block projection matrices are derived from a secret key, so no
+client can anticipate the subspace its update will be examined in:
+\begin{align}
+\mathrm{seed}_m(\round) &= \mathrm{SHA\text{-}256}\bigl(\text{key} \,\|\, \round \,\|\, m\bigr),
+\label{eq:seed}\\[2pt]
+R_m(\round) &\sim \mathcal{N}\!\left(0, \tfrac{1}{k_m}\right)^{k_m \times d_m},
+\qquad \textstyle\sum_m k_m = k,
+\label{eq:projmat}\\[2pt]
+\gproj_i^{(m)} &= R_m(\round)\, g_i^{(m)}.
+\label{eq:project}
+\end{align}
+
+By the Johnson--Lindenstrauss lemma pairwise distances are preserved up to
+$(1\pm\epsilon)$ with $k_m = O(\epsilon^{-2}\log N)$, so detection may run on
+sketches rather than on full parameter blocks.
+
+\medskip
+\noindent
+\textbf{Allocation caveat.} The implementation allocates $k_m$ proportionally to
+$d_m$ with a floor of $1$. For the evaluated model at $k=150$ this yields
+$k_m=1$ for six of ten blocks, where \eqref{eq:z} is a single squared Gaussian
+and therefore extremely heavy-tailed. This is the source of the false-positive
+behaviour discussed in \S\ref{sec:bvd}.
+
+% =============================================================================
+\section{Layer 3 --- Detection and Aggregation}
+\label{sec:bvd}
+
+\subsection{Block-variance outlier detection}
+
+\begin{align}
+\bar{g}^{(m)} &= \operatorname*{median}_{i \in \Vset} \gproj_i^{(m)}
+\qquad\text{(coordinate-wise)},
+\label{eq:center}\\[2pt]
+d_i^{(m)} &= \bigl\lVert \gproj_i^{(m)} - \bar{g}^{(m)} \bigr\rVert_2^2,
+\label{eq:dist}\\[2pt]
+z_i^{(m)} &= \frac{d_i^{(m)}}{\sigsq_m^2 + \varepsilon},
+\qquad
+Z_i = \max_m z_i^{(m)},
+\label{eq:z}\\[2pt]
+\Oset(\round) &= \{\, i \in \Vset : Z_i > \tau_z \,\},
+\qquad
+\Lset(\round) = \Vset(\round) \setminus \Oset(\round),
+\label{eq:outlier}\\[2pt]
+\sigsq_m^2 &\leftarrow \alpha_\sigma\, \sigsq_m^2
++ (1-\alpha_\sigma)\,\frac{1}{\lvert\Lset\rvert}\sum_{i \in \Lset} d_i^{(m)}
+\qquad (\Lset \neq \emptyset).
+\label{eq:sigma}
+\end{align}
+
+On first encounter with block $m$ the variance is initialised from that round's
+distances, subject to an absolute floor:
+\begin{equation}
+\sigsq_m^2 \leftarrow \max\!\left(1,\ \operatorname*{median}_{i \in \Vset} d_i^{(m)}\right).
+\label{eq:bootstrap}
+\end{equation}
+The floor of $1$ is dimensionally arbitrary and is a defect in its own right:
+once the model has converged, typical $d_i^{(m)}$ are of order $10^{-3}$, so the
+initialisation overstates the true scale by three orders of magnitude and
+\eqref{eq:z} is suppressed for the tens of rounds the EMA takes to decay.
+
+\medskip
+\noindent
+\textbf{Known defects in \eqref{eq:z}--\eqref{eq:sigma}.} These are stated
+because the empirical false-positive rate reaches $26\%$ on IID data with no
+adversary present, and the cause is structural rather than a matter of tuning
+$\tau_z$:
+\begin{enumerate}\itemsep2pt
+\item $Z_i$ is a ratio of a squared distance to a \emph{mean} squared distance,
+      not a standardised score --- no dispersion estimate appears in the
+      denominator, so $\tau_z$ admits no interpretation as a tail probability.
+\item $\sigsq_m^2$ in \eqref{eq:sigma} is estimated only over $\Lset$, i.e. over
+      clients already accepted. This truncates the upper tail of the quantity
+      being estimated and biases it downward on every round.
+\item $\max_m$ in \eqref{eq:z} carries no multiplicity correction, so the
+      detector becomes stricter as blocks are added, and the block with the
+      smallest $\sigsq_m^2$ determines every verdict. Measured divergence
+      between the smallest and largest $\sigsq_m^2$ reaches $4\times10^3$ over
+      $100$ rounds.
+\end{enumerate}
+
+\subsection{Behaviour score}
+
+\begin{equation}
+\varphi_i(\round)=
+\begin{cases}
+1, & Z_i \le \tau_z,\\[2pt]
+\max\!\left(0,\ 1 - \dfrac{Z_i - \tau_z}{\tau_z}\right), & Z_i > \tau_z.
+\end{cases}
+\label{eq:phi}
+\end{equation}
+
+\changed{Previously $\varphi_i = 1 - d_i / \max_j d_j$, i.e.\ normalised by the
+round's \emph{worst} client. One client therefore scored $0$ in every round,
+including all-honest cohorts, and the cohort mean was pinned near
+$1 - \bar{d}/\max_j d_j \approx 0.3$. Since \eqref{eq:trust} converges to
+$\varphi$, this was a second independent mechanism capping trust below
+$\theta_{\mathrm{high}}$. The score is now absolute, reusing the detector's own
+anomaly threshold rather than introducing a further constant.}
+
+\subsection{Magnitude bound on unverified updates}
+
+\begin{align}
+c &= \operatorname*{median}_{j \in \Vset} g_j
+\qquad\text{(coordinate-wise)},
+\label{eq:consensus}\\[2pt]
+\tau &= \kappa \cdot \operatorname*{median}_{j \in \Vset} \lVert g_j - c \rVert_2,
+\label{eq:radius}\\[2pt]
+g_i &\leftarrow c + (g_i - c)\cdot\min\!\left(1,\ \frac{\tau}{\lVert g_i - c\rVert_2}\right),
+\qquad i \in \Pset.
+\label{eq:clip}
+\end{align}
+
+Both medians are taken as the lower median at even cohort size (index
+$\lfloor (n-1)/2 \rfloor$ of the sorted values) rather than the midpoint average,
+so that a colluding pair cannot shift the centre by averaging.
+
+The radius is self-calibrating: it tracks the verified cohort's own spread, so
+no absolute scale constant is required, and $\kappa=1$ states exactly that a
+promoted client may deviate as much as a typical verified client does. Only
+magnitude is affected --- direction is preserved and clients inside the ball are
+returned unchanged. Verified clients are exempt, having already passed
+\eqref{eq:outlier}.
+
+\medskip
+\noindent
+\textbf{Why \eqref{eq:budget} alone is insufficient.} The budget bounds the
+weight unverified clients hold, not the norm of what they submit. A measured
+configuration with $\gamma = 0.114$ produced an aggregate norm of order $10^6$;
+the two bounds constrain orthogonal quantities and neither subsumes the other.
+
+\subsection{Aggregation}
+
+If detection rejects too much of the cohort, the aggregation set falls back to
+all verified clients rather than proceeding on a handful of survivors:
+\begin{equation}
+\Lset^{\mathrm{agg}}(\round) =
+\begin{cases}
+\Vset(\round), & \lvert\Lset\rvert < \max\bigl(1,\ \lfloor \rho\,\lvert\Vset\rvert \rfloor\bigr),\\[2pt]
+\Lset(\round), & \text{otherwise,}
+\end{cases}
+\qquad \rho = \texttt{min\_inlier\_fraction\_for\_agg}.
+\label{eq:fallback}
+\end{equation}
+
+\begin{align}
+v_i &= \max(0.05,\ \varphi_i)\cdot n_i, \qquad i \in \Lset^{\mathrm{agg}},
+\label{eq:vweight}\\[2pt]
+w_i &= p_i(\round)\cdot n_i, \qquad\qquad\ \ i \in \Pset,
+\label{eq:pweight}\\[2pt]
+Z(\round) &= \sum_{i \in \Lset^{\mathrm{agg}}} v_i + \sum_{i \in \Pset} w_i,
+\label{eq:norm}\\[4pt]
+g(\round+1) &= \frac{1}{Z(\round)}
+\left( \sum_{i \in \Lset^{\mathrm{agg}}} v_i\, g_i + \sum_{i \in \Pset} w_i\, g_i \right).
+\label{eq:aggregate}
+\end{align}
+
+\changed{The factor $n_i$ in \eqref{eq:vweight}--\eqref{eq:pweight} was absent:
+weighting derived from trust alone. Under a Dirichlet split at $\alpha=0.3$ the
+measured spread of client dataset sizes is $6.5\times$ (811 to 5261 samples), so
+a client holding $811$ samples carried the same weight as one holding $5261$.
+The trust term is retained as a multiplier, so unverified clients are still
+discounted --- but relative to a correct FedAvg base weight rather than in place
+of it. Aggregation is invariant to a common rescaling of all weights, which is
+what makes this safe: clients submit full parameters, so a change in overall
+scale would corrupt the global model rather than re-balance it.}
+
+% =============================================================================
+\section{Summary of divergences from the manuscript}
+
+\begin{center}
+\begin{tabular}{@{}llp{6.6cm}@{}}
+\toprule
+\textbf{Eq.} & \textbf{Quantity} & \textbf{Change} \\
+\midrule
+\eqref{eq:trust} & Trust update &
+Promotion no longer decays trust; staleness counters
+\eqref{eq:stale} carry that role. Fixed point moves from $f\varphi$ to
+$\varphi$, making Tier~3 reachable. \\[4pt]
+\eqref{eq:phi} & Behaviour score &
+Absolute rather than relative to the round's worst client. \\[4pt]
+\eqref{eq:vweight}--\eqref{eq:pweight} & Aggregation weights &
+Dataset size $n_i$ restored (standard FedAvg). \\[4pt]
+\eqref{eq:stale}, \eqref{eq:assign} & Staleness expiry &
+New. Bounds the interval a promoted client may go unverified, in both
+appearances and wall-clock rounds. \\
+\bottomrule
+\end{tabular}
+\end{center}
+
+\medskip
+\noindent
+Equations \eqref{eq:z}--\eqref{eq:sigma} are reported as implemented and are
+known to be defective; they are the subject of ongoing revision and should not
+be presented as a validated component.
+
+\end{document}
