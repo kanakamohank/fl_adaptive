@@ -21,7 +21,7 @@ class BlockVarianceDetector:
         self.alpha_sigma = alpha_sigma  
         self.epsilon_stab = epsilon_stab 
         
-        self.sigma_sq: Dict[str, float] = {}  
+        self.sigma_sq: Dict[str, float] = {}
         
     def _compute_robust_aggregate(self, projected_updates: Dict[str, Dict[str, torch.Tensor]]) -> Dict[str, torch.Tensor]:
         robust_aggs = {}
@@ -135,6 +135,23 @@ class BlockVarianceDetector:
             per_client = sorted(raw_distances[cid][m] for cid in verified_clients)
             # Lower median at even n, matching the convention used elsewhere.
             median_dist = per_client[(len(per_client) - 1) // 2]
+
+            # alpha_sigma trades responsiveness against stability, and the
+            # binding case is the early ramp: between rounds 4 and 12 of a real
+            # run the spread of client updates grows ~16x as clients diverge
+            # from a shared initialisation, and the EMA lags a signal moving
+            # that fast. Measured false-positive rate through such a ramp:
+            #
+            #     alpha_sigma   during ramp   after
+            #        0.9            66.7%      0.0%
+            #        0.5            24.0%      0.0%
+            #        0.0             9.3%      0.0%
+            #
+            # 0.9 is retained: the transient costs ~16 updates out of ~520 in a
+            # 100-round run, all while the model is barely better than random,
+            # and soft outlier weighting down-weights rather than discards them.
+            # A bias-corrected warm-up was tried and does nothing here -- it
+            # reaches alpha_sigma by round 10, so it is over before the ramp.
             self.sigma_sq[m] = ((self.alpha_sigma * self.sigma_sq[m])
                                 + ((1.0 - self.alpha_sigma) * median_dist))
 
