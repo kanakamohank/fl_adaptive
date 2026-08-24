@@ -63,6 +63,25 @@ class TavsEspConfig:
     evaluate_fn: Optional[Callable] = None
     min_inlier_fraction_for_agg: float = 0.25
 
+    # Down-weight flagged clients instead of dropping them outright.
+    #
+    # Detection is a hard gate: one flagged round costs a client its entire
+    # contribution. That is the right response to a confirmed attacker and the
+    # wrong one to an honest client near the threshold, and the detector cannot
+    # tell them apart -- it reports a continuous distance, then thresholds it.
+    #
+    # The graded behaviour score already exists and already expresses exactly
+    # this: 1.0 for a client the detector considers normal, falling linearly to
+    # 0.0 one tau_z beyond the threshold. Weighting by it means a marginal
+    # client keeps most of its weight, a clearly anomalous one keeps almost
+    # none, and a grossly anomalous one reaches zero -- the same outcome as
+    # exclusion, reached continuously.
+    #
+    # This also removes the cliff that made min_inlier_fraction_for_agg
+    # necessary: no round can lose most of its data to the threshold, so there
+    # is nothing for the fallback to rescue.
+    soft_outlier_weighting: bool = True
+
     # Master switch for BVD outlier detection.
     #
     # Off means every verified client is treated as an inlier and scores 1.0.
@@ -446,10 +465,14 @@ class TavsEspStrategy(Strategy):
             behavior_scores = {cid: 1.0 for cid in V_ids}
         logger.info(f"Round {server_round} Detection: {len(inliers)} Inliers, {len(outliers)} Outliers")
 
-        min_frac = getattr(self.config, "min_inlier_fraction_for_agg", 0.25)
-        inliers_for_agg = set(inliers)
-        if V_ids and len(inliers) < max(1, int(min_frac * len(V_ids))):
+        if getattr(self.config, "soft_outlier_weighting", True):
+            # Everyone verified contributes; behaviour_score sets how much.
             inliers_for_agg = set(V_ids)
+        else:
+            min_frac = getattr(self.config, "min_inlier_fraction_for_agg", 0.25)
+            inliers_for_agg = set(inliers)
+            if V_ids and len(inliers) < max(1, int(min_frac * len(V_ids))):
+                inliers_for_agg = set(V_ids)
 
         for cid in V_ids:
             self.scheduler.update_trust(cid, behavior_score=behavior_scores.get(cid, 0.0),
@@ -482,8 +505,15 @@ class TavsEspStrategy(Strategy):
             for cid in P_ids
         }
 
+        # The 0.05 floor guarantees a client the detector accepted is never
+        # silenced by a marginal score. It is deliberately NOT applied to a
+        # flagged client: an update far enough out must be able to reach zero
+        # weight, or soft weighting would leave every attacker a residual voice.
+        soft = getattr(self.config, "soft_outlier_weighting", True)
         verified_weights = {
-            cid: max(0.05, float(behavior_scores.get(cid, 0.0))) * num_examples.get(cid, 1)
+            cid: (float(behavior_scores.get(cid, 0.0))
+                  if (soft and cid in outliers)
+                  else max(0.05, float(behavior_scores.get(cid, 0.0)))) * num_examples.get(cid, 1)
             for cid in verified_updates.keys()
         }
         clip_stats: Dict[str, object] = {}

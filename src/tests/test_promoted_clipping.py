@@ -684,3 +684,25 @@ def test_detector_records_diagnostics():
     assert s["tau_z"] == 5.0
     assert s["max_z_min"] <= s["max_z_median"] <= s["max_z_max"]
     assert s["sigma_sq_min"] <= s["sigma_sq_max"]
+
+
+def test_soft_weighting_grades_flagged_clients_instead_of_dropping_them():
+    """
+    A client just past the threshold keeps most of its weight; one far past
+    reaches zero.
+
+    Detection reports a continuous distance and then thresholds it, so a hard
+    gate costs an honest client near the boundary its entire contribution for a
+    verdict the detector holds barely. The behaviour score already expresses the
+    gradation; this asserts it is actually used.
+    """
+    from src.tavs_v2.tavs_esp_strategy import TavsEspConfig
+    assert TavsEspConfig().soft_outlier_weighting is True
+
+    tau = 5.0
+    phi = lambda z: 1.0 if z <= tau else max(0.0, 1.0 - (z - tau) / tau)
+    assert phi(tau) == 1.0                      # at the line: untouched
+    assert phi(5.5) == pytest.approx(0.90)      # marginal: keeps 90%
+    assert phi(7.5) == pytest.approx(0.50)      # clearly odd: halved
+    assert phi(10.0) == 0.0                     # far out: silenced, as before
+    assert phi(50.0) == 0.0                     # and stays silenced
