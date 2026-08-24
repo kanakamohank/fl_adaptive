@@ -195,15 +195,21 @@ $T^\star=\varphi$.}
 \begin{align}
 i \in \Vset:&\quad a_i \leftarrow 0,\qquad \ell_i \leftarrow \round,
 \label{eq:reset}\\
-i \in \Pset:&\quad a_i \leftarrow a_i + 1,
-\label{eq:advance}\\[4pt]
-c_i \leftarrow &\
+i \in \Pset:&\quad a_i \leftarrow a_i + 1.
+\label{eq:advance}
+\end{align}
+
+The clean streak is updated \emph{only} for verified clients; it is neither
+advanced nor reset while a client is promoted, since no evidence is observed:
+\begin{equation}
+c_i \leftarrow
 \begin{cases}
-c_i + 1, & i \in \Vset \ \wedge\ i \notin \Oset \ \wedge\ \varphi_i > 0.8,\\
-0, & \text{otherwise.}
+c_i + 1, & i \in \Vset \ \wedge\ i \notin \Oset \ \wedge\ \varphi_i > 0.8,\\[2pt]
+0,       & i \in \Vset \ \wedge\ \bigl(i \in \Oset \ \vee\ \varphi_i \le 0.8\bigr),\\[2pt]
+c_i,     & i \in \Pset \quad\text{(unchanged).}
 \end{cases}
 \label{eq:streak}
-\end{align}
+\end{equation}
 
 The outlier condition in \eqref{eq:streak} is the detector's own verdict, not a
 score cutoff: under \eqref{eq:phi} a client marginally past the anomaly
@@ -258,9 +264,21 @@ Z_i = \max_m z_i^{(m)},
 \Lset(\round) = \Vset(\round) \setminus \Oset(\round),
 \label{eq:outlier}\\[2pt]
 \sigsq_m^2 &\leftarrow \alpha_\sigma\, \sigsq_m^2
-+ (1-\alpha_\sigma)\,\frac{1}{\lvert\Lset\rvert}\sum_{i \in \Lset} d_i^{(m)}.
++ (1-\alpha_\sigma)\,\frac{1}{\lvert\Lset\rvert}\sum_{i \in \Lset} d_i^{(m)}
+\qquad (\Lset \neq \emptyset).
 \label{eq:sigma}
 \end{align}
+
+On first encounter with block $m$ the variance is initialised from that round's
+distances, subject to an absolute floor:
+\begin{equation}
+\sigsq_m^2 \leftarrow \max\!\left(1,\ \operatorname*{median}_{i \in \Vset} d_i^{(m)}\right).
+\label{eq:bootstrap}
+\end{equation}
+The floor of $1$ is dimensionally arbitrary and is a defect in its own right:
+once the model has converged, typical $d_i^{(m)}$ are of order $10^{-3}$, so the
+initialisation overstates the true scale by three orders of magnitude and
+\eqref{eq:z} is suppressed for the tens of rounds the EMA takes to decay.
 
 \medskip
 \noindent
@@ -314,6 +332,10 @@ g_i &\leftarrow c + (g_i - c)\cdot\min\!\left(1,\ \frac{\tau}{\lVert g_i - c\rVe
 \label{eq:clip}
 \end{align}
 
+Both medians are taken as the lower median at even cohort size (index
+$\lfloor (n-1)/2 \rfloor$ of the sorted values) rather than the midpoint average,
+so that a colluding pair cannot shift the centre by averaging.
+
 The radius is self-calibrating: it tracks the verified cohort's own spread, so
 no absolute scale constant is required, and $\kappa=1$ states exactly that a
 promoted client may deviate as much as a typical verified client does. Only
@@ -330,15 +352,27 @@ the two bounds constrain orthogonal quantities and neither subsumes the other.
 
 \subsection{Aggregation}
 
+If detection rejects too much of the cohort, the aggregation set falls back to
+all verified clients rather than proceeding on a handful of survivors:
+\begin{equation}
+\Lset^{\mathrm{agg}}(\round) =
+\begin{cases}
+\Vset(\round), & \lvert\Lset\rvert < \max\bigl(1,\ \lfloor \rho\,\lvert\Vset\rvert \rfloor\bigr),\\[2pt]
+\Lset(\round), & \text{otherwise,}
+\end{cases}
+\qquad \rho = \texttt{min\_inlier\_fraction\_for\_agg}.
+\label{eq:fallback}
+\end{equation}
+
 \begin{align}
-v_i &= \max(0.05,\ \varphi_i)\cdot n_i, \qquad i \in \Lset,
+v_i &= \max(0.05,\ \varphi_i)\cdot n_i, \qquad i \in \Lset^{\mathrm{agg}},
 \label{eq:vweight}\\[2pt]
 w_i &= p_i(\round)\cdot n_i, \qquad\qquad\ \ i \in \Pset,
 \label{eq:pweight}\\[2pt]
-Z(\round) &= \sum_{i \in \Lset} v_i + \sum_{i \in \Pset} w_i,
+Z(\round) &= \sum_{i \in \Lset^{\mathrm{agg}}} v_i + \sum_{i \in \Pset} w_i,
 \label{eq:norm}\\[4pt]
 g(\round+1) &= \frac{1}{Z(\round)}
-\left( \sum_{i \in \Lset} v_i\, g_i + \sum_{i \in \Pset} w_i\, g_i \right).
+\left( \sum_{i \in \Lset^{\mathrm{agg}}} v_i\, g_i + \sum_{i \in \Pset} w_i\, g_i \right).
 \label{eq:aggregate}
 \end{align}
 
