@@ -8,13 +8,30 @@ class EphemeralStructuredProjection:
         self,
         target_k: int,
         model_blocks: Dict[str, int],  
-        master_key: bytes = b'default_paper_key'
+        master_key: bytes = b'default_paper_key',
+        k_min_per_block: int = 16,
     ):
         self.model_blocks = model_blocks  
         self.master_key = master_key      
         self.M = len(model_blocks)        
-        
-        self.target_k = max(target_k, self.M) 
+
+        # Every block gets at least k_min_per_block dimensions.
+        #
+        # The detector's statistic is dist^2 / sigma^2, which under a null of
+        # honest clients behaves as chi^2(k_m)/k_m: its dispersion is set
+        # ENTIRELY by k_m, with sd = sqrt(2/k_m). At k_m = 1 that is a single
+        # squared Gaussian -- sd 1.41, and it exceeds five times its own mean
+        # 2.5% of the time by chance alone. Since a client is flagged when ANY
+        # block fires, ten blocks at k_m = 1 give a false-positive rate near
+        # 1 - (1 - 0.025)^10 ~ 22% with no adversary present.
+        #
+        # The previous allocation was proportional to block size with a floor of
+        # 1, which gave k_m = 1 to six of ten blocks on the evaluated model. No
+        # choice of tau_z fixes that: the problem is the number of measurements,
+        # not where the line is drawn on them. At k_m = 16, sd falls to 0.35 and
+        # the per-block false-positive rate becomes negligible.
+        self.k_min_per_block = max(1, k_min_per_block)
+        self.target_k = max(target_k, self.M * self.k_min_per_block)
         self.k_m_allocations = self._allocate_k_m()
         
         # ---> CACHING FIX: Store matrices to prevent 234 GB RAM explosion <---
@@ -23,19 +40,27 @@ class EphemeralStructuredProjection:
 
     def _allocate_k_m(self) -> Dict[str, int]:
         total_d = sum(self.model_blocks.values())
-        allocations = {block_name: 1 for block_name in self.model_blocks}
-        
-        leftover_k = self.target_k - self.M
+        # Floor first, then distribute what remains in proportion to block size.
+        allocations = {block_name: self.k_min_per_block for block_name in self.model_blocks}
+
+        leftover_k = self.target_k - self.M * self.k_min_per_block
         remaining_leftover = leftover_k
-        
-        for m, (block_name, d_m) in enumerate(self.model_blocks.items()):
-            if m == self.M - 1:
-                allocations[block_name] += remaining_leftover
-            else:
-                extra_k = int(leftover_k * (d_m / total_d))
-                allocations[block_name] += extra_k
-                remaining_leftover -= extra_k
-                
+
+        # The leftover lands on the LARGEST block rather than the last one.
+        # Previously it went to whichever block happened to be declared last,
+        # so on the evaluated model a 10-parameter bias block received four
+        # dimensions while a 5120-parameter weight block received one --
+        # declaration order, not size, decided the resolution each block was
+        # examined at.
+        largest = max(self.model_blocks, key=self.model_blocks.get)
+        for block_name, d_m in self.model_blocks.items():
+            if block_name == largest:
+                continue
+            extra_k = int(leftover_k * (d_m / total_d))
+            allocations[block_name] += extra_k
+            remaining_leftover -= extra_k
+        allocations[largest] += remaining_leftover
+
         return allocations
 
     def _get_secondary_seed(self, block_name: str, round_num: int) -> int:

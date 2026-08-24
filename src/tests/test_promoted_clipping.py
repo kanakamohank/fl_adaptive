@@ -473,23 +473,34 @@ def test_trust_ema_reaches_theta_high_on_honest_scores():
     assert trust >= 0.7
 
 
-def test_score_unaffected_by_adding_a_well_behaved_client():
+def test_honest_scores_are_robust_to_an_extreme_outlier_joining():
     """
-    Scores must not move because a different client joined the cohort.
+    An extreme client joining must not change the honest clients' verdicts.
 
-    Under the relative score, adding any client could change every other
-    client's score by shifting the max used as the denominator.
+    This replaces an exact-invariance check that no longer holds: under
+    leave-one-out, adding any client genuinely changes every other client's
+    reference set, so scores are expected to move slightly. What must NOT
+    happen is the original defect -- one client's extremity determining
+    everyone else's score, which is what a max- or mean-normalised statistic
+    does. Both the centre and the variance are medians, so a single arbitrarily
+    large client cannot move either.
     """
-    torch.manual_seed(1)
-    base = {f"c{i}": {"m": torch.randn(20) * 0.1} for i in range(4)}
-    extra = dict(base, extra={"m": torch.randn(20) * 0.1})
+    torch.manual_seed(3)
+    honest = {f"c{i}": {f"b{m}": torch.randn(20) * 0.1 for m in range(3)} for i in range(5)}
 
-    _, _, s_base = _detector().detect_outliers(base, set(base))
-    _, _, s_extra = _detector().detect_outliers(extra, set(extra))
+    det_a = _detector(tau_z=5.0)
+    _, out_a, s_a = det_a.detect_outliers(honest, set(honest))
 
-    for cid in base:
-        assert s_base[cid] == pytest.approx(s_extra[cid], abs=1e-9)
+    poisoned = dict(honest)
+    poisoned["attacker"] = {f"b{m}": torch.randn(20) * 1e4 for m in range(3)}
+    det_b = _detector(tau_z=5.0)
+    _, out_b, s_b = det_b.detect_outliers(poisoned, set(poisoned))
 
+    assert not out_a, "honest cohort should produce no outliers"
+    assert "attacker" in out_b, "the extreme client must be flagged"
+    # The honest clients must survive unchanged in verdict, and keep full credit.
+    assert all(c not in out_b for c in honest), "an outlier dragged honest clients down with it"
+    assert all(s_b[c] == 1.0 for c in honest)
 
 def test_scores_stay_in_unit_range_with_an_extreme_outlier():
     """A grossly out-of-scale client scores 0.0, and never below."""
