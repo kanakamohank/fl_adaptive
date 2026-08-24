@@ -1,0 +1,53 @@
+{
+  "config": {
+    "epochs": 5,
+    "lr": 0.01,
+    "batch_size": 32,
+    "momentum": 0.9,
+    "no_momentum": true,
+    "weight_decay": 0.0005,
+    "model": "cifar_cnn",
+    "seed": 42,
+    "data_dir": "./data",
+    "results_dir": "results/centralized_baseline"
+  },
+  "momentum_used": 0.0,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 1.9837529909435327,
+      "test_loss": 1.6403166891098022,
+      "test_accuracy": 0.3899,
+      "federated_round_equivalent": 1.25
+    },
+    {
+      "epoch": 2,
+      "train_loss": 1.5957820342278068,
+      "test_loss": 1.428898960494995,
+      "test_accuracy": 0.4709,
+      "federated_round_equivalent": 2.5
+    },
+    {
+      "epoch": 3,
+      "train_loss": 1.43609905563252,
+      "test_loss": 1.3228338609695434,
+      "test_accuracy": 0.5199,
+      "federated_round_equivalent": 3.75
+    },
+    {
+      "epoch": 4,
+      "train_loss": 1.325636115847531,
+      "test_loss": 1.2471657917022705,
+      "test_accuracy": 0.5478,
+      "federated_round_equivalent": 5.0
+    },
+    {
+      "epoch": 5,
+      "train_loss": 1.2366200246188555,
+      "test_loss": 1.10977592754364,
+      "test_accuracy": 0.6033,
+      "federated_round_equivalent": 6.25
+    }
+  ],
+  "elapsed_seconds": 216.80062580108643
+}
