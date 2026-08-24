@@ -36,9 +36,20 @@ def test_km_allocation_proportionality(esp_projector, dummy_blocks):
     # 2. Larger blocks must get larger k_m
     assert allocations["ffn_layer_1"] > allocations["attention_layer_2"]
     assert allocations["attention_layer_2"] > allocations["attention_layer_1"]
-    
-    # 3. Exact math check for attention_layer_1: (10000 / 50000) * 500 = 100
-    assert allocations["attention_layer_1"] == 100
+
+    # 3. Every block clears the floor.
+    #
+    # Allocation is now floor-first, then proportional on what remains. The
+    # floor exists because the detector's statistic behaves as chi^2(k_m)/k_m:
+    # at k_m = 1 it is a single squared Gaussian and exceeds five times its own
+    # mean 2.5% of the time by chance, which no threshold can repair.
+    assert min(allocations.values()) >= esp_projector.k_min_per_block
+
+    # 4. Proportional share on top of the floor, for a block below the largest.
+    floor = esp_projector.k_min_per_block
+    leftover = esp_projector.target_k - len(allocations) * floor
+    expected = floor + int(leftover * (10000 / 50000))
+    assert allocations["attention_layer_1"] == expected
 
 def test_ephemeral_seed_unpredictability(esp_projector):
     """

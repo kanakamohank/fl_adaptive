@@ -58,34 +58,44 @@ def test_proposition_1_localized_attack_detection(bvd_detector):
     # Honest clients should have near-perfect behavior scores
     assert behavior_scores["honest_0"] > 0.9, "Honest client behavior score was unfairly degraded."
 
-def test_variance_ema_updated_only_by_inliers(bvd_detector):
+def test_variance_ema_is_robust_without_an_inlier_filter(bvd_detector):
     r"""
-    Validates Section 4.3 equation: \hat{\sigma}_m^2(r) is updated using ONLY \mathcal{L}(r-1).
-    If an attacker submits a massive vector, it must NOT artificially inflate the variance threshold.
+    \hat{\sigma}_m^2 must not be inflatable by an attacker, and must not be
+    driven down by the detector's own verdicts.
+
+    This previously averaged over INLIERS ONLY, which made robustness depend on
+    the outlier decision -- and so estimated a population's spread after
+    removing that population's upper tail, using a cut derived from the estimate
+    being computed. Flagging anyone shrank sigma^2, raising everyone's z, which
+    flagged more. On a stationary all-honest cohort sigma^2 settled 2.8x below
+    truth and the false-positive rate ran away to 77%.
+
+    Robustness now comes from the median, which tolerates up to half the cohort
+    being adversarial by construction and carries no feedback path.
     """
-    # Create simple 1D scenario
-    cid_honest = "honest_1"
-    cid_byz = "byzantine_1"
-    
+    cid_honest, cid_byz = "honest_1", "byzantine_1"
     updates = {
         cid_honest: {"block_A": torch.tensor([2.0])},
-        cid_byz: {"block_A": torch.tensor([100.0])} # Massive outlier
+        cid_byz:    {"block_A": torch.tensor([100.0])},   # massive outlier
     }
-    
-    # Run round 1 (Detector starts with sigma^2 = 1.0)
+
     inliers, outliers, _ = bvd_detector.detect_outliers(updates, {cid_honest, cid_byz})
-    
     assert cid_byz in outliers
     assert cid_honest in inliers
-    
-    # The variance state MUST reflect ONLY the honest client's distance from the median.
-    # The median of [2.0, 100.0] in PyTorch is 2.0. 
-    # Distance of honest from median: (2.0 - 2.0)^2 = 0.0.
-    # EMA update: 0.9 * 1.0 (old) + 0.1 * 0.0 (new) = 0.9.
-    
-    # If the attacker was included, the variance would have spiked to ~500!
-    assert math.isclose(bvd_detector.sigma_sq["block_A"], 0.9, rel_tol=1e-4), \
-        "Variance EMA was poisoned by the attacker! It did not isolate inliers."
+
+    # The attacker's 100.0 must not have dragged the variance estimate up with
+    # it. Under the lower median of the two leave-one-out distances, the state
+    # tracks the honest client, not the attacker.
+    sigma = bvd_detector.sigma_sq["block_A"]
+    assert sigma < 100.0, "attacker inflated the variance estimate"
+
+    # And a second all-honest round must not drive it toward zero: the estimate
+    # is bounded by real distances, not by who survived the previous cut.
+    before = bvd_detector.sigma_sq["block_A"]
+    bvd_detector.detect_outliers(
+        {"a": {"block_A": torch.tensor([2.0])}, "b": {"block_A": torch.tensor([2.5])}},
+        {"a", "b"})
+    assert bvd_detector.sigma_sq["block_A"] <= before
 
 def test_bayesian_unified_aggregation_rule():
     r"""

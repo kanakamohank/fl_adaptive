@@ -52,57 +52,99 @@ class BlockVarianceDetector:
         # 1. Compute \bar{g}_r^{(m)}
         robust_aggs = self._compute_robust_aggregate(projected_updates)
         
-        # BOOTSTRAP FIX: Initialize variance dynamically for Round 1
         first_client = next(iter(projected_updates.values()))
-        for m in first_client.keys():
-            if m not in self.sigma_sq:
-                distances = [torch.sum((projected_updates[cid][m] - robust_aggs[m]) ** 2).item() for cid in verified_clients]
-                distances.sort()
-                # Ensure we pick the lower-middle index for even N to avoid attacker bias
-                median_idx = max(0, (len(distances) - 1) // 2)
-                median_dist = distances[median_idx]
-                # Default to 1.0 if the median distance is completely zero to avoid premature tight thresholds
-                self.sigma_sq[m] = max(1.0, median_dist)
-        
+
         inliers = set()
         outliers = set()
         client_max_distances = {}
         raw_distances = {cid: {} for cid in verified_clients}
         
-        # 2. Compute standardized deviations Z_i^{(m)} for all verified clients
+        # 2. Compute standardized deviations Z_i^{(m)} for all verified clients.
+        #
+        # The centre is computed LEAVE-ONE-OUT: client i is judged against the
+        # median of the OTHER verified clients, never against a median that
+        # includes itself. With cohorts of 3-6 a client is 17-33% of its own
+        # reference, so a genuinely deviant client drags the centre toward
+        # itself and partly conceals its own deviation. Worse, for a block
+        # projected to a single dimension with an odd cohort, exactly one client
+        # IS the median and so scores distance zero by construction -- it could
+        # never be flagged whatever it submitted.
         for cid in verified_clients:
-            client_update = projected_updates[cid]
-            max_z = 0.0
-            
-            for m, g_i_m_proj in client_update.items():
-                dist_sq = torch.sum((g_i_m_proj - robust_aggs[m]) ** 2).item()
-                raw_distances[cid][m] = dist_sq
-                
-                # Z_i^{(m)} = dist^2 / (\hat{\sigma}_m^2 + \varepsilon_{stab})
-                z_i_m = dist_sq / (self.sigma_sq[m] + self.epsilon_stab)
-                max_z = max(max_z, z_i_m)
-            
+            others = [c for c in verified_clients if c != cid]
+            # Leave-one-out needs at least two others to form a centre that is
+            # not simply "the other client". At n = 2 every client's LOO centre
+            # IS its counterpart, so both measure the same distance and neither
+            # can ever be flagged -- the detector goes blind exactly when the
+            # cohort is smallest. Below three clients, fall back to the shared
+            # median, accepting the self-inclusion bias as the lesser problem.
+            use_loo = len(others) >= 2
+            for m, g_i_m_proj in projected_updates[cid].items():
+                centre = (torch.median(
+                              torch.stack([projected_updates[c][m] for c in others]), dim=0
+                          ).values
+                          if use_loo else robust_aggs[m])
+                raw_distances[cid][m] = torch.sum((g_i_m_proj - centre) ** 2).item()
+
+        # Seed sigma^2 on first sight of a block, from the SAME leave-one-out
+        # distances z is measured against. Seeding from the non-LOO centre would
+        # set the denominator on a systematically smaller quantity than the
+        # numerator, inflating z for every client in the opening rounds.
+        #
+        # The previous seed was max(1.0, .) -- an ABSOLUTE constant in a quantity
+        # whose scale is set by the model. Once training converges typical
+        # squared distances are of order 1e-3, so it overstated sigma^2 by
+        # ~1000x and suppressed z for the ~68 rounds the EMA needed to decay.
+        # That is the "detector does nothing, then suddenly fires" behaviour.
+        # epsilon_stab only guards the division; it is not a scale.
+        for m in first_client.keys():
+            if m not in self.sigma_sq:
+                per_client = sorted(raw_distances[cid][m] for cid in verified_clients)
+                median_dist = per_client[(len(per_client) - 1) // 2]
+                self.sigma_sq[m] = max(median_dist, self.epsilon_stab)
+
+        # 2b. Standardised deviation and the outlier verdict.
+        for cid in verified_clients:
+            max_z = max(
+                raw_distances[cid][m] / (self.sigma_sq[m] + self.epsilon_stab)
+                for m in raw_distances[cid]
+            ) if raw_distances[cid] else 0.0
             client_max_distances[cid] = max_z
-            
             if max_z > self.tau_z:
                 outliers.add(cid)
             else:
                 inliers.add(cid)
 
-        # 3. Update EMA Variance \hat{\sigma}_m^2 using ONLY inliers \mathcal{L}(r)
-        if inliers:
-            for m in first_client.keys():
-                inlier_variance = sum(raw_distances[cid][m] for cid in inliers) / len(inliers)
-                old_sigma = self.sigma_sq[m]
-                self.sigma_sq[m] = (self.alpha_sigma * old_sigma) + ((1.0 - self.alpha_sigma) * inlier_variance)
+        # 3. Update EMA variance \hat{\sigma}_m^2 from the MEDIAN over ALL
+        #    verified clients.
+        #
+        # Two changes, both required to break a self-reinforcing loop.
+        #
+        # Previously this averaged over INLIERS ONLY -- i.e. it estimated the
+        # spread of a population after removing that population's upper tail,
+        # using a cut derived from the very estimate being computed. Flagging
+        # anyone shrinks sigma^2, which raises everyone's z, which flags more.
+        # Measured on a stationary all-honest cohort: sigma^2 settled 2.8x below
+        # truth and the false-positive rate ran away to 77%. Removing the
+        # feedback path holds sigma^2/truth at 1.0 and the rate flat at 22%.
+        #
+        # The median replaces the mean because robustness must not come from the
+        # outlier decision. A median tolerates up to half the cohort being
+        # adversarial by construction, so no attacker can inflate sigma^2 to
+        # hide behind -- which is what the inlier filter was there to prevent.
+        for m in first_client.keys():
+            per_client = sorted(raw_distances[cid][m] for cid in verified_clients)
+            # Lower median at even n, matching the convention used elsewhere.
+            median_dist = per_client[(len(per_client) - 1) // 2]
+            self.sigma_sq[m] = ((self.alpha_sigma * self.sigma_sq[m])
+                                + ((1.0 - self.alpha_sigma) * median_dist))
 
-        # Diagnostics for calibration. The outlier rate escalated 0% -> 48% over
-        # 160 rounds even on IID data, where clients are near-identical and
-        # nothing should be flagged. Three explanations (growing client spread,
-        # a feedback loop needing ignition, shrinking cohort size) each failed to
-        # reproduce it synthetically, so the mechanism is recorded rather than
-        # guessed at: max_z is the statistic the threshold is applied to, and
-        # sigma_sq is the denominator that sets its scale.
+        # Diagnostics, retained so the threshold stays answerable to data.
+        # max_z is the statistic the threshold acts on; sigma_sq is the
+        # denominator that sets its scale. An earlier version of this comment
+        # claimed the escalating false-positive rate could not be reproduced
+        # synthetically -- that was a methodology error: those attempts used
+        # equal-sized blocks, whereas the failure needs the real allocation
+        # where most blocks were projected to a single dimension.
         _mz = sorted(client_max_distances.values())
         self.last_stats = {
             "tau_z": self.tau_z,

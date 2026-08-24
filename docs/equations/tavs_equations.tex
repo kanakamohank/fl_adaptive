@@ -237,11 +237,23 @@ sketches rather than on full parameter blocks.
 
 \medskip
 \noindent
-\textbf{Allocation caveat.} The implementation allocates $k_m$ proportionally to
-$d_m$ with a floor of $1$. For the evaluated model at $k=150$ this yields
-$k_m=1$ for six of ten blocks, where \eqref{eq:z} is a single squared Gaussian
-and therefore extremely heavy-tailed. This is the source of the false-positive
-behaviour discussed in \S\ref{sec:bvd}.
+\textbf{Allocation.} $k_m$ is assigned floor-first: every block receives at
+least $k_{\min}$ dimensions, and the remainder is distributed in proportion to
+$d_m$, with any rounding surplus going to the \emph{largest} block. If
+$k < M\,k_{\min}$ then $k$ is raised to $M\,k_{\min}$.
+
+\changed{The floor was previously $1$, which at $k=150$ gave $k_m=1$ to six of
+the evaluated model's ten blocks. Under the null of honest clients
+$d_i^{(m)}/\sigsq_m^2$ behaves as $\chi^2(k_m)/k_m$, whose dispersion is set
+entirely by $k_m$ with $\mathrm{sd}=\sqrt{2/k_m}$; at $k_m=1$ it is a single
+squared Gaussian exceeding five times its own mean $2.5\%$ of the time by
+chance. Since a client is flagged when \emph{any} block fires, ten such blocks
+give $1-(1-0.025)^{10} \approx 22\%$ false positives with no adversary
+present --- which no choice of $\tau_z$ repairs, the problem being the number of
+measurements rather than where the line is drawn on them. At $k_{\min}=16$ the
+dispersion falls to $0.35$. Separately, the rounding surplus previously went to
+whichever block was declared \emph{last}, so a $10$-parameter bias block
+received four dimensions while a $5120$-parameter weight block received one.}
 
 % =============================================================================
 \section{Layer 3 --- Detection and Aggregation}
@@ -250,10 +262,10 @@ behaviour discussed in \S\ref{sec:bvd}.
 \subsection{Block-variance outlier detection}
 
 \begin{align}
-\bar{g}^{(m)} &= \operatorname*{median}_{i \in \Vset} \gproj_i^{(m)}
-\qquad\text{(coordinate-wise)},
+\bar{g}^{(m)}_{-i} &= \operatorname*{median}_{j \in \Vset \setminus \{i\}} \gproj_j^{(m)}
+\qquad\text{(coordinate-wise, leave-one-out)},
 \label{eq:center}\\[2pt]
-d_i^{(m)} &= \bigl\lVert \gproj_i^{(m)} - \bar{g}^{(m)} \bigr\rVert_2^2,
+d_i^{(m)} &= \bigl\lVert \gproj_i^{(m)} - \bar{g}^{(m)}_{-i} \bigr\rVert_2^2,
 \label{eq:dist}\\[2pt]
 z_i^{(m)} &= \frac{d_i^{(m)}}{\sigsq_m^2 + \varepsilon},
 \qquad
@@ -264,41 +276,50 @@ Z_i = \max_m z_i^{(m)},
 \Lset(\round) = \Vset(\round) \setminus \Oset(\round),
 \label{eq:outlier}\\[2pt]
 \sigsq_m^2 &\leftarrow \alpha_\sigma\, \sigsq_m^2
-+ (1-\alpha_\sigma)\,\frac{1}{\lvert\Lset\rvert}\sum_{i \in \Lset} d_i^{(m)}
-\qquad (\Lset \neq \emptyset).
++ (1-\alpha_\sigma)\,\operatorname*{median}_{i \in \Vset} d_i^{(m)}.
 \label{eq:sigma}
 \end{align}
 
-On first encounter with block $m$ the variance is initialised from that round's
-distances, subject to an absolute floor:
+On first encounter with block $m$ the variance is seeded from the same
+leave-one-out distances:
 \begin{equation}
-\sigsq_m^2 \leftarrow \max\!\left(1,\ \operatorname*{median}_{i \in \Vset} d_i^{(m)}\right).
+\sigsq_m^2 \leftarrow \max\!\left(\operatorname*{median}_{i \in \Vset} d_i^{(m)},\ \varepsilon\right).
 \label{eq:bootstrap}
 \end{equation}
-The floor of $1$ is dimensionally arbitrary and is a defect in its own right:
-once the model has converged, typical $d_i^{(m)}$ are of order $10^{-3}$, so the
-initialisation overstates the true scale by three orders of magnitude and
-\eqref{eq:z} is suppressed for the tens of rounds the EMA takes to decay.
+
+\changed{Three changes, all removing sources of false positives measured at
+$26\%$ on IID data with no adversary present.
+\emph{(i)} \eqref{eq:center} is now leave-one-out. A client was previously
+compared against a median that included itself; at $\lvert\Vset\rvert = 3$--$6$
+it is $17$--$33\%$ of its own reference, and for a single-dimension block with
+odd cohort exactly one client \emph{is} the median and scores distance zero by
+construction. Below three verified clients the shared median is retained, since
+leave-one-out degenerates at $n=2$ to ``compare each client to the other one''.
+\emph{(ii)} \eqref{eq:sigma} was a mean over inliers only --- estimating a
+population's spread after removing its upper tail, using a cut derived from the
+estimate itself. Flagging shrank $\sigsq^2$, which raised every $z$, which
+flagged more; measured runaway to $77\%$ on a stationary honest cohort. The
+median carries the robustness instead, tolerating up to half the cohort being
+adversarial with no feedback path.
+\emph{(iii)} \eqref{eq:bootstrap} previously floored at the absolute constant
+$1$. After convergence typical $d_i^{(m)}$ are of order $10^{-3}$, so this
+overstated the scale by three orders of magnitude and suppressed \eqref{eq:z}
+for roughly $68$ rounds --- the ``detector does nothing, then suddenly fires''
+behaviour. $\varepsilon$ guards the division only; it is not a scale.}
 
 \medskip
 \noindent
-\textbf{Known defects in \eqref{eq:z}--\eqref{eq:sigma}.} These are stated
-because the empirical false-positive rate reaches $26\%$ on IID data with no
-adversary present, and the cause is structural rather than a matter of tuning
-$\tau_z$:
-\begin{enumerate}\itemsep2pt
-\item $Z_i$ is a ratio of a squared distance to a \emph{mean} squared distance,
-      not a standardised score --- no dispersion estimate appears in the
-      denominator, so $\tau_z$ admits no interpretation as a tail probability.
-\item $\sigsq_m^2$ in \eqref{eq:sigma} is estimated only over $\Lset$, i.e. over
-      clients already accepted. This truncates the upper tail of the quantity
-      being estimated and biases it downward on every round.
-\item $\max_m$ in \eqref{eq:z} carries no multiplicity correction, so the
-      detector becomes stricter as blocks are added, and the block with the
-      smallest $\sigsq_m^2$ determines every verdict. Measured divergence
-      between the smallest and largest $\sigsq_m^2$ reaches $4\times10^3$ over
-      $100$ rounds.
-\end{enumerate}
+\textbf{Remaining limitation.} $\max_m$ in \eqref{eq:z} carries no multiplicity
+correction, so the detector becomes stricter as blocks are added to the model.
+With $k_{\min}=16$ the per-block false-positive rate is small enough that the
+uncorrected maximum is tolerable, but $\tau_z$ still admits no interpretation as
+a tail probability, and a principled version would set per-block thresholds from
+the $\chi^2(k_m)$ quantile under a family-wise correction.
+
+Measured after the corrections above: on all-honest cohorts the false-positive
+rate is flat at $0\%$ (homogeneous) and $0.7$--$0.9\%$ (non-IID) across $200$
+rounds, with no escalation. Detection power at $\tau_z=5$ is $100\%$ against a
+$3\times$ deviation.
 
 \subsection{Behaviour score}
 
