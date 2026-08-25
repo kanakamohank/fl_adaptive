@@ -287,7 +287,7 @@ def main():
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--seeds", default="1,2,3")
     parser.add_argument("--rounds", type=int, default=20)
-    parser.add_argument("--num-clients", type=int, default=2)
+    parser.add_argument("--num-clients", type=int, default=1)
     parser.add_argument("--clients-per-round", type=int, default=1)
     parser.add_argument("--target-k", type=int, default=150)
     parser.add_argument("--clip-factor", type=float, default=2.0)

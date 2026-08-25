@@ -1,7 +1,7 @@
 {
   "experiment_config": {
     "num_rounds": 50,
-    "num_clients": 2,
+    "num_clients": 1,
     "clients_per_round": 1,
     "byzantine_fraction": 0.0,
     "model_type": "cifar_cnn",
@@ -27,7 +27,7 @@
       "min_fit_clients": 1,
       "min_available_clients": 1,
       "master_key": "b'default_key'",
-      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x11fc34e00>",
+      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x11b6bb740>",
       "min_inlier_fraction_for_agg": 0.25,
       "soft_outlier_weighting": true,
       "enable_outlier_detection": false,
@@ -62,15 +62,14 @@
     "validate_promotion_feasibility": true
   },
   "final_metrics": {
-    "loss": 1.2380012558524016,
-    "accuracy": 0.671,
-    "total_time": 374.3340449333191,
-    "avg_round_time": 129.9757194519043
+    "loss": 1.4161275412626326,
+    "accuracy": 0.6783,
+    "total_time": 526.835813999176,
+    "avg_round_time": 131.4130163192749
   },
   "trust_summary": {
     "final_trust_distribution": {
-      "12318092191656603955": 0.9261421823362291,
-      "16892152856692111089": 0.9607489275229479
+      "13446684186644603165": 0.9961346685945099
     },
     "trust_convergence": "analyzed"
   },
