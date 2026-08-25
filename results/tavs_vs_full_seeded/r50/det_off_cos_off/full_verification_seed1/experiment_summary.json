@@ -1,8 +1,8 @@
 {
   "experiment_config": {
-    "num_rounds": 100,
-    "num_clients": 5,
-    "clients_per_round": 4,
+    "num_rounds": 50,
+    "num_clients": 2,
+    "clients_per_round": 1,
     "byzantine_fraction": 0.0,
     "model_type": "cifar_cnn",
     "dataset": "cifar10",
@@ -24,10 +24,10 @@
       "target_k": 150,
       "projection_type": "structured",
       "scheduling_type": "csprng",
-      "min_fit_clients": 4,
-      "min_available_clients": 4,
+      "min_fit_clients": 1,
+      "min_available_clients": 1,
       "master_key": "b'default_key'",
-      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x11a6939c0>",
+      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x11fc34e00>",
       "min_inlier_fraction_for_agg": 0.25,
       "soft_outlier_weighting": true,
       "enable_outlier_detection": false,
@@ -55,25 +55,22 @@
       "ignore_reinit_error": true,
       "include_dashboard": false
     },
-    "output_dir": "results/tavs_vs_full_seeded/r100/det_off_cos_off/full_verification_seed1",
+    "output_dir": "results/tavs_vs_full_seeded/r50/det_off_cos_off/full_verification_seed1",
     "save_client_data": false,
     "seed": 1,
     "deterministic": true,
     "validate_promotion_feasibility": true
   },
   "final_metrics": {
-    "loss": 1.274857778458079,
-    "accuracy": 0.6756,
-    "total_time": 604.5222678184509,
-    "avg_round_time": 136.2222170829773
+    "loss": 1.2380012558524016,
+    "accuracy": 0.671,
+    "total_time": 374.3340449333191,
+    "avg_round_time": 129.9757194519043
   },
   "trust_summary": {
     "final_trust_distribution": {
-      "14136389187454889073": 0.9998179379162263,
-      "12248818387843737136": 0.9998924941601524,
-      "4574334807611418537": 0.9998525297121432,
-      "741489369501997088": 0.9998179379162263,
-      "6287275216048083716": 0.9997752319953411
+      "12318092191656603955": 0.9261421823362291,
+      "16892152856692111089": 0.9607489275229479
     },
     "trust_convergence": "analyzed"
   },

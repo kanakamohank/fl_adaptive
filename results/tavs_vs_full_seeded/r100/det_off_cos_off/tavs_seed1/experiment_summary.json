@@ -1,8 +1,8 @@
 {
   "experiment_config": {
     "num_rounds": 100,
-    "num_clients": 20,
-    "clients_per_round": 8,
+    "num_clients": 5,
+    "clients_per_round": 4,
     "byzantine_fraction": 0.0,
     "model_type": "cifar_cnn",
     "dataset": "cifar10",
@@ -24,10 +24,10 @@
       "target_k": 150,
       "projection_type": "structured",
       "scheduling_type": "csprng",
-      "min_fit_clients": 8,
-      "min_available_clients": 8,
+      "min_fit_clients": 4,
+      "min_available_clients": 4,
       "master_key": "b'default_key'",
-      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x11df876a0>",
+      "evaluate_fn": "<function TAVSESPPipeline._create_evaluate_function.<locals>.evaluate_fn at 0x11a691440>",
       "min_inlier_fraction_for_agg": 0.25,
       "soft_outlier_weighting": true,
       "enable_outlier_detection": false,
@@ -62,33 +62,18 @@
     "validate_promotion_feasibility": true
   },
   "final_metrics": {
-    "loss": 1.23224955417548,
-    "accuracy": 0.5595,
-    "total_time": 705.9286069869995,
-    "avg_round_time": 158.44757556915283
+    "loss": 1.2863696976831764,
+    "accuracy": 0.6714,
+    "total_time": 604.7348930835724,
+    "avg_round_time": 146.23696088790894
   },
   "trust_summary": {
     "final_trust_distribution": {
-      "1128476082042139826": 0.9515418858307999,
-      "15245266206713858413": 0.9607489275229479,
-      "15871879841583322221": 0.9515418858307999,
-      "7708879363133398304": 0.9515418858307999,
-      "15143710001372626375": 0.9563876972477199,
-      "18218403885266364685": 0.9607489275229479,
-      "5696425778583728255": 0.9646740347706532,
-      "9297028710321552819": 0.9607489275229479,
-      "14301064402440013337": 0.9515418858307999,
-      "4322862979737751745": 0.9261421823362291,
-      "4467109089290910599": 0.9607489275229479,
-      "6876399116498821150": 0.9515418858307999,
-      "2321377280418942572": 0.9563876972477199,
-      "11682481738128150936": 0.9646740347706532,
-      "17809397183908944960": 0.9515418858307999,
-      "2597070391835869637": 0.9563876972477199,
-      "6815744956956387211": 0.9563876972477199,
-      "5529384923210786992": 0.9563876972477199,
-      "1083478253003807087": 0.9607489275229479,
-      "2710668448918539424": 0.9563876972477199
+      "10831457508393957460": 0.9986522422750642,
+      "10968238616088657932": 0.9983361015741533,
+      "17126316754192134337": 0.998502491416738,
+      "9224546268994953203": 0.998502491416738,
+      "8562541910117229310": 0.998502491416738
     },
     "trust_convergence": "analyzed"
   },
