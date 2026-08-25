@@ -62,9 +62,10 @@ def _cosine_tag(args):
     The threshold is in the tag, not just the on/off state, so runs at different
     thresholds do not overwrite each other.
     """
-    if not args.cosine:
-        return "cos_off"
-    return f"cos_on_min{args.cosine_min:g}"
+    tag = "cos_off" if not args.cosine else f"cos_on_min{args.cosine_min:g}"
+    # Detection is part of the path: a detection-off run must not overwrite the
+    # detection-on run it exists to be compared against.
+    return f"det_{'on' if args.detection else 'off'}_{tag}"
 
 
 def run_one(arm, strategy_class, seed, args):
@@ -98,6 +99,7 @@ def run_one(arm, strategy_class, seed, args):
         # than inheriting a default. The published 43.3%/-0.0297 figures predate
         # the cosine gate, so a rerun is only comparable to them at --cosine off.
         cosine_filter_promoted=args.cosine, promoted_cosine_min=args.cosine_min,
+        enable_outlier_detection=args.detection,
     )
     config = PipelineConfig(
         num_rounds=args.rounds,
@@ -291,6 +293,17 @@ def main():
     parser.add_argument("--clip-factor", type=float, default=2.0)
     # Only the TAVS arm is affected: FullVerificationStrategy never promotes, so
     # there is no unverified update for either defence to act on.
+    # With detection ON the full_verification arm is FedAvg PLUS the detector,
+    # not FedAvg: it still projects, screens for outliers and weights by the
+    # behaviour score. That score is 1.0 for every unflagged client, so the
+    # weighting collapses to n_i and the arms differ only by whatever the
+    # detector flags -- currently ~1% of updates. Turning detection off makes
+    # the arm a genuine FedAvg control, which is what the accuracy gap against
+    # centralised training needs to be attributed. Valid only here, where
+    # byzantine_fraction is 0; it removes the Byzantine defence entirely.
+    parser.add_argument("--detection", default="on", choices=("on", "off"),
+                        help="BVD outlier detection (default on). 'off' makes "
+                             "full_verification a plain FedAvg control.")
     parser.add_argument("--cosine", default="off", choices=("on", "off"),
                         # Defaults to off, matching TavsEspConfig. These
                         # scripts defaulted to "on" and so silently kept the
@@ -310,7 +323,8 @@ def main():
     parser.add_argument("--data-alpha", type=float, default=0.3)
     parser.add_argument("--results-dir", default="results/tavs_vs_full_seeded")
     args = parser.parse_args()
-    args.cosine = args.cosine == "on"   # config field is a bool; the flag is a word
+    args.cosine = args.cosine == "on"
+    args.detection = args.detection == "on"   # config field is a bool; the flag is a word
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
 
     logging.basicConfig(level=logging.INFO,
