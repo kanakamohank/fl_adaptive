@@ -13,8 +13,15 @@ Currently:
                                    sweeping the number of clients K. Produces
                                    a plot of ||naive - correct||_F / ||correct||_F.
 
+  measure_lora_correlation_effect() -- sweep client correlation from identical
+                                   (theta=0) to orthogonal (theta=pi/2), holding
+                                   K fixed. Answers the caveat left open by the
+                                   K-sweep: real federated clients share init
+                                   and are correlated, so how much does that
+                                   attenuate the naive-aggregation error?
+
 Run:
-    python -m src.utils.utils_lab                          # both, with plot
+    python -m src.utils.utils_lab                          # all, with plots
     python -m src.utils.utils_lab --no-plot                # numeric only
 """
 import argparse
@@ -105,6 +112,74 @@ def measure_lora_aggregation_error(
     return rows
 
 
+def measure_lora_correlation_effect(
+    thetas: np.ndarray = None,
+    plot_path: str = "results/utils_lab/lora_aggregation_correlation.png",
+) -> List[Tuple[float, float]]:
+    """
+    Two rank-1 clients on the unit circle, held at fixed magnitude while the
+    angle between them varies. theta=0 -> identical; theta=pi/2 -> orthogonal.
+
+    This isolates the effect of client correlation from every other variable.
+    The K-sweep in measure_lora_aggregation_error used i.i.d. clients, which is
+    the worst case; real federated clients share initialisation and drift only
+    a little, so they sit close to theta=0 where the naive aggregate is nearly
+    correct. This sweep quantifies exactly how "nearly".
+    """
+    if thetas is None:
+        thetas = np.linspace(0.0, np.pi / 2, 40)
+    B1, A1 = np.array([[1.0], [0.0]]), np.array([[1.0, 0.0]])
+
+    rows: List[Tuple[float, float]] = []
+    for theta in thetas:
+        B2 = np.array([[np.cos(theta)], [np.sin(theta)]])
+        A2 = B2.T
+        target = 0.5 * (B1 @ A1) + 0.5 * (B2 @ A2)
+        naive = (0.5 * B1 + 0.5 * B2) @ (0.5 * A1 + 0.5 * A2)
+        err = (np.linalg.norm(naive - target, ord="fro")
+               / np.linalg.norm(target, ord="fro"))
+        rows.append((float(theta), float(err)))
+
+    print("--- measure_lora_correlation_effect ---")
+    print(f"{'theta (rad)':>12}{'theta / pi':>12}{'rel_err':>10}")
+    for th, e in rows[::4]:      # print every 4th to keep output short
+        print(f"{th:>12.4f}{th/np.pi:>12.3f}{e:>10.4f}")
+    print(f"{'...':>12}")
+    print(f"identical (theta=0):    rel_err = {rows[0][1]:.4f}")
+    print(f"orthogonal (theta=pi/2): rel_err = {rows[-1][1]:.4f}")
+
+    if plot_path:
+        _plot_correlation_curve(rows, out=plot_path)
+    return rows
+
+
+def _plot_correlation_curve(rows, out):
+    import matplotlib
+    matplotlib.use("Agg")
+    import matplotlib.pyplot as plt
+    os.makedirs(os.path.dirname(out), exist_ok=True)
+
+    thetas = [r[0] for r in rows]
+    errs = [r[1] for r in rows]
+
+    fig, ax = plt.subplots(figsize=(7.5, 4.5))
+    ax.plot(thetas, errs, "-", lw=1.8, color="#0d6d6d")
+    # Reference markers with plain-language labels for the two extremes.
+    ax.axvline(0, ls=":", color="#68758a", lw=1)
+    ax.axvline(np.pi / 2, ls=":", color="#68758a", lw=1)
+    ax.set_xticks([0, np.pi/8, np.pi/4, 3*np.pi/8, np.pi/2])
+    ax.set_xticklabels(["0\n(identical)", r"$\pi/8$", r"$\pi/4$",
+                        r"$3\pi/8$", r"$\pi/2$" + "\n(orthogonal)"])
+    ax.set_xlabel("angle between client update directions")
+    ax.set_ylabel(r"$\|\bar B \bar A - \sum_k p_k B_k A_k\|_F / \|\sum_k p_k B_k A_k\|_F$")
+    ax.set_title("Client correlation attenuates the naive-aggregation error\n"
+                 "(two rank-1 clients on the unit circle, equal weight)")
+    ax.grid(alpha=.3)
+    plt.tight_layout()
+    plt.savefig(out, dpi=150)
+    print(f"Plot: {out}")
+
+
 def _plot_error_curve(rows, d, r, out):
     import matplotlib
     matplotlib.use("Agg")
@@ -148,6 +223,11 @@ def main():
         K_values=K, d=args.d, r=args.r, trials=args.trials, seed=args.seed,
         plot_path=(None if args.no_plot else
                    "results/utils_lab/lora_aggregation_error.png"),
+    )
+    print()
+    measure_lora_correlation_effect(
+        plot_path=(None if args.no_plot else
+                   "results/utils_lab/lora_aggregation_correlation.png"),
     )
 
 
