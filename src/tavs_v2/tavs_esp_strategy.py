@@ -680,3 +680,95 @@ class FullVerificationStrategy(TavsEspStrategy):
         # True here routes all of them down the verified path.
         config_dict = {"server_round": server_round, "is_verified": True}
         return [(proxy, FitIns(parameters, config_dict.copy())) for proxy in sampled]
+
+
+class RandomSkipStrategy(TavsEspStrategy):
+    """
+    Fair baseline for TAVS: same skip rate, uniform-random selection.
+
+    Runs the identical pipeline (ESP projection -> BVD on verified -> cosine
+    gate + magnitude clip on promoted -> aggregate) but replaces the
+    trust-adaptive scheduler with a coin flip. Each sampled client is placed in
+    the verified set with probability (1 - skip_rate); the rest go to promoted.
+
+    This isolates the value of the trust signal itself: TAVS and RandomSkip
+    save the same BVD compute per round in expectation, so any accuracy gap
+    between them is attributable to whom each policy chose to skip, not to how
+    many. If the two are indistinguishable, the trust EMA is not doing work
+    that a fair coin could not.
+
+    Trust EMA still runs (so aggregate_fit's code path is unchanged), but its
+    output is ignored for scheduling.
+    """
+
+    def __init__(self, config, model_structure=None, skip_rate: float = 0.4,
+                 skip_seed: int = 0):
+        super().__init__(config, model_structure=model_structure)
+        # Guard the rate: 0.0 degenerates to full-verify; 1.0 verifies no one
+        # and starves the cosine gate / clip of a reference cohort, so aggregate_fit
+        # falls back to fabricating behaviour and this experiment stops measuring
+        # anything meaningful. Reject the endpoints early.
+        if not (0.0 <= skip_rate < 1.0):
+            raise ValueError(f"skip_rate must be in [0, 1); got {skip_rate}")
+        self.skip_rate = skip_rate
+        # Own generator so seeds are reproducible across policy runs without
+        # depending on Flower's or numpy's global state.
+        self._skip_rng = random.Random(skip_seed)
+
+    def configure_fit(self, server_round: int, parameters: Parameters,
+                      client_manager: fl.server.client_manager.ClientManager):
+        self._current_round = server_round
+        self._previous_global = self._parameters_to_blocks(parameters)
+        available_clients = self._sample_cohort(client_manager)
+        client_ids = sorted(available_clients.keys())  # deterministic ordering
+        if not client_ids:
+            return []
+
+        # Draw a Bernoulli per client rather than fixing an exact skip count.
+        # The exact-count alternative correlates the assignments (once we've
+        # promoted the target number the rest must be verified), which biases
+        # the trust EMA updates the pipeline still runs behind the scenes. A
+        # per-client coin keeps the two policies' aggregation math identical in
+        # expectation.
+        V, P = set(), set()
+        for cid in client_ids:
+            if self._skip_rng.random() < self.skip_rate:
+                P.add(cid)
+            else:
+                V.add(cid)
+
+        # Safety: if the draws happen to promote everyone, force one client to
+        # verified so the cohort has a reference for cosine gate + clipping.
+        # Without this the gates skip with skipped_reason="no_verified_clients_*"
+        # and every promoted update passes through unbounded, which is not what
+        # a "same-pipeline, different selection" baseline should measure.
+        if not V:
+            demoted = self._skip_rng.choice(client_ids)
+            P.discard(demoted); V.add(demoted)
+
+        self._round_assignments[server_round] = {
+            "verified": set(V), "promoted": set(P), "decoy": set(),
+        }
+        # Staleness accounting is meaningless without a trust-based promotion
+        # policy; record zero so downstream summarisation does not choke.
+        self._forced_stale[server_round] = 0
+        logger.info(
+            f"Round {server_round} RandomSkip: {len(V)} Verified, "
+            f"{len(P)} Promoted (rate={self.skip_rate})"
+        )
+
+        fit_configurations = []
+        for cid in client_ids:
+            proxy = available_clients[cid]
+            told_verified = cid in V
+            config_dict = {
+                "server_round": server_round,
+                "is_verified": told_verified,
+                "tavs_assignment": "verified" if told_verified else "promoted",
+                # Present trust as 0.5 so honest clients trained end-to-end do
+                # not read "trust=0.0" as a signal from the server. Random-skip
+                # advertises no trust judgement.
+                "trust_score": 0.5,
+            }
+            fit_configurations.append((proxy, FitIns(parameters, config_dict)))
+        return fit_configurations

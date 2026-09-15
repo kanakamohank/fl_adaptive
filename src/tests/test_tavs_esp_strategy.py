@@ -288,6 +288,161 @@ def test_end_to_end_fl_simulation():
     print("✓ End-to-end FL simulation bridge successful")
     return True
 
+# ---------------------------------------------------------------------------
+# RandomSkipStrategy tests
+#
+# RandomSkipStrategy is the fair baseline for TAVS: same aggregation pipeline,
+# skip decisions replaced by a per-client coin. These tests fence off the ways
+# it could silently stop being that baseline: the coin biased, the coin
+# non-reproducible, promoted clients bypassing the pipeline safety net.
+# ---------------------------------------------------------------------------
+from src.tavs_v2.tavs_esp_strategy import RandomSkipStrategy
+
+
+def test_random_skip_rate_validation():
+    """Constructor rejects rates that would degenerate the baseline.
+
+    skip_rate = 1.0 verifies no client, starves cosine/clip of a reference
+    cohort, and quietly turns the arm into "unbounded promoted updates". A
+    negative rate is a caller bug. Both are refused up-front rather than
+    caught mid-round.
+    """
+    print("\nTesting RandomSkip rate validation...")
+    config = DummyConfig()
+    RandomSkipStrategy(config=config, skip_rate=0.0)   # boundary: no skip
+    RandomSkipStrategy(config=config, skip_rate=0.99)
+
+    for bad in (1.0, -0.01, 1.5):
+        try:
+            RandomSkipStrategy(config=config, skip_rate=bad)
+        except ValueError:
+            continue
+        raise AssertionError(f"skip_rate={bad} should have raised")
+    print("✓ rate validation rejects [1.0, ∞) and negatives")
+    return True
+
+
+def test_random_skip_split_is_partition():
+    """V and P cover the sampled cohort exactly and never overlap.
+
+    aggregate_fit routes by V/P membership, so a client missing from both
+    would be dropped from aggregation. A client in both would be counted
+    twice. Either would silently corrupt the arm's aggregate.
+    """
+    print("\nTesting RandomSkip V/P partition...")
+    config = DummyConfig()
+    strategy = RandomSkipStrategy(config=config, skip_rate=0.5, skip_seed=42)
+    client_manager = MockClientManager(num_clients=20)
+    params = MockParameters([np.random.randn(150000)])
+
+    fit_configs = strategy.configure_fit(1, params, client_manager)
+    assert len(fit_configs) == 20
+
+    assn = strategy._round_assignments[1]
+    v, p = assn["verified"], assn["promoted"]
+    assert v.isdisjoint(p), f"V and P overlap: {v & p}"
+    cohort = {proxy.cid for proxy, _ in fit_configs}
+    assert v | p == cohort, f"V ∪ P != cohort; missing {cohort - (v | p)}"
+    print(f"✓ partition holds: |V|={len(v)}, |P|={len(p)}, cohort={len(cohort)}")
+    return True
+
+
+def test_random_skip_rate_matches_target():
+    """Observed skip fraction tracks target rate at cohort-scale N.
+
+    The pipeline is Bernoulli per client, so we expect the observed rate to
+    concentrate at the target as clients accumulate. At n=200 and p=0.4 the
+    sd of the fraction is sqrt(0.24/200) ≈ 0.035; we allow ±0.10 so the test
+    is not flaky on any single seed but still catches a 2σ bias.
+    """
+    print("\nTesting RandomSkip target-rate calibration...")
+    config = DummyConfig()
+    strategy = RandomSkipStrategy(config=config, skip_rate=0.4, skip_seed=7)
+    client_manager = MockClientManager(num_clients=200)
+    params = MockParameters([np.random.randn(150000)])
+
+    strategy.configure_fit(1, params, client_manager)
+    assn = strategy._round_assignments[1]
+    observed = len(assn["promoted"]) / (len(assn["verified"]) + len(assn["promoted"]))
+    assert 0.30 <= observed <= 0.50, f"observed skip {observed:.3f} off target 0.40"
+    print(f"✓ observed skip rate {observed:.3f} within ±0.10 of 0.40")
+    return True
+
+
+def test_random_skip_never_leaves_v_empty():
+    """The safety guard promotes at least one client back to V.
+
+    Without a verified cohort the cosine gate and magnitude clip have no
+    reference and short-circuit with skipped_reason=no_verified_clients_*,
+    which lets every promoted update through unbounded. The strategy forces
+    one client back to V rather than let the arm silently stop being a
+    same-pipeline comparison.
+    """
+    print("\nTesting RandomSkip empty-V safety guard...")
+    config = DummyConfig()
+    # skip_rate = 0.99 makes every-promoted the modal outcome for small cohorts.
+    strategy = RandomSkipStrategy(config=config, skip_rate=0.99, skip_seed=0)
+    client_manager = MockClientManager(num_clients=5)
+    params = MockParameters([np.random.randn(150000)])
+
+    for round_num in range(1, 11):
+        strategy.configure_fit(round_num, params, client_manager)
+        v = strategy._round_assignments[round_num]["verified"]
+        assert len(v) >= 1, f"round {round_num}: V empty despite guard"
+    print("✓ V never empty across 10 near-total-skip rounds")
+    return True
+
+
+def test_random_skip_seed_reproducibility_and_independence():
+    """Same skip_seed reproduces the same split; different seeds diverge.
+
+    The pilot binds skip_seed to the pipeline seed so that multiple runs of
+    the random arm do NOT share the class default skip_seed=0 (which would
+    give identical Bernoulli sequences across seeds and quietly kill half
+    the intended seed variance).
+    """
+    print("\nTesting RandomSkip seed reproducibility & independence...")
+    config = DummyConfig()
+    client_manager = MockClientManager(num_clients=30)
+    params = MockParameters([np.random.randn(150000)])
+
+    def one(seed: int):
+        s = RandomSkipStrategy(config=config, skip_rate=0.4, skip_seed=seed)
+        s.configure_fit(1, params, client_manager)
+        return s._round_assignments[1]["promoted"]
+
+    p_a1 = one(11); p_a2 = one(11); p_b = one(12)
+    assert p_a1 == p_a2, "same seed produced different splits"
+    assert p_a1 != p_b, "different seeds produced identical splits (silent seed leak)"
+    print(f"✓ deterministic per seed, independent across seeds "
+          f"(|A|={len(p_a1)}, |B|={len(p_b)}, symdiff={len(p_a1 ^ p_b)})")
+    return True
+
+
+def test_random_skip_is_verified_flag_matches_split():
+    """The is_verified flag sent to each client matches its V/P assignment.
+
+    aggregate_fit routes by _round_assignments, not the client-echoed flag,
+    so a mismatch here would not corrupt aggregation -- but it would put an
+    honest client into unexpected training mode (some clients gate local
+    behaviour on this flag). Guard the contract explicitly.
+    """
+    print("\nTesting RandomSkip is_verified flag routing...")
+    config = DummyConfig()
+    strategy = RandomSkipStrategy(config=config, skip_rate=0.5, skip_seed=3)
+    client_manager = MockClientManager(num_clients=12)
+    params = MockParameters([np.random.randn(150000)])
+
+    fit_configs = strategy.configure_fit(1, params, client_manager)
+    v = strategy._round_assignments[1]["verified"]
+    for proxy, fit_ins in fit_configs:
+        told = fit_ins.config["is_verified"]
+        in_v = proxy.cid in v
+        assert told == in_v, f"{proxy.cid}: told={told} but in_v={in_v}"
+    print("✓ every client's is_verified flag matches its V-membership")
+    return True
+
+
 def main():
     """Run all TAVS-ESP strategy tests."""
     print("🧪 TAVS-ESP Strategy Test Suite")
@@ -300,7 +455,15 @@ def main():
         success4 = test_trust_dynamics_integration()
         success5 = test_end_to_end_fl_simulation()
 
-        if all([success1, success2, success3, success4, success5]):
+        rs1 = test_random_skip_rate_validation()
+        rs2 = test_random_skip_split_is_partition()
+        rs3 = test_random_skip_rate_matches_target()
+        rs4 = test_random_skip_never_leaves_v_empty()
+        rs5 = test_random_skip_seed_reproducibility_and_independence()
+        rs6 = test_random_skip_is_verified_flag_matches_split()
+
+        if all([success1, success2, success3, success4, success5,
+                rs1, rs2, rs3, rs4, rs5, rs6]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
             return True
         else:
