@@ -389,8 +389,24 @@ class TavsEspStrategy(Strategy):
         block_items = list(self.model_blocks.items())
         total_expected_params = sum(size for _, size in block_items)
 
+        # Lazy-init the cid -> config-id bridge. Kept per-strategy so it
+        # persists across rounds; a client seen once in round 1 stays in the
+        # map even if it is not sampled in round 2, which is exactly what a
+        # late-run analysis needs to reconstruct trust-vs-noise correlations.
+        if not hasattr(self, "cid_to_client_config_id"):
+            self.cid_to_client_config_id = {}
+
         for client_proxy, fit_res in results:
             cid = client_proxy.cid
+            # Record cid -> "honest_XX" as soon as we see the client's metric
+            # in a FitRes. Falls back to cid itself for clients that never
+            # report client_id, which keeps downstream keys well-defined
+            # rather than silently missing.
+            reported = fit_res.metrics.get("client_id") if fit_res.metrics else None
+            if reported:
+                self.cid_to_client_config_id[cid] = str(reported)
+            elif cid not in self.cid_to_client_config_id:
+                self.cid_to_client_config_id[cid] = cid
             ndarrays = parameters_to_ndarrays(fit_res.parameters)
             client_blocks: Dict[str, torch.Tensor] = {}
             
@@ -637,7 +653,17 @@ class TavsEspStrategy(Strategy):
         return result
 
     def export_complete_state(self):
-        return {"trust_state": self.scheduler.trust_scores}
+        # `cid_to_client_config_id` bridges Flower's opaque proxy.cid (used as
+        # the trust-dict key) to the human-readable "honest_XX" from the client
+        # configs. Without this, downstream analysis cannot tell which pool
+        # entry a particular trust score belongs to -- the pilot's diagnostic
+        # ("did TAVS put low trust on the actually-noisy clients?") is
+        # answerable only via this map. Populated defensively (empty when the
+        # strategy never saw a FitRes with the client_id metric).
+        return {
+            "trust_state": self.scheduler.trust_scores,
+            "cid_to_client_config_id": dict(getattr(self, "cid_to_client_config_id", {})),
+        }
 
 class FullVerificationStrategy(TavsEspStrategy):
     """
