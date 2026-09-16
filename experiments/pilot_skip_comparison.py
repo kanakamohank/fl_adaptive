@@ -284,11 +284,16 @@ def paired_delta(rows, seeds, key, a, b):
 def main():
     parser = argparse.ArgumentParser(description=__doc__,
                                      formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--seeds", default="1,2,3",
-                        help="Comma-separated seed list. Default 1,2,3: two seeds "
-                             "give a 50%% coin flip on paired-delta sign agreement, "
-                             "so 2 is the pilot floor -- 3 is the cheap upgrade that "
-                             "turns 1/2 same-sign into 2/3 or 3/3.")
+    parser.add_argument("--seeds", default="1,2,3,4,5,6,7,8,9,10",
+                        help="Comma-separated seed list. Default is 10 seeds. "
+                             "Pilot 3 at 3 seeds showed a consistent +0.3pp TAVS "
+                             "advantage over random skip on late accuracy but a "
+                             "seed-3 inversion in the trust-vs-noise mechanism "
+                             "diagnostic (rank-biserial correlation flipped sign). "
+                             "10 seeds resolves whether that inversion is a tail "
+                             "event or ~1-in-3 mechanism instability -- a stability "
+                             "question, not a power question. Reduce only for "
+                             "quick smoke tests; do not report on <5 seeds.")
     parser.add_argument("--rounds", type=int, default=20)
     parser.add_argument("--num-clients", type=int, default=100,
                         help="Client pool size (default 100).")
