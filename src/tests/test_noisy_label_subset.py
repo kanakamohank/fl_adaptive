@@ -13,6 +13,7 @@ The pilot's whole thesis depends on this wrapper producing:
 If any of the above breaks, the pilot's "does trust identify the noisy clients"
 question becomes uninterpretable. The tests are strict on purpose.
 """
+import math
 import sys
 import os
 import numpy as np
@@ -262,6 +263,138 @@ def test_pipeline_level_noisy_client_stability():
     return True
 
 
+def test_noise_diagnostic_computes_expected_stats():
+    """`_noise_diagnostic` reports gap, bottom-k overlap, and per-group trust
+    lists correctly. Uses a hand-crafted trust map so the expected numbers
+    are computable without simulation.
+    """
+    print("\nTesting _noise_diagnostic against hand-crafted inputs...")
+    from src.tavs_v2.end_to_end_pipeline import PipelineResults, TAVSESPPipeline
+
+    # Ten clients. 3 noisy, 7 clean. Noisy clients get the lowest trust so
+    # bottom-3 overlap should be 3/3. Trust gap (clean - noisy) should be
+    # (0.4+0.5+0.6+0.7+0.8+0.9+1.0)/7 - (0.1+0.15+0.2)/3 = 0.7 - 0.15 = 0.55.
+    cid_map = {f"cid{i}": f"honest_{i:02d}" for i in range(10)}
+    trust_vals = {
+        f"cid0": 0.10, f"cid1": 0.15, f"cid2": 0.20,   # noisy
+        f"cid3": 0.40, f"cid4": 0.50, f"cid5": 0.60,   # clean
+        f"cid6": 0.70, f"cid7": 0.80, f"cid8": 0.90, f"cid9": 1.00,
+    }
+    # PipelineResults needs config; use a minimal one.
+    from src.tavs_v2 import PipelineConfig, TavsEspConfig
+    cfg = PipelineConfig(
+        num_rounds=1, num_clients=10, clients_per_round=10,
+        byzantine_fraction=0.0, tavs_config=TavsEspConfig(),
+        label_noise_client_fraction=0.3, label_noise_rate=0.5,
+        validate_promotion_feasibility=False,
+    )
+    r = PipelineResults(
+        config=cfg, server_metrics=[], server_losses=[0.0],
+        server_accuracies=[0.5], final_trust_state={}, trust_evolution={},
+        tier_evolution={}, byzantine_detection_history=[], attack_success_rates={},
+        total_time_seconds=0.0, round_times=[0.0], convergence_metrics={},
+        security_metrics={},
+        noisy_pool_indices=[0, 1, 2],
+        noisy_client_config_ids=["honest_00", "honest_01", "honest_02"],
+        cid_to_client_config_id=cid_map,
+    )
+
+    diag = TAVSESPPipeline._noise_diagnostic(r, trust_vals)
+    assert diag["noise_injected"] is True
+    assert diag["n_noisy"] == 3
+    assert diag["n_observed_noisy_with_trust"] == 3
+    assert diag["n_observed_clean_with_trust"] == 7
+    assert abs(diag["mean_trust_noisy"] - 0.15) < 1e-9
+    assert abs(diag["mean_trust_clean"] - 0.70) < 1e-9
+    assert abs(diag["trust_gap_clean_minus_noisy"] - 0.55) < 1e-9
+    # All three noisy IDs are the three lowest-trust clients -> perfect overlap.
+    assert diag["bottom_k_overlap_with_noisy"] == 3
+    assert abs(diag["bottom_k_overlap_pct"] - 100.0) < 1e-9
+    assert diag["sorted_trust_noisy"] == [0.10, 0.15, 0.20]
+    print("✓ diagnostic matches hand-computed gap, overlap, and per-group lists")
+
+    # Contrast: swap so noisy clients get the HIGHEST trust and clean
+    # clients occupy the bottom. This is the "mechanism actively wrong"
+    # case -- bottom-k overlap should collapse to 0 and gap should go
+    # negative. The mid-range variant was a fuzzier test with mixed signs
+    # that made the assertion depend on tail arithmetic; this version is
+    # unambiguous.
+    trust_swapped = {
+        # Noisy clients at the very top.
+        "cid0": 0.90, "cid1": 0.95, "cid2": 1.00,
+        # Clean clients now spread across the bottom seven slots.
+        "cid3": 0.10, "cid4": 0.15, "cid5": 0.20,
+        "cid6": 0.30, "cid7": 0.40, "cid8": 0.50, "cid9": 0.60,
+    }
+    diag2 = TAVSESPPipeline._noise_diagnostic(r, trust_swapped)
+    assert diag2["bottom_k_overlap_with_noisy"] == 0, (
+        f"bottom-3 should now be all-clean; got overlap={diag2['bottom_k_overlap_with_noisy']}"
+    )
+    assert diag2["trust_gap_clean_minus_noisy"] < 0, (
+        f"gap should be negative when noisy > clean; "
+        f"got {diag2['trust_gap_clean_minus_noisy']}"
+    )
+    print("✓ diagnostic detects the mechanism-inverted case "
+          "(zero overlap, negative gap)")
+
+    # Strategy-class marker: TavsEspStrategy (or None -> defaults to that name)
+    # is treated as trust-driven; explicit non-trust arms are flagged so
+    # downstream readers do not misinterpret the block for random/full arms.
+    from src.tavs_v2.tavs_esp_strategy import FullVerificationStrategy, RandomSkipStrategy
+    r_full = PipelineResults(
+        config=PipelineConfig(
+            num_rounds=1, num_clients=10, clients_per_round=10,
+            byzantine_fraction=0.0, tavs_config=TavsEspConfig(),
+            strategy_class=FullVerificationStrategy,
+            label_noise_client_fraction=0.3, label_noise_rate=0.5,
+            validate_promotion_feasibility=False,
+        ),
+        server_metrics=[], server_losses=[0.0], server_accuracies=[0.5],
+        final_trust_state={}, trust_evolution={}, tier_evolution={},
+        byzantine_detection_history=[], attack_success_rates={},
+        total_time_seconds=0.0, round_times=[0.0], convergence_metrics={},
+        security_metrics={},
+        noisy_pool_indices=[0, 1, 2],
+        noisy_client_config_ids=["honest_00", "honest_01", "honest_02"],
+        cid_to_client_config_id=cid_map,
+    )
+    diag_full = TAVSESPPipeline._noise_diagnostic(r_full, trust_vals)
+    assert diag_full["diagnostic_meaningful"] is False, (
+        "FullVerificationStrategy should be flagged as non-trust-driven"
+    )
+    assert diag_full["strategy_class"] == "FullVerificationStrategy"
+
+    diag_tavs = TAVSESPPipeline._noise_diagnostic(r, trust_vals)  # r had None strategy
+    assert diag_tavs["diagnostic_meaningful"] is True
+    print("✓ diagnostic_meaningful marks non-trust-driven arms")
+
+    # NaN guard: if trust values include NaN, the returned means and sorted
+    # lists filter them rather than emitting invalid JSON literals.
+    trust_with_nan = {**trust_vals, "cid5": float("nan")}
+    diag_nan = TAVSESPPipeline._noise_diagnostic(r, trust_with_nan)
+    assert diag_nan["mean_trust_clean"] is not None
+    assert math.isfinite(diag_nan["mean_trust_clean"])
+    for x in diag_nan["sorted_trust_clean"] + diag_nan["sorted_trust_noisy"]:
+        assert math.isfinite(x), f"NaN slipped through into sorted list: {x}"
+    print("✓ NaN in trust scores filtered rather than emitted as invalid JSON")
+
+    # Empty-noise path: no injection -> flat descriptor, no group stats.
+    r_no = PipelineResults(
+        config=cfg, server_metrics=[], server_losses=[0.0],
+        server_accuracies=[0.5], final_trust_state={}, trust_evolution={},
+        tier_evolution={}, byzantine_detection_history=[], attack_success_rates={},
+        total_time_seconds=0.0, round_times=[0.0], convergence_metrics={},
+        security_metrics={},
+        noisy_pool_indices=[], noisy_client_config_ids=[],
+        cid_to_client_config_id=cid_map,
+    )
+    diag3 = TAVSESPPipeline._noise_diagnostic(r_no, trust_vals)
+    assert diag3["noise_injected"] is False
+    assert "mean_trust_noisy" not in diag3
+    print("✓ diagnostic reports noise_injected=False when no noise was set up")
+    return True
+
+
 def main():
     print("🧪 NoisyLabelSubset Test Suite")
     print("=" * 50)
@@ -275,6 +408,7 @@ def main():
         test_base_dataset_is_not_mutated,
         test_getitem_returns_true_label_off_the_noisy_set,
         test_pipeline_level_noisy_client_stability,
+        test_noise_diagnostic_computes_expected_stats,
     ]
     for t in tests:
         assert t() is True

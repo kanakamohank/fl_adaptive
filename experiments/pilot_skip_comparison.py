@@ -173,6 +173,17 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
     total_cohort = total_verified + total_promoted
     observed_skip = (total_promoted / total_cohort) if total_cohort else 0.0
 
+    # Slurp the diagnostic that the pipeline dropped into experiment_summary.json.
+    # Reading it here (rather than recomputing) keeps the pilot's report in
+    # sync with what the pipeline actually persisted -- if the two ever
+    # diverge, that is a bug worth catching, not a difference to paper over.
+    diag = {}
+    try:
+        with open(Path(config.output_dir) / "experiment_summary.json") as f:
+            diag = json.load(f).get("noise_diagnostic", {}) or {}
+    except FileNotFoundError:
+        pass
+
     return {
         "arm": arm,
         "seed": seed,
@@ -187,6 +198,9 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         "total_promoted": total_promoted,
         "observed_skip_rate": observed_skip,
         "elapsed_seconds": time.time() - started,
+        # Noise diagnostic -- see PipelineResults._noise_diagnostic docstring.
+        # Absent (None) fields signal "no noise injected" or "no clients seen".
+        "noise_diagnostic": diag,
     }
 
 
@@ -300,12 +314,18 @@ def main():
     parser.add_argument("--data-alpha", type=float, default=0.3,
                         help="Dirichlet alpha, only used when --data-split=dirichlet. "
                              "Default 0.3 for continuity with tavs_vs_full_seeded.py.")
-    parser.add_argument("--noisy-client-fraction", type=float, default=0.2,
-                        help="Fraction of the client pool that gets noisy labels "
-                             "(default 0.2 -> 20 of 100 clients).")
-    parser.add_argument("--label-noise-rate", type=float, default=0.2,
+    parser.add_argument("--noisy-client-fraction", type=float, default=0.4,
+                        help="Fraction of the client pool that gets noisy labels. "
+                             "Default 0.4 (=40 of 100 clients) -- STRONGER than the "
+                             "0.2 pilot 2 setting, which produced only a +0.17pp "
+                             "TAVS-vs-random gap on late accuracy. This pilot tests "
+                             "whether the mechanism scales with the differentiation "
+                             "signal or hits a ceiling.")
+    parser.add_argument("--label-noise-rate", type=float, default=0.3,
                         help="Fraction of a noisy client's labels flipped to a "
-                             "wrong class (default 0.2).")
+                             "wrong class (default 0.3). Combined with "
+                             "--noisy-client-fraction=0.4 that is 12%% of total labels "
+                             "corrupted, up from 4%% in pilot 2.")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
     args = parser.parse_args()
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
@@ -367,6 +387,29 @@ def main():
         print("    per seed: " + "  ".join(
             f"s{k}:{v:+.3f}" for k, v in d["per_seed"].items()))
         print(f"    mean {d['mean']:+.4f}   ({signs})")
+
+    # Noise diagnostic: did TAVS put lower trust on the actually-noisy clients?
+    # Only meaningful for tavs_skip (full_verify has no scheduler decision and
+    # random_skip's trust EMA is not used by the policy). Reported per seed
+    # from experiment_summary.json's noise_diagnostic block.
+    tavs_rows = [r for r in rows if r["arm"] == "tavs_skip"]
+    if tavs_rows and any((r["noise_diagnostic"] or {}).get("noise_injected") for r in tavs_rows):
+        print("\n  MECHANISM DIAGNOSTIC (tavs_skip): did trust find the noisy clients?")
+        print(f"    {'seed':>4} {'n_noisy':>8} {'mean_trust_noisy':>18} "
+              f"{'mean_trust_clean':>18} {'gap(C-N)':>10}    {'bottom-k overlap'}")
+        for r in tavs_rows:
+            d = r["noise_diagnostic"] or {}
+            if not d.get("noise_injected"):
+                continue
+            mn = d.get("mean_trust_noisy", float("nan")) or float("nan")
+            mc = d.get("mean_trust_clean", float("nan")) or float("nan")
+            gap = d.get("trust_gap_clean_minus_noisy")
+            gap_s = f"{gap:+.4f}" if gap is not None else "   n/a"
+            ov = d.get("bottom_k_overlap_with_noisy", 0) or 0
+            ovp = d.get("bottom_k_overlap_pct", 0.0) or 0.0
+            print(f"    {r['seed']:>4} {d['n_noisy']:>8} "
+                  f"{mn:>18.4f} {mc:>18.4f} {gap_s:>10}    "
+                  f"{ov}/{d['n_noisy']} ({ovp:.0f}%)")
 
     print(f"\nPlot: {plot_path}")
     print(f"JSON: {out_dir / 'pilot_results.json'}")

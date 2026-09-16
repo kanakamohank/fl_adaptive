@@ -419,6 +419,66 @@ def test_random_skip_seed_reproducibility_and_independence():
     return True
 
 
+def test_cid_to_client_config_id_populated_and_stable():
+    """`aggregate_fit` records proxy.cid -> "honest_XX" from FitRes metrics.
+
+    The noise diagnostic joins on this map. If the map is stale or
+    incomplete, the pilot's "did TAVS trust the noisy clients less"
+    plot reads the wrong trust score for each config id and the
+    mechanism proof is silently corrupted. This test locks the contract:
+    every seen client is recorded on the first FitRes it produces, and
+    subsequent aggregate_fit calls with disjoint clients accumulate --
+    they do not drop or corrupt the earlier entries.
+    """
+    print("\nTesting cid_to_client_config_id accumulation across rounds...")
+    config = DummyConfig()
+    strategy = TavsEspStrategy(config=config)
+
+    # First round: clients 0-3.
+    proxies_r1 = [MockClientProxy(f"cid_{i}") for i in range(4)]
+    for c in proxies_r1:
+        strategy.scheduler.join_rounds[c.cid] = -100  # bypass ramp cap
+    results_r1 = [
+        (p, MockFitRes(
+            parameters=MockParameters([np.random.randn(150000) * 0.05]),
+            metrics={"client_id": f"honest_{i:02d}"},
+        ))
+        for i, p in enumerate(proxies_r1)
+    ]
+    strategy.aggregate_fit(1, results_r1, [])
+    assert len(strategy.cid_to_client_config_id) == 4
+    for i, p in enumerate(proxies_r1):
+        assert strategy.cid_to_client_config_id[p.cid] == f"honest_{i:02d}"
+
+    # Second round: clients 4-7 (disjoint from round 1). The round-1 mapping
+    # must still be present.
+    proxies_r2 = [MockClientProxy(f"cid_{i}") for i in range(4, 8)]
+    for c in proxies_r2:
+        strategy.scheduler.join_rounds[c.cid] = -100
+    results_r2 = [
+        (p, MockFitRes(
+            parameters=MockParameters([np.random.randn(150000) * 0.05]),
+            metrics={"client_id": f"honest_{i:02d}"},
+        ))
+        for i, p in zip((4, 5, 6, 7), proxies_r2)
+    ]
+    strategy.aggregate_fit(2, results_r2, [])
+    assert len(strategy.cid_to_client_config_id) == 8
+    for i, p in enumerate(proxies_r1):
+        assert strategy.cid_to_client_config_id[p.cid] == f"honest_{i:02d}", \
+            f"round-1 entry for {p.cid} lost after round 2"
+    for i, p in zip((4, 5, 6, 7), proxies_r2):
+        assert strategy.cid_to_client_config_id[p.cid] == f"honest_{i:02d}"
+
+    # Export includes the map.
+    state = strategy.export_complete_state()
+    assert "cid_to_client_config_id" in state
+    assert state["cid_to_client_config_id"] == strategy.cid_to_client_config_id
+    print(f"✓ map accumulated across rounds ({len(strategy.cid_to_client_config_id)} "
+          f"clients) and exported via export_complete_state")
+    return True
+
+
 def test_random_skip_is_verified_flag_matches_split():
     """The is_verified flag sent to each client matches its V/P assignment.
 
@@ -460,10 +520,11 @@ def main():
         rs3 = test_random_skip_rate_matches_target()
         rs4 = test_random_skip_never_leaves_v_empty()
         rs5 = test_random_skip_seed_reproducibility_and_independence()
-        rs6 = test_random_skip_is_verified_flag_matches_split()
+        rs6 = test_cid_to_client_config_id_populated_and_stable()
+        rs7 = test_random_skip_is_verified_flag_matches_split()
 
         if all([success1, success2, success3, success4, success5,
-                rs1, rs2, rs3, rs4, rs5, rs6]):
+                rs1, rs2, rs3, rs4, rs5, rs6, rs7]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
             return True
         else:

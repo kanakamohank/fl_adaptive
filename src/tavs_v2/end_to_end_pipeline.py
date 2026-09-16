@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import logging
+import math
 import os
 import random
 from typing import Dict, List, Tuple, Optional, Any, Callable
@@ -136,6 +137,19 @@ class PipelineResults:
     # Measured per-round verified/promoted counts from the scheduler. Defaulted
     # because it was added after every existing construction site.
     scheduling_history: List[Dict[str, int]] = field(default_factory=list)
+
+    # Noise-diagnostic block (populated by TAVSESPPipeline when label-noise
+    # injection is enabled; empty otherwise). Together these three fields let
+    # a downstream analysis answer "did TAVS assign lower trust to the actually
+    # -noisy clients?" without re-running the pipeline.
+    #   noisy_pool_indices     : int indices into the client pool that had
+    #                            their labels flipped
+    #   noisy_client_config_ids: the corresponding "honest_XX" strings
+    #   cid_to_client_config_id: Flower proxy.cid -> "honest_XX" bridge, needed
+    #                            because trust dict keys are Flower cids
+    noisy_pool_indices: List[int] = field(default_factory=list)
+    noisy_client_config_ids: List[str] = field(default_factory=list)
+    cid_to_client_config_id: Dict[str, str] = field(default_factory=dict)
 
 class TAVSESPPipeline:
     def __init__(self, config: PipelineConfig):
@@ -497,6 +511,7 @@ class TAVSESPPipeline:
             )
 
         trust_state = strategy.export_complete_state()
+        cid_map = trust_state.get("cid_to_client_config_id", {}) if isinstance(trust_state, dict) else {}
         trust_evolution, tier_evolution = {}, {}
 
         for analytics in strategy.round_analytics:
@@ -532,19 +547,43 @@ class TAVSESPPipeline:
 
         round_times = [analytics.projection_time_ms + analytics.detection_time_ms + analytics.aggregation_time_ms for analytics in strategy.round_analytics]
 
+        # Reconstruct which "honest_XX" ids were noisy from the pool-index
+        # list the setup phase recorded. Empty when no noise was injected --
+        # noisy_pool_indices then stays [] and downstream analysis knows no
+        # differentiation signal was applied.
+        pool_indices = list(getattr(self, "noisy_client_ids", []))
+        noisy_config_ids = []
+        for i in pool_indices:
+            if 0 <= i < len(self.client_configs):
+                noisy_config_ids.append(self.client_configs[i].client_id)
+
         return PipelineResults(
             config=self.config, server_metrics=[], server_losses=server_losses, server_accuracies=server_accuracies,
             final_trust_state=trust_state, trust_evolution=trust_evolution, tier_evolution=tier_evolution,
             byzantine_detection_history=byzantine_detection_history,
             scheduling_history=list(getattr(strategy, 'scheduling_history', [])),
             attack_success_rates={},
-            total_time_seconds=total_time, round_times=round_times, convergence_metrics=convergence_metrics, security_metrics=security_metrics
+            total_time_seconds=total_time, round_times=round_times,
+            convergence_metrics=convergence_metrics, security_metrics=security_metrics,
+            noisy_pool_indices=pool_indices,
+            noisy_client_config_ids=noisy_config_ids,
+            cid_to_client_config_id=dict(cid_map),
         )
 
     def _save_results(self, results: PipelineResults):
         results_file = self.output_dir / "pipeline_results.json"
         with open(results_file, 'w') as f:
             json.dump(asdict(results), f, indent=2, default=str)
+
+        # Distill noise-vs-trust into a small diagnostic block. Kept as its
+        # own top-level key so a downstream analysis (pilot script, plotter)
+        # never has to re-derive the noisy set or the cid->config_id join
+        # from the sprawling pipeline_results.json.
+        final_trust_by_cid = {
+            cid: scores[-1] if scores else 0.0
+            for cid, scores in results.trust_evolution.items()
+        }
+        noise_diag = self._noise_diagnostic(results, final_trust_by_cid)
 
         summary = {
             "experiment_config": asdict(results.config),
@@ -555,15 +594,143 @@ class TAVSESPPipeline:
                 "avg_round_time": np.mean(results.round_times) if results.round_times else None
             },
             "trust_summary": {
-                "final_trust_distribution": {
-                    client_id: scores[-1] if scores else 0.0 for client_id, scores in results.trust_evolution.items()
-                },
+                "final_trust_distribution": final_trust_by_cid,
                 "trust_convergence": "analyzed" if results.trust_evolution else "no_data"
             },
-            "security_summary": results.security_metrics
+            "security_summary": results.security_metrics,
+            "noise_diagnostic": noise_diag,
         }
         with open(self.output_dir / "experiment_summary.json", 'w') as f:
             json.dump(summary, f, indent=2, default=str)
+
+    @staticmethod
+    def _noise_diagnostic(results: "PipelineResults",
+                          final_trust_by_cid: Dict[str, float]) -> Dict[str, Any]:
+        """
+        Distill "did TAVS put lower trust on the noisy clients?" into a few
+        numbers. Populated only when label noise was actually injected;
+        otherwise the block records that fact so a null diagnostic never
+        looks like a hidden failure.
+        """
+        noisy_ids = set(results.noisy_client_config_ids)
+        # Arm marker: without it a downstream reader can read the block from
+        # random_skip's / full_verify's summary and mistake BVD's raw signal
+        # for scheduler behaviour. tavs_skip is the only arm that USES trust
+        # for policy; the other arms still compute trust but ignore it.
+        strategy_name = getattr(results.config.strategy_class, "__name__",
+                                "TavsEspStrategy") if results.config.strategy_class \
+                        else "TavsEspStrategy"
+        # Anything whose name starts with a known non-trust-driven arm is
+        # marked non-meaningful. New subclasses fall through to "meaningful"
+        # unless explicitly flagged.
+        non_trust_arms = ("FullVerificationStrategy", "RandomSkipStrategy")
+        meaningful = not any(strategy_name.startswith(a) for a in non_trust_arms)
+
+        if not noisy_ids:
+            return {"noise_injected": False, "n_noisy": 0,
+                    "strategy_class": strategy_name,
+                    "diagnostic_meaningful": meaningful}
+
+        # Rebuild config-id -> trust by walking every observed proxy.cid
+        # through the bridge. Clients that were never sampled do not appear
+        # in trust_evolution, so their config-id is legitimately absent.
+        cid_map = results.cid_to_client_config_id or {}
+        trust_by_config_id: Dict[str, float] = {}
+        for cid, cfg in cid_map.items():
+            if cid in final_trust_by_cid:
+                trust_by_config_id[cfg] = final_trust_by_cid[cid]
+
+        noisy_trusts = [trust_by_config_id[c] for c in noisy_ids if c in trust_by_config_id]
+        clean_trusts = [t for cfg, t in trust_by_config_id.items() if cfg not in noisy_ids]
+
+        # np.mean over an empty list returns NaN with a warning; NaN also
+        # slips through when a client's trust score is NaN for any reason
+        # (rare, but possible during degenerate rounds). json.dumps then
+        # emits literal "NaN", which is invalid JSON and breaks strict
+        # readers. Guard both cases -- return None instead of NaN.
+        def _mean(xs):
+            # Skip non-finite entries rather than propagating them; a single
+            # NaN trust score would otherwise poison the whole group's mean
+            # and emit invalid JSON. If every entry is non-finite return None,
+            # which is a valid JSON null.
+            if not xs:
+                return None
+            finite = [float(x) for x in xs if math.isfinite(x)]
+            if not finite:
+                return None
+            return float(np.mean(finite))
+        def _sorted(xs):
+            return sorted(float(x) for x in xs if math.isfinite(x))
+
+        # Rank-based overlap. If TAVS's trust ranking is informative, the
+        # noisy clients cluster at the bottom of the ranking; we count how
+        # many of the k lowest-trust clients (k = |noisy|) were actually noisy.
+        # This is monotone-invariant to the exact trust scale, so it is not
+        # perturbed by threshold changes.
+        ranked = sorted(trust_by_config_id.items(), key=lambda kv: kv[1])
+        k = len(noisy_ids)
+        bottom_k = {cfg for cfg, _t in ranked[:k]}
+        overlap = len(bottom_k & noisy_ids)
+
+        # Guarded overlap: restrict the ranking to clients that were verified
+        # AT LEAST `min_verifications` times, so single-look noise doesn't
+        # dominate the bottom. n_verifications is the length of the trust
+        # trajectory in trust_evolution, which appends once per round the
+        # client was seen. Threshold set to 2 -- exactly the minimum needed
+        # for the EMA to have moved off its initial value; a client sampled
+        # exactly once is measured on ONE BVD outcome, which is noise not
+        # signal at tau_z=5. At 20-round pilots with 20/round on 100 clients
+        # this typically keeps ~60-80 clients; smaller pools stay unchanged.
+        traj_len = {
+            cfg: len(results.trust_evolution.get(cid, []))
+            for cid, cfg in cid_map.items()
+        }
+        min_verifs = 2
+        eligible = {cfg for cfg, t in trust_by_config_id.items()
+                    if traj_len.get(cfg, 0) >= min_verifs}
+        # k_g = number of noisy clients that are also eligible; overlap
+        # measured only among those. This is the cleaner mechanism metric
+        # for undertrained runs and is reported alongside the raw one.
+        eligible_noisy = eligible & noisy_ids
+        k_g = len(eligible_noisy)
+        ranked_g = sorted(
+            [(c, t) for c, t in trust_by_config_id.items() if c in eligible],
+            key=lambda kv: kv[1],
+        )
+        bottom_kg = {cfg for cfg, _t in ranked_g[:k_g]}
+        overlap_g = len(bottom_kg & eligible_noisy)
+
+        return {
+            "noise_injected": True,
+            "n_noisy": len(noisy_ids),
+            "n_observed_noisy_with_trust": len(noisy_trusts),
+            "n_observed_clean_with_trust": len(clean_trusts),
+            "strategy_class": strategy_name,
+            "diagnostic_meaningful": meaningful,
+            "mean_trust_noisy": _mean(noisy_trusts),
+            "mean_trust_clean": _mean(clean_trusts),
+            # Positive = noisy clients have LOWER trust than clean (mechanism working).
+            "trust_gap_clean_minus_noisy": (
+                _mean(clean_trusts) - _mean(noisy_trusts)
+                if (noisy_trusts and clean_trusts and
+                    _mean(noisy_trusts) is not None and
+                    _mean(clean_trusts) is not None) else None
+            ),
+            "bottom_k_overlap_with_noisy": overlap,
+            "bottom_k_overlap_pct": (100.0 * overlap / k) if k else None,
+            # Appearance-guarded variant. min_verifications caps single-look
+            # noise, which at pool=100 & 20 rounds otherwise dominates the
+            # raw bottom-k. Keep both so the raw one stays comparable to
+            # any downstream analyses that already used it.
+            "bottom_k_min_verifications": min_verifs,
+            "n_eligible_noisy_for_guarded_overlap": k_g,
+            "bottom_k_guarded_overlap_with_noisy": overlap_g,
+            "bottom_k_guarded_overlap_pct": (100.0 * overlap_g / k_g) if k_g else None,
+            # Full sorted trust score lists per group, so the plotter and
+            # any future re-analysis do not need pipeline_results.json.
+            "sorted_trust_noisy": _sorted(noisy_trusts),
+            "sorted_trust_clean": _sorted(clean_trusts),
+        }
 
 
 def run_tavs_esp_experiment(config: PipelineConfig) -> PipelineResults:
