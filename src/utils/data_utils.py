@@ -193,3 +193,96 @@ def create_dataloaders(client_datasets: List[Subset], batch_size: int = 32,
     """Create DataLoaders for client datasets."""
     return [DataLoader(ds, batch_size=batch_size, shuffle=shuffle)
             for ds in client_datasets]
+
+
+class NoisyLabelSubset(Dataset):
+    """
+    Wrap a client's dataset so a fixed fraction of its labels are flipped to
+    a wrong class. Used to simulate an honest-but-noisy client for the pilot
+    that asks whether TAVS's trust signal can identify low-quality clients
+    at all.
+
+    Contract:
+      - noise_fraction of THIS client's samples get a corrupted label; the
+        rest are returned untouched. Corrupting per-client, not per-sample,
+        so a client's noise profile stays fixed across epochs and rounds --
+        that is what BVD would have to spot.
+      - Which samples are corrupted is drawn deterministically from `seed`,
+        so re-running the same experiment produces the same noisy set. A
+        run without this determinism would move the label noise across
+        seeds and confound the "does trust identify the noisy client"
+        question with dataset-shuffle luck.
+      - The corrupted label is any class other than the true one, drawn
+        uniformly. That is the classical symmetric-noise regime; it is not
+        pair-flip and it is not adversarial.
+      - The wrapper never mutates the underlying dataset. Two clients that
+        share a base dataset are independent: their noise decisions do not
+        collide.
+    """
+
+    def __init__(self, base: Dataset, noise_fraction: float,
+                 num_classes: int = 10, seed: int = 0):
+        if not (0.0 <= noise_fraction <= 1.0):
+            raise ValueError(f"noise_fraction must be in [0, 1]; got {noise_fraction}")
+        if num_classes < 2:
+            raise ValueError(f"num_classes must be >= 2; got {num_classes}")
+
+        self.base = base
+        self.num_classes = num_classes
+
+        n = len(base)
+        n_noisy = int(round(noise_fraction * n))
+
+        # Draw the noisy index set and the replacement labels ahead of time.
+        # Doing it in __getitem__ would need re-seeded randomness per call to
+        # keep the same sample corrupted every epoch; caching once is simpler
+        # and cheaper.
+        rng = np.random.default_rng(seed)
+        noisy_indices = rng.choice(n, size=n_noisy, replace=False) if n_noisy else np.array([], dtype=np.int64)
+        # Pre-sample the WRONG class for each noisy index. Draw a random class
+        # in [0, num_classes-1) and shift up if it collides with the true class;
+        # this yields a uniform draw over the (num_classes - 1) wrong labels
+        # without a rejection-sampling loop.
+        self._noisy = {}
+        for idx in noisy_indices:
+            true_label = self._raw_label(int(idx))
+            wrong = int(rng.integers(0, num_classes - 1))
+            if wrong >= true_label:
+                wrong += 1
+            self._noisy[int(idx)] = wrong
+
+    def _raw_label(self, idx: int) -> int:
+        # Read the label WITHOUT running the base's transforms.
+        #
+        # Going through self.base[idx] would call CIFAR-10's __getitem__, which
+        # runs RandomCrop + RandomHorizontalFlip. Each of those consumes torch's
+        # global RNG, so with 20 noisy clients * ~500 samples this used to
+        # burn ~10,000 draws before model init and quietly shift both model
+        # weights and DataLoader shuffling relative to a no-noise run at the
+        # same seed. The label itself does not need any of that.
+        #
+        # torchvision datasets expose the raw targets array; a Subset over one
+        # forwards through .dataset. Fall back to __getitem__ only for
+        # datasets that expose no such handle (e.g. the DummyDataset in tests
+        # that has no .targets on the underlying object).
+        base = self.base
+        underlying = getattr(base, "dataset", None)
+        indices = getattr(base, "indices", None)
+        if underlying is not None and indices is not None:
+            for attr in ("targets", "labels"):
+                if hasattr(underlying, attr):
+                    return int(getattr(underlying, attr)[int(indices[idx])])
+        return int(base[idx][1])
+
+    def __len__(self) -> int:
+        return len(self.base)
+
+    def __getitem__(self, idx):
+        sample, label = self.base[idx]
+        if idx in self._noisy:
+            label = self._noisy[idx]
+        return sample, label
+
+    @property
+    def num_noisy(self) -> int:
+        return len(self._noisy)

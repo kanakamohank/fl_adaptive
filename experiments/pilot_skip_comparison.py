@@ -50,6 +50,32 @@ from src.tavs_v2.tavs_esp_strategy import FullVerificationStrategy, RandomSkipSt
 logger = logging.getLogger(__name__)
 
 
+def _config_tag(args) -> str:
+    """Directory component encoding the DATA-side config, so runs at different
+    split / noise settings do not collide.
+
+    Encodes split mode, non-Dirichlet-alpha (only when the split uses it),
+    and label-noise knobs. num_classes is folded into the tag only when it
+    departs from the CIFAR-10 default of 10 so future CIFAR-100 runs do not
+    silently share a directory with CIFAR-10 runs at the same noise config.
+    """
+    split = getattr(args, "data_split", "dirichlet")
+    parts = [f"split-{split}"]
+    if split == "dirichlet":
+        parts.append(f"a{args.data_alpha:g}")
+    if args.noisy_client_fraction > 0 and args.label_noise_rate > 0:
+        nf = int(round(args.noisy_client_fraction * 100))
+        nr = int(round(args.label_noise_rate * 100))
+        parts.append(f"noiseC{nf:02d}_R{nr:02d}")
+        # Only tag the class count when it deviates from the default so
+        # existing CIFAR-10 runs keep their paths.
+        if getattr(args, "label_noise_num_classes", 10) != 10:
+            parts.append(f"K{args.label_noise_num_classes}")
+    else:
+        parts.append("clean")
+    return "_".join(parts)
+
+
 def build_arm(name: str, args, seed: int, skip_rate: float):
     """Return (strategy_class, extra_kwargs) for the requested arm.
 
@@ -119,9 +145,19 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         byzantine_fraction=0.0,   # honest only
         tavs_config=tavs_config,
         strategy_class=strategy_class,
+        data_split=args.data_split,
         data_alpha=args.data_alpha,
+        # Label noise on a subset of clients: the only source of client-level
+        # DIFFERENTIATION in this otherwise-honest pilot. Without it TAVS's
+        # trust EMA has no signal to converge on (see the r20/skip49 result).
+        label_noise_client_fraction=args.noisy_client_fraction,
+        label_noise_rate=args.label_noise_rate,
         seed=seed,
+        # Encode the label-noise config in the path so IID+noise runs do not
+        # overwrite the earlier no-noise r20/skip49 results the analysis
+        # already cites.
         output_dir=str(Path(args.results_dir) / f"r{args.rounds}" /
+                       _config_tag(args) /
                        f"skip{int(skip_rate * 100):02d}" /
                        f"{arm}_seed{seed}"),
     )
@@ -157,11 +193,15 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
 def make_plot(rows, args, out_path, matched_rate):
     """Two panels: accuracy trajectory (headline) and observed skip rate."""
     fig, axes = plt.subplots(1, 2, figsize=(13, 5))
+    noise_tag = ("clean" if args.noisy_client_fraction * args.label_noise_rate == 0
+                 else f"{int(args.noisy_client_fraction*100)}% clients @ "
+                      f"{int(args.label_noise_rate*100)}% label noise")
     fig.suptitle(
-        f"Pilot: trust-based vs random skip at matched rate "
-        f"({len(args.seed_list)} seeds, {args.rounds} rounds, "
-        f"CIFAR-10 alpha={args.data_alpha}, matched skip={matched_rate:.2f})",
-        fontsize=13, fontweight="bold",
+        f"Pilot: trust-based vs random skip at matched rate\n"
+        f"{len(args.seed_list)} seeds, {args.rounds} rounds, "
+        f"CIFAR-10 alpha={args.data_alpha}, {noise_tag}, "
+        f"matched skip={matched_rate:.2f}",
+        fontsize=12, fontweight="bold",
     )
 
     # Panel 1: accuracy per round.
@@ -247,8 +287,25 @@ def main():
                              "read its observed rate, RandomSkip second at that rate. "
                              "The one-pass fixed-rate variant is available for "
                              "sensitivity checks and is not the matched comparison.")
+    parser.add_argument("--data-split", default="iid", choices=("iid", "dirichlet"),
+                        help="Client split. 'iid' (default) shards CIFAR-10 evenly "
+                             "so every client gets len(dataset)/num_clients samples "
+                             "with no class skew -- required for the label-noise "
+                             "pilot, because label noise is the only client-level "
+                             "differentiation signal and Dirichlet at num_clients=100 "
+                             "leaves clients with ~50 samples each (some down to a "
+                             "1-sample fallback where 20%% noise rounds to zero). "
+                             "'dirichlet' uses --data-alpha and is available for "
+                             "sensitivity checks.")
     parser.add_argument("--data-alpha", type=float, default=0.3,
-                        help="Dirichlet alpha for non-IID split (default 0.3).")
+                        help="Dirichlet alpha, only used when --data-split=dirichlet. "
+                             "Default 0.3 for continuity with tavs_vs_full_seeded.py.")
+    parser.add_argument("--noisy-client-fraction", type=float, default=0.2,
+                        help="Fraction of the client pool that gets noisy labels "
+                             "(default 0.2 -> 20 of 100 clients).")
+    parser.add_argument("--label-noise-rate", type=float, default=0.2,
+                        help="Fraction of a noisy client's labels flipped to a "
+                             "wrong class (default 0.2).")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
     args = parser.parse_args()
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
@@ -274,7 +331,8 @@ def main():
     for seed in args.seed_list:
         rows.append(run_one("random_skip", seed, args, skip_rate=matched_rate))
     # Path uses the matched rate so different runs do not collide.
-    out_dir = Path(args.results_dir) / f"r{args.rounds}" / f"skip{int(matched_rate*100):02d}"
+    out_dir = (Path(args.results_dir) / f"r{args.rounds}" / _config_tag(args)
+               / f"skip{int(matched_rate*100):02d}")
     out_dir.mkdir(parents=True, exist_ok=True)
     (out_dir / "pilot_results.json").write_text(json.dumps(
         {"config": {k: v for k, v in vars(args).items() if k != "seed_list"},

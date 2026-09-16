@@ -19,7 +19,9 @@ from flwr.simulation import run_simulation
 from .tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
 from src.clients.tavs_flower_client import TAVSFlowerClient, TAVSClientConfig, create_tavs_flower_client
 from src.core.models import ModelStructure, get_model
-from src.utils.data_utils import load_cifar10, create_dirichlet_splits
+from src.utils.data_utils import (
+    load_cifar10, create_dirichlet_splits, create_iid_splits, NoisyLabelSubset,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +35,37 @@ class PipelineConfig:
     model_type: str = "cifar_cnn"
     dataset: str = "cifar10"
     data_alpha: float = 0.3
+    # How to split the training set across clients.
+    #
+    # "dirichlet" (default, existing behaviour) uses `create_dirichlet_splits`,
+    # which allocates each class to clients in proportion to a Dirichlet(alpha)
+    # draw. Its formula divides class_size by num_clients, so at pool sizes
+    # much larger than the split was originally designed for (num_clients=100
+    # on CIFAR-10) clients get ~50 samples instead of ~500 and late-drawn
+    # clients can fall to a 1-sample emergency fallback. That is fine for the
+    # non-IID studies the split was built for but breaks label-noise pilots
+    # where a 1-sample client has zero noisy samples (0.2 * 1 rounds to 0).
+    #
+    # "iid" uses `create_iid_splits`, which shards the training set evenly --
+    # exactly len(dataset)/num_clients samples per client. It ignores
+    # data_alpha. Choose this when the study needs a clean per-client budget
+    # (label-noise pilots, most differentiation-signal studies).
+    data_split: str = "dirichlet"
+
+    # Label noise (honest-but-noisy clients).
+    #
+    # A subset of clients gets a fraction of their local labels flipped to a
+    # wrong class. This is the only source of client-level DIFFERENTIATION we
+    # inject on an otherwise-honest pool -- without it the trust EMA has
+    # nothing but BVD's false-positive noise to converge on, which is exactly
+    # what the first pilot measured. Two knobs, on purpose:
+    #   * label_noise_client_fraction : how many clients are noisy
+    #   * label_noise_rate           : how noisy each of them is
+    # Zero on both = no noise (the previous behaviour).
+    label_noise_client_fraction: float = 0.0
+    label_noise_rate: float = 0.0
+    # Which class-set to draw wrong labels from. Defaults to 10 (CIFAR-10).
+    label_noise_num_classes: int = 10
 
     tavs_config: TavsEspConfig = None
 
@@ -142,15 +175,66 @@ class TAVSESPPipeline:
         else:
             raise ValueError(f"Unsupported dataset: {self.config.dataset}")
 
-        # create_dirichlet_splits resets the global numpy seed internally, so the
+        # Both split helpers reset the global numpy seed internally, so the
         # run seed must be passed explicitly or every run gets the same split.
-        self.client_datasets = create_dirichlet_splits(
-            train_dataset, num_clients=self.config.num_clients,
-            alpha=self.config.data_alpha, seed=self.config.seed
-        )
+        if self.config.data_split == "iid":
+            self.client_datasets = create_iid_splits(
+                train_dataset, num_clients=self.config.num_clients,
+                seed=self.config.seed,
+            )
+        elif self.config.data_split == "dirichlet":
+            self.client_datasets = create_dirichlet_splits(
+                train_dataset, num_clients=self.config.num_clients,
+                alpha=self.config.data_alpha, seed=self.config.seed,
+            )
+        else:
+            raise ValueError(f"unknown data_split: {self.config.data_split}; "
+                             f"expected 'dirichlet' or 'iid'")
         # Restore the run seed: the split helper left the global RNG at its own
         # state, which would otherwise be identical for every seed value.
         np.random.seed(self.config.seed)
+
+        # Inject label noise on a FIXED subset of clients, deterministic in
+        # `seed`. Two rules keep this comparable across arms:
+        #
+        #   1. Which clients are noisy is drawn per-run from `seed`, so all
+        #      three arms of one seed see the same noisy client set. Arms
+        #      cannot beat each other by getting different noisy pools.
+        #   2. The noise wrapper is seeded by (seed, client_id), so a client
+        #      that was noisy at seed=1 has the SAME noisy sample set every
+        #      time the pilot re-runs at seed=1. Rerunning does not shuffle
+        #      the noise around.
+        if (self.config.label_noise_client_fraction > 0.0
+                and self.config.label_noise_rate > 0.0):
+            num_noisy = int(round(self.config.label_noise_client_fraction
+                                  * self.config.num_clients))
+            if num_noisy > 0:
+                # Draw the noisy client index set from a run-seeded generator,
+                # not the global RNG, so a later helper's reseeding cannot
+                # move the noisy set silently.
+                pick_rng = np.random.default_rng(self.config.seed)
+                self.noisy_client_ids = sorted(pick_rng.choice(
+                    self.config.num_clients, size=num_noisy, replace=False).tolist())
+                for cid in self.noisy_client_ids:
+                    self.client_datasets[cid] = NoisyLabelSubset(
+                        base=self.client_datasets[cid],
+                        noise_fraction=self.config.label_noise_rate,
+                        num_classes=self.config.label_noise_num_classes,
+                        # Per-client seed derived from run seed + client id, so
+                        # different noisy clients corrupt DIFFERENT samples,
+                        # and each client's corrupted set is stable across arms.
+                        seed=self.config.seed * 10_000 + cid,
+                    )
+                logger.info(
+                    f"Label noise injected: {num_noisy}/{self.config.num_clients} "
+                    f"clients at rate {self.config.label_noise_rate:.2f} "
+                    f"(client ids: {self.noisy_client_ids[:8]}"
+                    f"{'...' if num_noisy > 8 else ''})"
+                )
+            else:
+                self.noisy_client_ids = []
+        else:
+            self.noisy_client_ids = []
 
         model = get_model(self.config.model_type, num_classes=10)
         if hasattr(model, 'structure'):
