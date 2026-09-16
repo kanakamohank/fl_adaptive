@@ -122,7 +122,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         data_alpha=args.data_alpha,
         seed=seed,
         output_dir=str(Path(args.results_dir) / f"r{args.rounds}" /
-                       f"skip{int(args.skip_rate * 100):02d}" /
+                       f"skip{int(skip_rate * 100):02d}" /
                        f"{arm}_seed{seed}"),
     )
 
