@@ -90,18 +90,25 @@ def build_arm(name: str, args, seed: int, skip_rate: float):
         return FullVerificationStrategy, {}
     if name == "tavs_skip":
         return None, {}   # None -> pipeline uses TavsEspStrategy directly
+    if name == "tavs_skip_noweight":
+        # Ablation arm: TAVS scheduling + BVD, but aggregation weights become
+        # num_examples only (no trust, no behaviour score). Signal is set on
+        # the TavsEspConfig, not here -- see run_one.
+        return None, {}
     if name == "random_skip":
         return RandomSkipStrategy, {"skip_rate": skip_rate, "skip_seed": seed}
     raise ValueError(f"unknown arm: {name}")
 
 
-ARM_ORDER = ["full_verify", "tavs_skip", "random_skip"]
-ARM_COLOURS = {"full_verify": "#d95f02",
-               "tavs_skip":   "#1b9e77",
-               "random_skip": "#7570b3"}
-ARM_NAMES = {"full_verify": "Full verify",
-             "tavs_skip":   "TAVS skip",
-             "random_skip": "Random skip"}
+ARM_ORDER = ["full_verify", "tavs_skip", "tavs_skip_noweight", "random_skip"]
+ARM_COLOURS = {"full_verify":        "#d95f02",
+               "tavs_skip":          "#1b9e77",
+               "tavs_skip_noweight": "#66a61e",
+               "random_skip":        "#7570b3"}
+ARM_NAMES = {"full_verify":        "Full verify",
+             "tavs_skip":          "TAVS skip",
+             "tavs_skip_noweight": "TAVS (no trust weighting)",
+             "random_skip":        "Random skip"}
 
 
 def run_one(arm: str, seed: int, args, skip_rate: float):
@@ -118,6 +125,10 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         clip_promoted_updates=True, promoted_clip_factor=2.0,
         cosine_filter_promoted=False,   # off by default here, matching that harness
         enable_outlier_detection=True,
+        # Only the tavs_skip_noweight ablation arm flips this on. Everything
+        # else is identical to tavs_skip, so any accuracy delta between the
+        # two arms is attributable to aggregation weighting alone.
+        disable_trust_weighted_aggregation=(arm == "tavs_skip_noweight"),
     )
 
     # PipelineConfig takes a strategy CLASS, not an instance, and the pipeline
@@ -338,20 +349,35 @@ def main():
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")
 
-    # Two-pass to keep the comparison honest: run full_verify + tavs_skip first,
-    # measure TAVS's actual observed skip rate, then run random_skip at that rate.
-    # The one-pass fixed-rate mode is preserved via --skip-rate for sensitivity
-    # checks but is not a matched-rate comparison.
+    # Two-pass to keep the comparison honest. First pass: every arm that
+    # produces its OWN skip rate (full_verify skips 0%; both tavs_skip and
+    # tavs_skip_noweight use TAVS scheduling and share dynamics). Read TAVS's
+    # observed rate, then run random_skip at that rate in pass two.
+    #
+    # The one-pass fixed-rate mode is preserved via --skip-rate for
+    # sensitivity checks but is not a matched-rate comparison.
     rows = []
     for seed in args.seed_list:
-        for arm in ("full_verify", "tavs_skip"):
+        for arm in ("full_verify", "tavs_skip", "tavs_skip_noweight"):
             rows.append(run_one(arm, seed, args, skip_rate=0.0))
 
     tavs_rates = [r["observed_skip_rate"] for r in rows if r["arm"] == "tavs_skip"]
+    nowt_rates = [r["observed_skip_rate"] for r in rows if r["arm"] == "tavs_skip_noweight"]
     matched_rate = (args.skip_rate if args.skip_rate is not None
                     else float(np.mean(tavs_rates)))
-    print(f"\n[matched-rate] TAVS observed skip = {tavs_rates} "
-          f"-> random_skip target = {matched_rate:.3f}")
+    # Log both scheduler-produced rates side by side. If they differ by more
+    # than ~1pp, matching random_skip to the tavs_skip rate under-credits or
+    # over-credits the noweight arm, and a second random_skip at the noweight
+    # rate is worth running. Reported here so the drift is visible in the log.
+    if nowt_rates:
+        drift = abs(float(np.mean(nowt_rates)) - float(np.mean(tavs_rates)))
+        print(f"\n[matched-rate] TAVS observed skip = {tavs_rates}")
+        print(f"[matched-rate] noweight observed skip = {nowt_rates}")
+        print(f"[matched-rate] mean drift (noweight - tavs) = {drift:+.3f}   "
+              f"-> random_skip target = {matched_rate:.3f}  (matched to tavs_skip)")
+    else:
+        print(f"\n[matched-rate] TAVS observed skip = {tavs_rates} "
+              f"-> random_skip target = {matched_rate:.3f}")
 
     for seed in args.seed_list:
         rows.append(run_one("random_skip", seed, args, skip_rate=matched_rate))
@@ -385,7 +411,12 @@ def main():
     # Paired deltas -- the actual test the pilot is trying to run.
     for a, b in (("tavs_skip", "full_verify"),
                  ("random_skip", "full_verify"),
-                 ("tavs_skip", "random_skip")):
+                 ("tavs_skip", "random_skip"),
+                 # Ablation pairs: locate the mechanism.
+                 #   noweight - tavs   : cost of dropping trust weighting
+                 #   noweight - random : does noweight still beat random?
+                 ("tavs_skip_noweight", "tavs_skip"),
+                 ("tavs_skip_noweight", "random_skip")):
         d = paired_delta(rows, args.seed_list, "late_accuracy", a, b)
         signs = f"{max(d['n_negative'], d['n_positive'])}/{len(args.seed_list)} same-sign"
         print(f"\n  {a} - {b}  late-acc delta")

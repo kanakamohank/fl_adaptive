@@ -419,6 +419,83 @@ def test_random_skip_seed_reproducibility_and_independence():
     return True
 
 
+def test_disable_trust_weighted_aggregation_flag_changes_aggregate():
+    """
+    The `disable_trust_weighted_aggregation` config flag must actually change
+    the aggregation. Without a functional check, a rename or a subtle
+    condition typo could turn the ablation into a silent no-op and every
+    conclusion drawn from a 4-arm pilot (which comparison arm was which)
+    would be wrong in the same direction.
+
+    We build two identical strategies -- same clients, same updates, same
+    scheduler state -- and flip only the flag. If the resulting aggregate
+    is byte-for-byte identical, the flag doesn't do anything. It must
+    differ for the ablation to mean what the pilot script says it means.
+    """
+    print("\nTesting disable_trust_weighted_aggregation flag actually changes aggregate...")
+
+    def one_run(disable_flag: bool):
+        cfg = DummyConfig()
+        cfg.disable_trust_weighted_aggregation = disable_flag
+        # gamma_budget=0.35 in DummyConfig is fine, but the client trust
+        # scores below force a mix of V and P. is_stale checks
+        # last_verified_round; without one set the scheduler routes every
+        # client into V as "never verified" (fresh client can't skip on no
+        # evidence) and both branches collapse to the same identical-weight
+        # case. Setting last_verified_round to a recent past round lets
+        # theta_low / theta_high do their job.
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(6)]
+        for i, p in enumerate(proxies):
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25 + 0.1 * i
+            # Non-trivial clean streak so Tier-2/3 gating is meaningful.
+            strategy.scheduler.clean_streaks[p.cid] = 3
+            # Recent enough that neither staleness cap fires.
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+
+        # Heterogeneous updates so BVD produces non-uniform behaviour_scores
+        # in the "flag on" branch. Without this, all clients score 1.0 and
+        # both branches collapse to identical num_examples weights.
+        rng = np.random.RandomState(0)
+        results = []
+        for i, p in enumerate(proxies):
+            # Two clients at 50x scale trigger BVD's outlier branch and
+            # receive lower behaviour scores when trust weighting is on;
+            # the same clients receive num_examples-only weight when off.
+            scale = 50.0 if i < 2 else 0.1
+            arr = (rng.randn(150000) * scale).astype(np.float32)
+            results.append((p, MockFitRes(
+                parameters=MockParameters([arr]),
+                metrics={"is_verified": True, "client_id": f"honest_{i:02d}"},
+            )))
+
+        params, _metrics = strategy.aggregate_fit(1, results, [])
+        return mock_parameters_to_ndarrays(params)
+
+    a = one_run(disable_flag=False)[0].ravel()
+    b = one_run(disable_flag=True)[0].ravel()
+    diff = float(np.abs(a - b).sum())
+    assert diff > 1e-4, (
+        f"aggregate is unchanged when the flag flips (L1 diff={diff:.2e}) -- "
+        f"the ablation is a no-op and the pilot would compare an arm to itself"
+    )
+    print(f"✓ flag changes the aggregate (L1 diff = {diff:.4f})")
+
+    # Default TavsEspConfig must have the flag OFF. Any silent flip in a
+    # future refactor would rewrite every non-ablation experiment's
+    # aggregation semantics without touching a single call site.
+    from src.tavs_v2 import TavsEspConfig
+    default = TavsEspConfig()
+    assert getattr(default, "disable_trust_weighted_aggregation", None) is False, (
+        "TavsEspConfig() default has changed -- every existing experiment "
+        "silently switches to unweighted aggregation"
+    )
+    print("✓ TavsEspConfig() default keeps trust-weighting ON")
+    return True
+
+
 def test_cid_to_client_config_id_populated_and_stable():
     """`aggregate_fit` records proxy.cid -> "honest_XX" from FitRes metrics.
 
@@ -522,9 +599,10 @@ def main():
         rs5 = test_random_skip_seed_reproducibility_and_independence()
         rs6 = test_cid_to_client_config_id_populated_and_stable()
         rs7 = test_random_skip_is_verified_flag_matches_split()
+        rs8 = test_disable_trust_weighted_aggregation_flag_changes_aggregate()
 
         if all([success1, success2, success3, success4, success5,
-                rs1, rs2, rs3, rs4, rs5, rs6, rs7]):
+                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
             return True
         else:
