@@ -82,6 +82,36 @@ class TavsEspConfig:
     # is nothing for the fallback to rescue.
     soft_outlier_weighting: bool = True
 
+    # Ablation switch: drop trust/behaviour terms from aggregation weights.
+    #
+    # TAVS's usual aggregation weight is (behaviour_score or bayesian_posterior
+    # of trust) * num_examples. Setting this True replaces the first factor
+    # with 1.0 for every included client, giving pure FedAvg weighting on
+    # num_examples alone.
+    #
+    # What this actually tests, precisely: in a benign run where
+    # enable_outlier_detection=True and no attackers are present, BVD scores
+    # nearly every verified client at behaviour_score ~ 1.0, so the verified
+    # branch is largely unchanged by this flag. The dominant effect is on the
+    # PROMOTED branch, where the flag replaces bayesian_posterior_weight of
+    # trust with 1.0 -- i.e. it stops downweighting unverified clients whose
+    # trust EMA is low. The flag is still named for the general property
+    # (trust-weighted aggregation off), but the empirical mechanism it
+    # isolates in this pilot is "Bayesian downweight on promoted clients."
+    #
+    # The point of this switch is to answer ONE question the n=10 pilot
+    # opened: TAVS beats random-skip by +0.59pp on late accuracy but its
+    # trust ordering is no better than random's (rank-biserial mean ~0 for
+    # both). So the win is not "trust identifies noisy clients." Candidates
+    # for what IS driving the win: (a) the Bayesian downweight on promoted
+    # clients (this knob), (b) staleness caps, (c) adaptive skip rate,
+    # (d) tier structure. Turning (a) off while leaving everything else
+    # intact tests (a) in isolation ONLY at round 1; from round 2 onwards the
+    # aggregate diverges between arms, so late-round trust EMAs also diverge
+    # -- interpret "same scheduler decisions" as strict only at round 1.
+    # Leave OFF for every non-ablation experiment.
+    disable_trust_weighted_aggregation: bool = False
+
     # Master switch for BVD outlier detection.
     #
     # Off means every verified client is treated as an inlier and scores 1.0.
@@ -514,24 +544,42 @@ class TavsEspStrategy(Strategy):
         # The trust factor is retained as a multiplier, so TAVS still discounts
         # unverified clients; it now discounts them relative to a correct base
         # weight instead of replacing it.
-        promoted_weights = {
-            cid: self.scheduler.bayesian_posterior_weight(
-                self.scheduler.get_effective_trust(cid, server_round)
-            ) * num_examples.get(cid, 1)
-            for cid in P_ids
-        }
+        # Ablation switch. When on, every included client gets weight
+        # num_examples only (pure FedAvg) -- no trust, no behaviour score.
+        # Turning this on and leaving everything else intact tests whether
+        # TAVS's win over random-skip comes from trust-weighted aggregation
+        # or from something else (staleness caps, skip schedule, tier
+        # structure). Cosine gate and magnitude clip still run because they
+        # act on updates before this line and are inherited by random-skip.
+        disable_trust_agg = getattr(self.config,
+                                    "disable_trust_weighted_aggregation", False)
+
+        if disable_trust_agg:
+            promoted_weights = {cid: num_examples.get(cid, 1) for cid in P_ids}
+        else:
+            promoted_weights = {
+                cid: self.scheduler.bayesian_posterior_weight(
+                    self.scheduler.get_effective_trust(cid, server_round)
+                ) * num_examples.get(cid, 1)
+                for cid in P_ids
+            }
 
         # The 0.05 floor guarantees a client the detector accepted is never
         # silenced by a marginal score. It is deliberately NOT applied to a
         # flagged client: an update far enough out must be able to reach zero
         # weight, or soft weighting would leave every attacker a residual voice.
         soft = getattr(self.config, "soft_outlier_weighting", True)
-        verified_weights = {
-            cid: (float(behavior_scores.get(cid, 0.0))
-                  if (soft and cid in outliers)
-                  else max(0.05, float(behavior_scores.get(cid, 0.0)))) * num_examples.get(cid, 1)
-            for cid in verified_updates.keys()
-        }
+        if disable_trust_agg:
+            verified_weights = {
+                cid: num_examples.get(cid, 1) for cid in verified_updates.keys()
+            }
+        else:
+            verified_weights = {
+                cid: (float(behavior_scores.get(cid, 0.0))
+                      if (soft and cid in outliers)
+                      else max(0.05, float(behavior_scores.get(cid, 0.0)))) * num_examples.get(cid, 1)
+                for cid in verified_updates.keys()
+            }
         clip_stats: Dict[str, object] = {}
         cosine_stats: Dict[str, object] = {}
         aggregated_blocks = UnifiedBayesianAggregator.aggregate(
