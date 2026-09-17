@@ -483,16 +483,17 @@ def test_disable_trust_weighted_aggregation_flag_changes_aggregate():
     )
     print(f"✓ flag changes the aggregate (L1 diff = {diff:.4f})")
 
-    # Default TavsEspConfig must have the flag OFF. Any silent flip in a
-    # future refactor would rewrite every non-ablation experiment's
-    # aggregation semantics without touching a single call site.
+    # Default TavsEspConfig has the flag ON (num_examples-only aggregation).
+    # The default was flipped from False to True after the n=6 ablation
+    # showed no cost from removing trust weighting. Guard the current
+    # default so a silent flip back to False stays visible.
     from src.tavs_v2 import TavsEspConfig
     default = TavsEspConfig()
-    assert getattr(default, "disable_trust_weighted_aggregation", None) is False, (
-        "TavsEspConfig() default has changed -- every existing experiment "
-        "silently switches to unweighted aggregation"
+    assert getattr(default, "disable_trust_weighted_aggregation", None) is True, (
+        "TavsEspConfig() default has silently changed -- experiments that "
+        "assume num_examples-only aggregation would revert to trust weighting"
     )
-    print("✓ TavsEspConfig() default keeps trust-weighting ON")
+    print("✓ TavsEspConfig() default has trust-weighting OFF (num_examples only)")
     return True
 
 

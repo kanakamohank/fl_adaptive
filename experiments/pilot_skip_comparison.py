@@ -173,6 +173,52 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
                        f"{arm}_seed{seed}"),
     )
 
+    # Skip re-execution if the pipeline already dropped a completed
+    # pipeline_results.json into this arm's output_dir. Used for --skip-completed
+    # when resuming from an interrupted run. The row we return is reconstructed
+    # from the cached JSON so downstream analysis is oblivious to the resume.
+    #
+    # A cached run is treated as valid iff pipeline_results.json exists AND has
+    # a non-empty server_accuracies list -- a half-written file from a crash
+    # (empty accuracies, or missing keys) is re-run rather than silently
+    # accepted as complete.
+    output_dir = Path(config.output_dir)
+    cached_path = output_dir / "pipeline_results.json"
+    if getattr(args, "skip_completed", False) and cached_path.exists():
+        try:
+            cached = json.loads(cached_path.read_text())
+            server_accuracies = cached.get("server_accuracies") or []
+            sched = cached.get("scheduling_history") or []
+        except (OSError, json.JSONDecodeError):
+            server_accuracies, sched = [], []
+        if server_accuracies:
+            total_verified = sum(s.get("num_verified", 0) for s in sched)
+            total_promoted = sum(s.get("num_promoted", 0) for s in sched)
+            total_cohort = total_verified + total_promoted
+            observed_skip = (total_promoted / total_cohort) if total_cohort else 0.0
+            late_window = max(1, int(round(args.rounds * 0.25)))
+            diag = {}
+            try:
+                s = json.loads((output_dir / "experiment_summary.json").read_text())
+                diag = s.get("noise_diagnostic", {}) or {}
+            except (OSError, json.JSONDecodeError):
+                pass
+            print(f"\n{'=' * 70}\n{arm}  seed={seed}   [CACHED, skipping re-run]"
+                  f"\n{'=' * 70}")
+            return {
+                "arm": arm, "seed": seed,
+                "final_accuracy": server_accuracies[-1],
+                "late_window": late_window,
+                "late_accuracy": statistics.mean(server_accuracies[-late_window:]),
+                "accuracy_trajectory": server_accuracies,
+                "total_verified": total_verified,
+                "total_promoted": total_promoted,
+                "observed_skip_rate": observed_skip,
+                "elapsed_seconds": 0.0,   # cached: no measurable execution cost
+                "noise_diagnostic": diag,
+                "cached": True,
+            }
+
     print(f"\n{'=' * 70}\n{arm}  seed={seed}  "
           f"(rounds={args.rounds}, skip_target={skip_rate:.2f})\n{'=' * 70}")
     started = time.time()
@@ -343,6 +389,14 @@ def main():
                              "--noisy-client-fraction=0.4 that is 12%% of total labels "
                              "corrupted, up from 4%% in pilot 2.")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
+    parser.add_argument("--skip-completed", action="store_true",
+                        help="For each (arm, seed), skip re-execution if the arm's "
+                             "output_dir already contains a valid pipeline_results.json "
+                             "(non-empty server_accuracies). Reconstructs the row from "
+                             "the cached JSON so downstream stats and plots match a "
+                             "fresh run. Use to resume from an interrupted run without "
+                             "redoing completed work. A half-written cache from a "
+                             "crash is treated as invalid and re-run.")
     args = parser.parse_args()
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
 

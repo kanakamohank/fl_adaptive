@@ -82,35 +82,32 @@ class TavsEspConfig:
     # is nothing for the fallback to rescue.
     soft_outlier_weighting: bool = True
 
-    # Ablation switch: drop trust/behaviour terms from aggregation weights.
+    # Aggregation-weight switch. True = num_examples-only (pure FedAvg).
+    # False = legacy behaviour_score/bayesian_posterior-scaled weights.
     #
-    # TAVS's usual aggregation weight is (behaviour_score or bayesian_posterior
-    # of trust) * num_examples. Setting this True replaces the first factor
-    # with 1.0 for every included client, giving pure FedAvg weighting on
-    # num_examples alone.
+    # DEFAULT FLIPPED TO TRUE after the n=6 partial ablation. The comparison
+    # was (paired seeds 1-6, IID + 40%x30% label noise):
+    #   noweight - tavs   : +0.0026 late-acc (5/6 same-sign, p=0.10)
+    #   noweight - random : +0.0059 late-acc (5/6 same-sign, p=0.01)
+    #   noweight - full   : +0.0009 late-acc (4/6 same-sign, p=0.58)
+    # i.e. removing trust weighting did not cost TAVS its edge over random,
+    # and on 5/6 seeds slightly improved it. Set False to reproduce the
+    # legacy weighting (kept for the ablation arm and for any experiment
+    # comparing against an earlier weighted-aggregation result).
     #
-    # What this actually tests, precisely: in a benign run where
-    # enable_outlier_detection=True and no attackers are present, BVD scores
-    # nearly every verified client at behaviour_score ~ 1.0, so the verified
-    # branch is largely unchanged by this flag. The dominant effect is on the
-    # PROMOTED branch, where the flag replaces bayesian_posterior_weight of
-    # trust with 1.0 -- i.e. it stops downweighting unverified clients whose
-    # trust EMA is low. The flag is still named for the general property
-    # (trust-weighted aggregation off), but the empirical mechanism it
-    # isolates in this pilot is "Bayesian downweight on promoted clients."
+    # What the flag does, precisely: when True, both verified_weights and
+    # promoted_weights become num_examples-only in aggregate_fit. Under
+    # enable_outlier_detection=True in a benign setup, BVD scores nearly
+    # every verified client at behaviour_score ~ 1.0, so the verified
+    # branch changes little; the dominant effect is that promoted clients
+    # are no longer downweighted by bayesian_posterior_weight(trust).
     #
-    # The point of this switch is to answer ONE question the n=10 pilot
-    # opened: TAVS beats random-skip by +0.59pp on late accuracy but its
-    # trust ordering is no better than random's (rank-biserial mean ~0 for
-    # both). So the win is not "trust identifies noisy clients." Candidates
-    # for what IS driving the win: (a) the Bayesian downweight on promoted
-    # clients (this knob), (b) staleness caps, (c) adaptive skip rate,
-    # (d) tier structure. Turning (a) off while leaving everything else
-    # intact tests (a) in isolation ONLY at round 1; from round 2 onwards the
-    # aggregate diverges between arms, so late-round trust EMAs also diverge
-    # -- interpret "same scheduler decisions" as strict only at round 1.
-    # Leave OFF for every non-ablation experiment.
-    disable_trust_weighted_aggregation: bool = False
+    # Note on isolation: setting this OFF while every other TAVS mechanism
+    # stays intact only cleanly isolates the aggregation weight at round 1.
+    # From round 2 onwards, the aggregate diverges between the two settings,
+    # so downstream trust EMA and scheduling drift. Interpret "one knob" as
+    # strict only at t=0.
+    disable_trust_weighted_aggregation: bool = True
 
     # Master switch for BVD outlier detection.
     #
