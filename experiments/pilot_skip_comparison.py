@@ -95,19 +95,31 @@ def build_arm(name: str, args, seed: int, skip_rate: float):
         # num_examples only (no trust, no behaviour score). Signal is set on
         # the TavsEspConfig, not here -- see run_one.
         return None, {}
+    if name == "tavs_skip_nofloor":
+        # Tier-1-floor ablation. All three co-varied on the TavsEspConfig
+        # in run_one: initial_trust=0.5 (above theta_low), tau_ramp=1.0
+        # (so the ramp cap does not re-establish the floor), and
+        # bootstrap_verify_new_clients=False (so the is_stale branch does
+        # not force V for a never-verified client). If TAVS's edge over
+        # random survives with all three of these turned off, the Tier-1
+        # floor is NOT the mechanism.
+        return None, {}
     if name == "random_skip":
         return RandomSkipStrategy, {"skip_rate": skip_rate, "skip_seed": seed}
     raise ValueError(f"unknown arm: {name}")
 
 
-ARM_ORDER = ["full_verify", "tavs_skip", "tavs_skip_noweight", "random_skip"]
+ARM_ORDER = ["full_verify", "tavs_skip", "tavs_skip_noweight",
+             "tavs_skip_nofloor", "random_skip"]
 ARM_COLOURS = {"full_verify":        "#d95f02",
                "tavs_skip":          "#1b9e77",
                "tavs_skip_noweight": "#66a61e",
+               "tavs_skip_nofloor":  "#e6ab02",
                "random_skip":        "#7570b3"}
 ARM_NAMES = {"full_verify":        "Full verify",
              "tavs_skip":          "TAVS skip",
              "tavs_skip_noweight": "TAVS (no trust weighting)",
+             "tavs_skip_nofloor":  "TAVS (Tier-1 floor off)",
              "random_skip":        "Random skip"}
 
 
@@ -115,20 +127,35 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
     """One end-to-end pipeline run; returns the fields we plot and score on."""
     strategy_class, strategy_kwargs = build_arm(arm, args, seed, skip_rate)
 
+    # Tier-1-floor ablation arm co-varies THREE knobs. Reviewer flagged that
+    # raising initial_trust alone is a no-op:
+    #   * initial_trust=0.5 puts raw trust above theta_low=0.3
+    #   * but get_effective_trust returns min(raw, T_max(r)), and with
+    #     tau_ramp=5 the ramp cap is < theta_low for the first ~3 rounds,
+    #     so fresh clients still land in Tier 1 via the ramp. tau_ramp=1.0
+    #     lifts T_max(1) to ~0.63 -- above theta_low from round 1.
+    #   * and is_stale forces V for never-verified clients before tier
+    #     logic runs. bootstrap_verify_new_clients=False disables that
+    #     branch so a fresh client's first appearance is not
+    #     unconditionally verified.
+    # All three must move together. This is the "actually turn off the
+    # Tier-1 floor" arm, not "raise initial_trust and hope."
+    nofloor = (arm == "tavs_skip_nofloor")
     tavs_config = TavsEspConfig(
-        # Kept identical to tavs_vs_full_seeded.py so results here are
-        # comparable to those runs and any regression is attributable to
-        # RandomSkip, not to a config drift.
         theta_low=0.3, theta_high=0.7, alpha_trust=0.9, gamma_budget=0.35,
-        tau_ramp=5.0, k_trust=3, target_k=150,
+        tau_ramp=(1.0 if nofloor else 5.0),
+        k_trust=3, target_k=150,
         detection_threshold=5.0,
         clip_promoted_updates=True, promoted_clip_factor=2.0,
-        cosine_filter_promoted=False,   # off by default here, matching that harness
+        cosine_filter_promoted=False,
         enable_outlier_detection=True,
-        # Only the tavs_skip_noweight ablation arm flips this on. Everything
-        # else is identical to tavs_skip, so any accuracy delta between the
-        # two arms is attributable to aggregation weighting alone.
+        # Only the tavs_skip_noweight arm flips this on. Everything else is
+        # identical to tavs_skip so any accuracy delta between the two is
+        # attributable to aggregation weighting alone.
         disable_trust_weighted_aggregation=(arm == "tavs_skip_noweight"),
+        # Tier-1-floor ablation: all three switches co-varied.
+        initial_trust=(0.5 if nofloor else 0.25),
+        bootstrap_verify_new_clients=(not nofloor),
     )
 
     # PipelineConfig takes a strategy CLASS, not an instance, and the pipeline
@@ -172,6 +199,52 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
                        f"skip{int(skip_rate * 100):02d}" /
                        f"{arm}_seed{seed}"),
     )
+
+    # Skip re-execution if the pipeline already dropped a completed
+    # pipeline_results.json into this arm's output_dir. Used for --skip-completed
+    # when resuming from an interrupted run. The row we return is reconstructed
+    # from the cached JSON so downstream analysis is oblivious to the resume.
+    #
+    # A cached run is treated as valid iff pipeline_results.json exists AND has
+    # a non-empty server_accuracies list -- a half-written file from a crash
+    # (empty accuracies, or missing keys) is re-run rather than silently
+    # accepted as complete.
+    output_dir = Path(config.output_dir)
+    cached_path = output_dir / "pipeline_results.json"
+    if getattr(args, "skip_completed", False) and cached_path.exists():
+        try:
+            cached = json.loads(cached_path.read_text())
+            server_accuracies = cached.get("server_accuracies") or []
+            sched = cached.get("scheduling_history") or []
+        except (OSError, json.JSONDecodeError):
+            server_accuracies, sched = [], []
+        if server_accuracies:
+            total_verified = sum(s.get("num_verified", 0) for s in sched)
+            total_promoted = sum(s.get("num_promoted", 0) for s in sched)
+            total_cohort = total_verified + total_promoted
+            observed_skip = (total_promoted / total_cohort) if total_cohort else 0.0
+            late_window = max(1, int(round(args.rounds * 0.25)))
+            diag = {}
+            try:
+                s = json.loads((output_dir / "experiment_summary.json").read_text())
+                diag = s.get("noise_diagnostic", {}) or {}
+            except (OSError, json.JSONDecodeError):
+                pass
+            print(f"\n{'=' * 70}\n{arm}  seed={seed}   [CACHED, skipping re-run]"
+                  f"\n{'=' * 70}")
+            return {
+                "arm": arm, "seed": seed,
+                "final_accuracy": server_accuracies[-1],
+                "late_window": late_window,
+                "late_accuracy": statistics.mean(server_accuracies[-late_window:]),
+                "accuracy_trajectory": server_accuracies,
+                "total_verified": total_verified,
+                "total_promoted": total_promoted,
+                "observed_skip_rate": observed_skip,
+                "elapsed_seconds": 0.0,   # cached: no measurable execution cost
+                "noise_diagnostic": diag,
+                "cached": True,
+            }
 
     print(f"\n{'=' * 70}\n{arm}  seed={seed}  "
           f"(rounds={args.rounds}, skip_target={skip_rate:.2f})\n{'=' * 70}")
@@ -343,6 +416,14 @@ def main():
                              "--noisy-client-fraction=0.4 that is 12%% of total labels "
                              "corrupted, up from 4%% in pilot 2.")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
+    parser.add_argument("--skip-completed", action="store_true",
+                        help="For each (arm, seed), skip re-execution if the arm's "
+                             "output_dir already contains a valid pipeline_results.json "
+                             "(non-empty server_accuracies). Reconstructs the row from "
+                             "the cached JSON so downstream stats and plots match a "
+                             "fresh run. Use to resume from an interrupted run without "
+                             "redoing completed work. A half-written cache from a "
+                             "crash is treated as invalid and re-run.")
     args = parser.parse_args()
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
 
@@ -358,26 +439,30 @@ def main():
     # sensitivity checks but is not a matched-rate comparison.
     rows = []
     for seed in args.seed_list:
-        for arm in ("full_verify", "tavs_skip", "tavs_skip_noweight"):
+        for arm in ("full_verify", "tavs_skip",
+                    "tavs_skip_noweight", "tavs_skip_nofloor"):
             rows.append(run_one(arm, seed, args, skip_rate=0.0))
 
     tavs_rates = [r["observed_skip_rate"] for r in rows if r["arm"] == "tavs_skip"]
     nowt_rates = [r["observed_skip_rate"] for r in rows if r["arm"] == "tavs_skip_noweight"]
+    nof_rates  = [r["observed_skip_rate"] for r in rows if r["arm"] == "tavs_skip_nofloor"]
     matched_rate = (args.skip_rate if args.skip_rate is not None
                     else float(np.mean(tavs_rates)))
-    # Log both scheduler-produced rates side by side. If they differ by more
-    # than ~1pp, matching random_skip to the tavs_skip rate under-credits or
-    # over-credits the noweight arm, and a second random_skip at the noweight
-    # rate is worth running. Reported here so the drift is visible in the log.
+    # Log every scheduler-produced rate side by side. random_skip is matched
+    # to tavs_skip only. A material drift between arms (>1pp) means the
+    # ablation confounds the mechanism test with a rate change; the drift
+    # is reported here so the confound stays visible.
+    print(f"\n[matched-rate] tavs_skip     observed skip = {tavs_rates}")
     if nowt_rates:
         drift = abs(float(np.mean(nowt_rates)) - float(np.mean(tavs_rates)))
-        print(f"\n[matched-rate] TAVS observed skip = {tavs_rates}")
-        print(f"[matched-rate] noweight observed skip = {nowt_rates}")
-        print(f"[matched-rate] mean drift (noweight - tavs) = {drift:+.3f}   "
-              f"-> random_skip target = {matched_rate:.3f}  (matched to tavs_skip)")
-    else:
-        print(f"\n[matched-rate] TAVS observed skip = {tavs_rates} "
-              f"-> random_skip target = {matched_rate:.3f}")
+        print(f"[matched-rate] noweight      observed skip = {nowt_rates}  "
+              f"(drift vs tavs = {drift:+.3f})")
+    if nof_rates:
+        drift = abs(float(np.mean(nof_rates)) - float(np.mean(tavs_rates)))
+        print(f"[matched-rate] nofloor       observed skip = {nof_rates}  "
+              f"(drift vs tavs = {drift:+.3f})")
+    print(f"[matched-rate] -> random_skip target = {matched_rate:.3f}  "
+          f"(matched to tavs_skip mean)")
 
     for seed in args.seed_list:
         rows.append(run_one("random_skip", seed, args, skip_rate=matched_rate))
@@ -412,11 +497,16 @@ def main():
     for a, b in (("tavs_skip", "full_verify"),
                  ("random_skip", "full_verify"),
                  ("tavs_skip", "random_skip"),
-                 # Ablation pairs: locate the mechanism.
+                 # Aggregation-weight ablation pairs.
                  #   noweight - tavs   : cost of dropping trust weighting
                  #   noweight - random : does noweight still beat random?
                  ("tavs_skip_noweight", "tavs_skip"),
-                 ("tavs_skip_noweight", "random_skip")):
+                 ("tavs_skip_noweight", "random_skip"),
+                 # Tier-1-floor ablation pairs.
+                 #   nofloor - tavs    : cost of removing the floor
+                 #   nofloor - random  : does the edge survive without the floor?
+                 ("tavs_skip_nofloor",  "tavs_skip"),
+                 ("tavs_skip_nofloor",  "random_skip")):
         d = paired_delta(rows, args.seed_list, "late_accuracy", a, b)
         signs = f"{max(d['n_negative'], d['n_positive'])}/{len(args.seed_list)} same-sign"
         print(f"\n  {a} - {b}  late-acc delta")
