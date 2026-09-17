@@ -53,6 +53,37 @@ class TavsScheduler:
         # Restores the pre-split behaviour where promotion decayed trust. For
         # before/after comparison only -- it makes Tier 3 unreachable.
         decay_trust_on_promotion: bool = False,
+        # Initial trust score for a newly-seen client, before any verification
+        # has produced a behaviour score for it.
+        #
+        # Default 0.25 sits BELOW theta_low=0.3 by construction, so every
+        # fresh client lands in Tier 1 (forced-verified) for its first few
+        # rounds -- the anti-Sybil guarantee: an unverified identity cannot
+        # opt out of a check. This is a load-bearing property of the
+        # scheduler, not an incidental value.
+        #
+        # Exposed as a config knob solely to enable the Tier-1-floor
+        # ablation described in the pilot's writeup. Setting initial_trust
+        # ABOVE theta_low is NOT sufficient on its own to remove the floor:
+        # the ramp cap (get_effective_trust returns min(raw, T_max(r))) also
+        # gates fresh clients, AND the is_stale bootstrap branch forces V
+        # for never-verified clients independent of trust. All three
+        # (initial_trust, tau_ramp, disable_bootstrap_gate) must co-vary
+        # for the floor ablation to actually disable the floor.
+        initial_trust: float = 0.25,
+        # Ablation switch: disable the "never verified => is_stale=True"
+        # branch that force-Vs every client on its first appearance.
+        #
+        # Default True preserves the anti-Sybil bootstrap: no client can be
+        # promoted before it has been looked at once. Set False for the
+        # Tier-1-floor ablation, where we also raise initial_trust and
+        # lower tau_ramp so a fresh client can actually land in Tier 2
+        # on its first appearance rather than being trapped in V.
+        #
+        # Does NOT disable the s_max_appearances / s_max_rounds caps in
+        # is_stale -- those are a separate hard-expiry mechanism, and
+        # ablating them is a different experiment.
+        bootstrap_verify_new_clients: bool = True,
     ):
         # 1-to-1 Notation Mapping with Paper
         self.gamma_budget = gamma_budget  # \gamma_{budget}: Max unverified influence
@@ -78,6 +109,8 @@ class TavsScheduler:
         self.s_max_rounds = s_max_rounds
         # Reproduces the pre-split behaviour for before/after comparison only.
         self.decay_trust_on_promotion = decay_trust_on_promotion
+        self.initial_trust = initial_trust
+        self.bootstrap_verify_new_clients = bootstrap_verify_new_clients
 
         # State tracking
         self.trust_scores: Dict[str, float] = {}       # T_i(r)
@@ -99,7 +132,7 @@ class TavsScheduler:
 
     def get_effective_trust(self, client_id: str, round_num: int) -> float:
         """Mechanism 3: T_i^{\max}(r) = 1 - \exp(-(r-r_0)/\tau_{\mathrm{ramp}})"""
-        raw_trust = self.trust_scores.get(client_id, 0.25)
+        raw_trust = self.trust_scores.get(client_id, self.initial_trust)
         r_0 = self.join_rounds.get(client_id, round_num)
 
         t_max = 1.0 - math.exp(-(round_num - r_0) / self.tau_ramp)
@@ -136,7 +169,17 @@ class TavsScheduler:
         sampled one trips the appearance cap first.
         """
         if client_id not in self.last_verified_round:
-            return True     # never verified: cannot be promoted on no evidence
+            # Never verified. Default policy: force V ("cannot be promoted
+            # on no evidence") -- the anti-Sybil bootstrap. Ablation policy
+            # (bootstrap_verify_new_clients=False): fall through to the
+            # s_max checks and let tier logic in schedule_verifications
+            # decide, so the Tier-1-floor ablation can actually remove the
+            # floor. Never-verified clients trivially pass the s_max caps
+            # (appearances=0, no last_verified_round to check), so this
+            # returns False when the bootstrap is disabled.
+            if self.bootstrap_verify_new_clients:
+                return True
+            return False
         appearances = self.appearances_since_verified.get(client_id, 0)
         if appearances >= self.s_max_appearances:
             return True
@@ -149,7 +192,7 @@ class TavsScheduler:
         # Initialize new clients
         for cid in available_clients:
             if cid not in self.trust_scores:
-                self.trust_scores[cid] = 0.25
+                self.trust_scores[cid] = self.initial_trust
                 self.join_rounds[cid] = round_num
                 self.clean_streaks[cid] = 0
                 self.appearances_since_verified[cid] = 0
@@ -230,7 +273,7 @@ class TavsScheduler:
         round_num is optional so existing callers keep working, but without it
         the wall-clock staleness cap cannot be enforced.
         """
-        old_trust = self.trust_scores.get(client_id, 0.25)
+        old_trust = self.trust_scores.get(client_id, self.initial_trust)
         
         if was_verified:
             new_trust = (self.alpha_trust * old_trust) + ((1.0 - self.alpha_trust) * behavior_score)

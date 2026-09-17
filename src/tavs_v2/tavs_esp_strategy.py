@@ -82,6 +82,22 @@ class TavsEspConfig:
     # is nothing for the fallback to rescue.
     soft_outlier_weighting: bool = True
 
+    # Tier-1-floor ablation knobs (all three must co-vary to actually
+    # remove the floor -- see comments on the corresponding TavsScheduler
+    # parameters for why).
+    #
+    # initial_trust default 0.25 sits below theta_low=0.3, forcing fresh
+    # clients into Tier 1 (verified) via tier logic. Raising it above
+    # theta_low is necessary but NOT sufficient -- the ramp cap (tau_ramp)
+    # and the is_stale bootstrap branch also gate fresh clients.
+    initial_trust: float = 0.25
+    # bootstrap_verify_new_clients default True preserves the anti-Sybil
+    # rule "cannot be promoted on no evidence" -- every fresh client's
+    # first appearance goes to V via is_stale, before tier logic even
+    # runs. False disables that branch, and is required for the Tier-1
+    # floor to actually be removable through initial_trust + tau_ramp.
+    bootstrap_verify_new_clients: bool = True
+
     # Aggregation-weight switch. True = num_examples-only (pure FedAvg).
     # False = legacy behaviour_score/bayesian_posterior-scaled weights.
     #
@@ -227,6 +243,9 @@ class TavsEspStrategy(Strategy):
             s_max_appearances=getattr(self.config, 's_max_appearances', 4),
             s_max_rounds=getattr(self.config, 's_max_rounds', 10),
             decay_trust_on_promotion=getattr(self.config, 'decay_trust_on_promotion', False),
+            initial_trust=getattr(self.config, 'initial_trust', 0.25),
+            bootstrap_verify_new_clients=getattr(
+                self.config, 'bootstrap_verify_new_clients', True),
         )
         
         self.projector = EphemeralStructuredProjection(

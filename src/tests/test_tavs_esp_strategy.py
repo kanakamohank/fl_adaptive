@@ -419,6 +419,65 @@ def test_random_skip_seed_reproducibility_and_independence():
     return True
 
 
+def test_initial_trust_and_bootstrap_gate_wired_through():
+    """
+    Tier-1-floor ablation needs three flags to co-vary (initial_trust,
+    tau_ramp, bootstrap_verify_new_clients). If any one is not threaded
+    correctly the ablation is a partial no-op and any negative result is
+    uninterpretable (reviewer flagged this). Lock in the wiring here.
+    """
+    print("\nTesting initial_trust & bootstrap_verify_new_clients threading...")
+    cfg = DummyConfig()
+    cfg.initial_trust = 0.5
+    cfg.bootstrap_verify_new_clients = False
+    strategy = TavsEspStrategy(config=cfg)
+
+    assert strategy.scheduler.initial_trust == 0.5, (
+        f"initial_trust did not reach scheduler; got "
+        f"{strategy.scheduler.initial_trust}"
+    )
+    assert strategy.scheduler.bootstrap_verify_new_clients is False, (
+        "bootstrap_verify_new_clients did not reach scheduler"
+    )
+    print("✓ TavsEspConfig fields thread through to TavsScheduler")
+
+    # Fresh client with the bootstrap gate OFF must NOT be flagged stale.
+    # With the gate ON (default), the same client IS stale.
+    off = strategy.scheduler
+    assert off.is_stale("brand_new_client", round_num=1) is False, (
+        "bootstrap gate OFF: never-verified client should NOT be stale"
+    )
+
+    on_strategy = TavsEspStrategy(config=DummyConfig())  # default bootstrap=True
+    assert on_strategy.scheduler.is_stale("brand_new_client", round_num=1) is True, (
+        "bootstrap gate ON (default): never-verified client MUST be stale"
+    )
+    print("✓ is_stale returns False for never-verified when bootstrap is off, "
+          "True (default) otherwise")
+
+    # initial_trust actually drives the value used on first-seen clients.
+    off._csprng_roll = lambda *_a, **_k: 0.99  # never a decoy
+    off.schedule_verifications(["brand_new_client"], round_num=1)
+    assert abs(off.trust_scores["brand_new_client"] - 0.5) < 1e-9, (
+        f"initial_trust=0.5 did not set new client's trust to 0.5; got "
+        f"{off.trust_scores['brand_new_client']}"
+    )
+    print("✓ new client trust initialized to configured initial_trust")
+
+    # Defaults must be preserved.
+    from src.tavs_v2 import TavsEspConfig
+    default = TavsEspConfig()
+    assert default.initial_trust == 0.25, (
+        "TavsEspConfig.initial_trust default changed silently"
+    )
+    assert default.bootstrap_verify_new_clients is True, (
+        "TavsEspConfig.bootstrap_verify_new_clients default changed silently"
+    )
+    print("✓ TavsEspConfig() defaults keep the floor ON (initial_trust=0.25, "
+          "bootstrap=True)")
+    return True
+
+
 def test_disable_trust_weighted_aggregation_flag_changes_aggregate():
     """
     The `disable_trust_weighted_aggregation` config flag must actually change
@@ -601,9 +660,10 @@ def main():
         rs6 = test_cid_to_client_config_id_populated_and_stable()
         rs7 = test_random_skip_is_verified_flag_matches_split()
         rs8 = test_disable_trust_weighted_aggregation_flag_changes_aggregate()
+        rs9 = test_initial_trust_and_bootstrap_gate_wired_through()
 
         if all([success1, success2, success3, success4, success5,
-                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8]):
+                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
             return True
         else:
