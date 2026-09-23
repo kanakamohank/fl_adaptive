@@ -52,23 +52,46 @@ logger = logging.getLogger(__name__)
 
 def _config_tag(args) -> str:
     """Directory component encoding the DATA-side config, so runs at different
-    split / noise settings do not collide.
+    split / cohort / noise settings do not collide.
 
-    Encodes split mode, non-Dirichlet-alpha (only when the split uses it),
-    and label-noise knobs. num_classes is folded into the tag only when it
-    departs from the CIFAR-10 default of 10 so future CIFAR-100 runs do not
-    silently share a directory with CIFAR-10 runs at the same noise config.
+    Encodes: split mode; non-Dirichlet-alpha when the split uses it; client
+    pool size and per-round cohort when they differ from the historical
+    100/20 defaults; label-noise fraction/rate and type when non-clean;
+    num_classes when it departs from CIFAR-10's 10.
+
+    Every non-default segment is added only when the arg is set away from the
+    default so existing run paths (100 clients, 20/round, uniform noise, 10
+    classes) remain byte-identical -- ONLY those runs share directories with
+    prior identical runs. Any change to any encoded knob produces a fresh
+    directory, matching the caller's "do not override unless strictly same
+    config" invariant.
     """
     split = getattr(args, "data_split", "dirichlet")
     parts = [f"split-{split}"]
     if split == "dirichlet":
         parts.append(f"a{args.data_alpha:g}")
+
+    # Client-count and cohort-size segments. Kept out of the tag when they
+    # match the historical defaults 100 pool / 20 per-round so existing
+    # results at r20/split-iid_noiseC40_R30/ remain reachable without
+    # migration. Changing either bumps the tag and produces a fresh dir --
+    # e.g. Priority 2's 50-client run lands in a new subtree, not on top of
+    # the 100-client baseline.
+    num_clients = getattr(args, "num_clients", 100)
+    cpr = getattr(args, "clients_per_round", 20)
+    if num_clients != 100 or cpr != 20:
+        parts.append(f"N{num_clients}_C{cpr}")
+
     if args.noisy_client_fraction > 0 and args.label_noise_rate > 0:
         nf = int(round(args.noisy_client_fraction * 100))
         nr = int(round(args.label_noise_rate * 100))
         parts.append(f"noiseC{nf:02d}_R{nr:02d}")
-        # Only tag the class count when it deviates from the default so
-        # existing CIFAR-10 runs keep their paths.
+        # Noise TYPE: only tag when non-uniform, so uniform-random-label runs
+        # (the only mode that existed before pair-flip was added) keep their
+        # existing paths.
+        noise_type = getattr(args, "label_noise_type", "uniform")
+        if noise_type != "uniform":
+            parts.append(f"type-{noise_type}")
         if getattr(args, "label_noise_num_classes", 10) != 10:
             parts.append(f"K{args.label_noise_num_classes}")
     else:
@@ -190,6 +213,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         # trust EMA has no signal to converge on (see the r20/skip49 result).
         label_noise_client_fraction=args.noisy_client_fraction,
         label_noise_rate=args.label_noise_rate,
+        label_noise_type=args.label_noise_type,
         seed=seed,
         # Encode the label-noise config in the path so IID+noise runs do not
         # overwrite the earlier no-noise r20/skip49 results the analysis
@@ -415,6 +439,18 @@ def main():
                              "wrong class (default 0.3). Combined with "
                              "--noisy-client-fraction=0.4 that is 12%% of total labels "
                              "corrupted, up from 4%% in pilot 2.")
+    parser.add_argument("--label-noise-type", default="uniform",
+                        choices=("uniform", "pairflip"),
+                        help="Noise TYPE. 'uniform' (default, historical): wrong "
+                             "label drawn uniformly at random over the other "
+                             "classes. 'pairflip': each noisy sample is swapped "
+                             "with its confusable partner via a fixed CIFAR-10 "
+                             "map (airplane<->bird, automobile<->truck, "
+                             "cat<->dog, deer<->horse, frog<->ship). Uniform "
+                             "wrong-gradients cancel on aggregation; pair-flip "
+                             "wrong-gradients accumulate. The pair-flip regime "
+                             "is where trust-based scheduling should actually "
+                             "outperform random skipping.")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
     parser.add_argument("--skip-completed", action="store_true",
                         help="For each (arm, seed), skip re-execution if the arm's "
