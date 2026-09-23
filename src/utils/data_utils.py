@@ -227,16 +227,20 @@ class NoisyLabelSubset(Dataset):
         collide.
     """
 
-    # CIFAR-10 pair-flip map. Standard confusable pairs from the
-    # noisy-labels literature (Han et al. NeurIPS'18, Yao et al. NeurIPS'20).
-    # Symmetric: 0<->2, 1<->9, 3<->5, 4<->7, 6<->8. Meaning:
-    #   airplane <-> bird           (both fly, sky background)
-    #   automobile <-> truck        (wheeled vehicles)
-    #   cat <-> dog                 (four-legged pets)
-    #   deer <-> horse              (four-legged large mammals)
-    #   frog <-> ship               (weakest pair; kept for symmetry)
-    # Undefined for other class counts -- callers passing num_classes != 10
-    # with noise_type="pairflip" must supply their own pair_map.
+    # CIFAR-10 pair-flip default. Extends the canonical Patrini et al. 2017
+    # asymmetric map (`bird->airplane, deer->horse, cat<->dog, truck->automobile`)
+    # to a SYMMETRIC map that covers all 10 classes:
+    #   airplane <-> bird           canonical pair, both fly on sky background
+    #   automobile <-> truck        canonical pair, wheeled vehicles
+    #   cat <-> dog                 canonical pair, four-legged pets
+    #   deer <-> horse              canonical pair, four-legged large mammals
+    #   frog <-> ship               EXTENSION (not from literature); chosen so
+    #                               every class has a partner and the effective
+    #                               noise rate stays uniform across classes
+    # Callers reproducing Patrini's exact asymmetric benchmark should pass their
+    # own 4-entry map via pair_map; the constructor will then reject partial
+    # coverage, so if you use the asymmetric benchmark you must exclude
+    # samples of the unmapped classes from the noisy set.
     _CIFAR10_PAIRFLIP = {0: 2, 2: 0, 1: 9, 9: 1, 3: 5, 5: 3, 4: 7, 7: 4, 6: 8, 8: 6}
 
     def __init__(self, base: Dataset, noise_fraction: float,
@@ -261,8 +265,15 @@ class NoisyLabelSubset(Dataset):
         if noise_type == "pairflip":
             resolved = pair_map if pair_map is not None else self._CIFAR10_PAIRFLIP
             # Sanity-check the map: keys and values must be valid class
-            # ids, and no class may map to itself (that would silently
-            # revert some flips to no-ops).
+            # ids, no self-loops, AND full coverage over range(num_classes).
+            #
+            # Partial coverage was previously permitted with a silent
+            # `continue` in the flip loop below -- that let samples of
+            # unmapped classes keep their true label, silently reducing
+            # the effective noise rate below what noise_fraction advertised.
+            # For an asymmetric benchmark (e.g. Patrini's 4-entry map), the
+            # caller must exclude samples of the unmapped classes from the
+            # noisy pool themselves; the wrapper refuses partial coverage.
             for src, dst in resolved.items():
                 if not (0 <= src < num_classes) or not (0 <= dst < num_classes):
                     raise ValueError(
@@ -274,6 +285,15 @@ class NoisyLabelSubset(Dataset):
                         f"pair_map has self-loop {src}->{src}; "
                         "self-loops silently reduce effective noise rate"
                     )
+            missing = set(range(num_classes)) - set(resolved.keys())
+            if missing:
+                raise ValueError(
+                    f"pair_map missing entries for classes {sorted(missing)}; "
+                    f"full coverage over range({num_classes}) is required so "
+                    f"the effective noise rate matches noise_fraction. For an "
+                    f"asymmetric benchmark, restrict noise to samples whose "
+                    f"class IS in pair_map's keys and pass that subset."
+                )
             self.pair_map = dict(resolved)
         else:
             self.pair_map = None
@@ -289,12 +309,12 @@ class NoisyLabelSubset(Dataset):
         # confusable partner. A class outside the pair_map's keys (rare;
         # only if the caller passed a partial map) keeps its true label,
         # equivalent to that sample not being flipped.
+        # pair_map is now validated to cover every class in range(num_classes),
+        # so the pair-flip branch always finds a partner. No silent skips.
         self._noisy = {}
         for idx in noisy_indices:
             true_label = self._raw_label(int(idx))
             if noise_type == "pairflip":
-                if true_label not in self.pair_map:
-                    continue    # partial map: leave the label untouched
                 wrong = int(self.pair_map[true_label])
             else:
                 wrong = int(rng.integers(0, num_classes - 1))

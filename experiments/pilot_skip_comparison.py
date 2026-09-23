@@ -82,13 +82,29 @@ def _config_tag(args) -> str:
     if num_clients != 100 or cpr != 20:
         parts.append(f"N{num_clients}_C{cpr}")
 
-    if args.noisy_client_fraction > 0 and args.label_noise_rate > 0:
+    # Noise is active only when BOTH knobs are > 0 -- exactly one of them
+    # being zero produces zero flips per client, so it is a "clean" run and
+    # we drop into the clean branch. But the previous version was permissive
+    # -- ANY zero produced the "clean" tag -- which meant
+    # `--noisy-client-fraction 0.4 --label-noise-rate 0` collided with a
+    # genuinely clean run AND with any other config sharing a zero knob.
+    # Guard by requiring both to be strictly zero for a clean run; a partial
+    # zero raises because it is not a config anyone should be running (the
+    # noise is dead but the path would advertise otherwise).
+    nf_gt = args.noisy_client_fraction > 0
+    nr_gt = args.label_noise_rate > 0
+    if nf_gt != nr_gt:
+        raise ValueError(
+            f"noise knobs disagree: --noisy-client-fraction "
+            f"{args.noisy_client_fraction} and --label-noise-rate "
+            f"{args.label_noise_rate}. Set BOTH to 0 for a clean run, or "
+            f"both to positive for noise. A single zero silently produces "
+            f"no flips and would collide with existing paths."
+        )
+    if nf_gt and nr_gt:
         nf = int(round(args.noisy_client_fraction * 100))
         nr = int(round(args.label_noise_rate * 100))
         parts.append(f"noiseC{nf:02d}_R{nr:02d}")
-        # Noise TYPE: only tag when non-uniform, so uniform-random-label runs
-        # (the only mode that existed before pair-flip was added) keep their
-        # existing paths.
         noise_type = getattr(args, "label_noise_type", "uniform")
         if noise_type != "uniform":
             parts.append(f"type-{noise_type}")

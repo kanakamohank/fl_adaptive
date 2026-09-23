@@ -84,28 +84,43 @@ def _noisy_cids(pipeline_results: Dict) -> set:
     return {cid for cid, cfg in bridge.items() if cfg in noisy_cfg}
 
 
-def _per_round_assignments(pipeline_results: Dict) -> Tuple[List[set], List[set]]:
-    """Return (per_round_verified, per_round_promoted) as lists of cid sets.
+def _per_round_assignments(pipeline_results: Dict, arm: str = "") -> Tuple[List[set], List[set], bool]:
+    """Return (per_round_verified, per_round_promoted, legacy_run).
 
     Prefers the ground-truth `round_assignments` (populated by newer runs
-    that persist the strategy's own V/P record) over `tier_evolution` (which
-    defaults absent clients to Tier 1 and is thus wrong for RandomSkip and
-    FullVerification).
+    that persist the strategy's own V/P record). Falls back to
+    `tier_evolution` ONLY for arms whose strategy actually populates
+    tier_assignments (i.e. TavsEspStrategy variants). For RandomSkip and
+    FullVerification the tier_evolution fallback silently reports every
+    client as Tier 1 (verified), which produces zero-slippage numbers that
+    misleadingly favour those arms -- refuse to compute rather than emit
+    those.
+
+    Returns (V, P, legacy) where legacy=True means the fallback was used,
+    and legacy=None-return means we refused because the fallback would
+    have lied.
     """
     ra = pipeline_results.get("round_assignments")
     if ra:
+        # Sort by numeric round to be robust to json's string keys.
         rounds = sorted(int(r) for r in ra.keys())
-        V = [set(ra[str(r)].get("verified", []) or ra[str(r)].get("Verified", []))
-             for r in rounds]
-        P = [set(ra[str(r)].get("promoted", []) or ra[str(r)].get("Promoted", []))
-             for r in rounds]
-        return V, P
+        V = [set(ra[str(r)].get("verified", [])) for r in rounds]
+        P = [set(ra[str(r)].get("promoted", [])) for r in rounds]
+        return V, P, False
 
-    # Legacy fallback for runs predating round_assignments persistence.
-    # Works for TavsEspStrategy arms; unreliable for RandomSkip/FullVerify.
+    # No round_assignments (old cache). Only TavsEspStrategy arms have
+    # trustworthy tier_evolution; RandomSkipStrategy / FullVerificationStrategy
+    # ride the pipeline's default-Tier-1 path and their tier_evolution is
+    # uniformly 1 -- computing slippage from that would report zero
+    # promoted-noisy for arms that actually promoted many.
+    arm_norm = (arm or "").lower()
+    tavs_family = arm_norm.startswith("tavs_skip")   # covers _noweight, _nofloor
+    if not tavs_family:
+        return None, None, True   # sentinel: refuse; caller must handle
+
     tier_evo = pipeline_results.get("tier_evolution") or {}
     if not tier_evo:
-        return [], []
+        return [], [], True
     max_len = max(len(v) for v in tier_evo.values())
     V, P = [], []
     for r in range(max_len):
@@ -115,18 +130,24 @@ def _per_round_assignments(pipeline_results: Dict) -> Tuple[List[set], List[set]
                 continue
             (p if tiers[r] >= 2 else v).add(cid)
         V.append(v); P.append(p)
-    return V, P
+    return V, P, True
 
 
-def _per_round_promoted_by_cid(pipeline_results: Dict) -> List[set]:
-    return _per_round_assignments(pipeline_results)[1]
+def _per_round_promoted_by_cid(pipeline_results: Dict, arm: str = "") -> Optional[List[set]]:
+    v, p, legacy = _per_round_assignments(pipeline_results, arm)
+    if p is None:
+        return None
+    return p
 
 
-def _per_round_verified_by_cid(pipeline_results: Dict) -> List[set]:
-    return _per_round_assignments(pipeline_results)[0]
+def _per_round_verified_by_cid(pipeline_results: Dict, arm: str = "") -> Optional[List[set]]:
+    v, p, legacy = _per_round_assignments(pipeline_results, arm)
+    if v is None:
+        return None
+    return v
 
 
-def slippage_stats(pipeline_results: Dict) -> Dict:
+def slippage_stats(pipeline_results: Dict, arm: str = "") -> Dict:
     """Per-run slippage summary — the mentor's exact ask.
 
     Returns a dict with:
@@ -141,8 +162,17 @@ def slippage_stats(pipeline_results: Dict) -> Dict:
     if not noisy:
         return {"noise_injected": False}
 
-    promoted_rounds = _per_round_promoted_by_cid(pipeline_results)
-    verified_rounds = _per_round_verified_by_cid(pipeline_results)
+    V, P, legacy = _per_round_assignments(pipeline_results, arm)
+    if V is None:
+        # Legacy cache with no round_assignments and an arm whose
+        # tier_evolution can't be trusted (RandomSkip / FullVerify).
+        # Refuse rather than silently emit zero slippage.
+        return {"noise_injected": True, "legacy_run_unanalyzable": True,
+                "reason": "no round_assignments in cache; tier_evolution is "
+                          "unreliable for this arm (defaults absent clients "
+                          "to Tier 1 = verified). Rerun to persist "
+                          "round_assignments."}
+    promoted_rounds, verified_rounds = P, V
 
     per_round_promoted_noisy = []
     per_round_verified_noisy = []
@@ -204,7 +234,8 @@ def trust_bimodality(experiment_summary: Dict) -> Dict:
     }
 
 
-def skip_decision_overlap(pr_a: Dict, pr_b: Dict) -> Dict:
+def skip_decision_overlap(pr_a: Dict, pr_b: Dict,
+                          arm_a: str = "", arm_b: str = "") -> Dict:
     """Per-round Jaccard between the promoted sets of two arms (same seed).
 
     If Jaccard is high (>0.7) across most rounds, the two policies pick
@@ -212,8 +243,13 @@ def skip_decision_overlap(pr_a: Dict, pr_b: Dict) -> Dict:
     on THIS data, and any accuracy difference is coming from something other
     than "who to skip."
     """
-    Pa = _per_round_promoted_by_cid(pr_a)
-    Pb = _per_round_promoted_by_cid(pr_b)
+    Pa = _per_round_promoted_by_cid(pr_a, arm_a)
+    Pb = _per_round_promoted_by_cid(pr_b, arm_b)
+    if Pa is None or Pb is None:
+        return {"per_round_jaccard": [], "mean": None,
+                "unavailable": True,
+                "reason": "one or both arms lack round_assignments in cache "
+                          "and cannot use the tier_evolution fallback"}
     rounds = min(len(Pa), len(Pb))
     jacs = []
     for r in range(rounds):
@@ -277,12 +313,21 @@ def process_pilot(pilot_results_json: Path) -> Dict:
             summary_p = d / "experiment_summary.json"
             summary = json.loads(summary_p.read_text()) if summary_p.exists() else {}
             per_seed[seed] = {
-                "slippage": slippage_stats(pr),
+                "slippage": slippage_stats(pr, arm=arm),
                 "trust_bimodality": trust_bimodality(summary),
             }
-        # Aggregate slippage across seeds.
+        # Aggregate slippage across seeds. Skip rows that refused to
+        # compute (legacy cache + non-TAVS arm) so the aggregate reflects
+        # only the trustworthy seeds.
         agg = {}
-        slip_seeds = [s for s in per_seed.values() if s["slippage"].get("noise_injected")]
+        slip_seeds = [s for s in per_seed.values()
+                      if s["slippage"].get("noise_injected")
+                      and not s["slippage"].get("legacy_run_unanalyzable")]
+        legacy_seeds = [s for s in per_seed.values()
+                        if s["slippage"].get("legacy_run_unanalyzable")]
+        if legacy_seeds:
+            agg["legacy_run_seeds"] = len(legacy_seeds)
+            agg["legacy_reason"] = legacy_seeds[0]["slippage"].get("reason")
         if slip_seeds:
             agg["mean_promoted_noisy_per_run"] = float(np.mean(
                 [s["slippage"]["total_noisy_client_rounds_promoted"] for s in slip_seeds]
@@ -317,7 +362,8 @@ def process_pilot(pilot_results_json: Path) -> Dict:
             pr_r = _load_run(arm_dirs["random_skip"][s])
             if not pr_t or not pr_r:
                 continue
-            ov = skip_decision_overlap(pr_t, pr_r)
+            ov = skip_decision_overlap(pr_t, pr_r,
+                                       arm_a="tavs_skip", arm_b="random_skip")
             if ov["mean"] is not None:
                 overlaps.append((s, ov["mean"]))
         if overlaps:

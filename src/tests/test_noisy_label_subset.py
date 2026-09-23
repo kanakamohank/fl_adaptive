@@ -301,7 +301,14 @@ def test_pairflip_uses_pair_map_and_never_self_flips():
 
 
 def test_pairflip_rejects_bad_config():
-    """Constructor guards against silent misuses of the pair-flip path."""
+    """Constructor guards against silent misuses of the pair-flip path.
+
+    Includes the full-coverage guard added after reviewer feedback: a
+    partial pair_map used to silently skip flips for uncovered classes,
+    reducing the effective noise rate below what noise_fraction advertised.
+    Now the constructor refuses partial coverage; the caller must either
+    supply a full map or use a different noise_type.
+    """
     print("\nTesting pair-flip config validation...")
     base = DummyDataset(100, num_classes=10)
 
@@ -316,7 +323,8 @@ def test_pairflip_rejects_bad_config():
     # Self-loop in pair_map
     try:
         NoisyLabelSubset(base, 0.3, noise_type="pairflip",
-                         pair_map={0: 0, 1: 2, 2: 1})
+                         pair_map={i: (i + 1) % 10 for i in range(10)} |
+                                  {0: 0})    # first entry self-loops
     except ValueError:
         pass
     else:
@@ -325,12 +333,45 @@ def test_pairflip_rejects_bad_config():
     # Out-of-range class id
     try:
         NoisyLabelSubset(base, 0.3, num_classes=5, noise_type="pairflip",
-                         pair_map={0: 99})
+                         pair_map={0: 99, 1: 0, 2: 1, 3: 4, 4: 3})
     except ValueError:
         pass
     else:
         raise AssertionError("out-of-range pair_map should have raised")
-    print("✓ constructor rejects bad noise_type, self-loops, out-of-range ids")
+
+    # Partial coverage -- new guard.
+    try:
+        NoisyLabelSubset(base, 0.3, num_classes=10, noise_type="pairflip",
+                         pair_map={0: 2, 2: 0, 3: 5, 5: 3})   # 6 classes uncovered
+    except ValueError as e:
+        assert "full coverage" in str(e).lower() or "missing" in str(e).lower()
+    else:
+        raise AssertionError("partial coverage pair_map should have raised")
+
+    print("✓ constructor rejects bad noise_type, self-loops, out-of-range ids, "
+          "and partial coverage")
+    return True
+
+
+def test_default_cifar10_pairflip_map_is_frozen():
+    """Freeze the default CIFAR-10 pair-flip map.
+
+    Explicitly enumerates the pairs so a silent edit (e.g. someone reordering
+    dict entries or 'improving' the extension pair) trips CI. The frog<->ship
+    entry is not from the noisy-labels literature; that is our extension for
+    full coverage. If we ever swap to the canonical Patrini asymmetric map,
+    this test must be updated deliberately, not by accident.
+    """
+    print("\nTesting default CIFAR-10 pair-flip map is frozen...")
+    expected = {0: 2, 2: 0, 1: 9, 9: 1, 3: 5, 5: 3, 4: 7, 7: 4, 6: 8, 8: 6}
+    assert NoisyLabelSubset._CIFAR10_PAIRFLIP == expected, (
+        f"CIFAR-10 pair-flip map has drifted; got "
+        f"{NoisyLabelSubset._CIFAR10_PAIRFLIP}, expected {expected}"
+    )
+    # And every class is covered (symmetric + full).
+    assert set(expected.keys()) == set(range(10))
+    assert set(expected.values()) == set(range(10))
+    print("✓ CIFAR-10 pair-flip map matches frozen expected values")
     return True
 
 
@@ -502,6 +543,7 @@ def main():
         test_pipeline_level_noisy_client_stability,
         test_pairflip_uses_pair_map_and_never_self_flips,
         test_pairflip_rejects_bad_config,
+        test_default_cifar10_pairflip_map_is_frozen,
         test_pairflip_vs_uniform_are_different,
         test_noise_diagnostic_computes_expected_stats,
     ]
