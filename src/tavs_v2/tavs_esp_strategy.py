@@ -724,9 +724,19 @@ class TavsEspStrategy(Strategy):
         # ("did TAVS put low trust on the actually-noisy clients?") is
         # answerable only via this map. Populated defensively (empty when the
         # strategy never saw a FitRes with the client_id metric).
+        #
+        # `round_assignments` is the ground-truth V/P/D split per round --
+        # necessary for forensics because tier_evolution defaults absent
+        # clients to Tier 1 (Verified), which makes RandomSkip and
+        # FullVerification arms look like they never promoted anyone. This
+        # is the fix: dump the strategy's own record.
         return {
             "trust_state": self.scheduler.trust_scores,
             "cid_to_client_config_id": dict(getattr(self, "cid_to_client_config_id", {})),
+            "round_assignments": {
+                r: {k: sorted(v) for k, v in assn.items()}
+                for r, assn in getattr(self, "_round_assignments", {}).items()
+            },
         }
 
 class FullVerificationStrategy(TavsEspStrategy):

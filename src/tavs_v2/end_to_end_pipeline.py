@@ -67,6 +67,14 @@ class PipelineConfig:
     label_noise_rate: float = 0.0
     # Which class-set to draw wrong labels from. Defaults to 10 (CIFAR-10).
     label_noise_num_classes: int = 10
+    # Noise TYPE. "uniform" (default, historical) draws wrong labels
+    # uniformly at random over the other classes. "pairflip" swaps each
+    # noisy sample to its confusable partner via a fixed map (CIFAR-10
+    # default: airplane<->bird, cat<->dog, deer<->horse, ...) -- structured
+    # errors that FedAvg cannot dampen by averaging random directions.
+    # Pair-flip is the regime where a trust signal should actually beat
+    # random skipping.
+    label_noise_type: str = "uniform"
 
     tavs_config: TavsEspConfig = None
 
@@ -150,6 +158,15 @@ class PipelineResults:
     noisy_pool_indices: List[int] = field(default_factory=list)
     noisy_client_config_ids: List[str] = field(default_factory=list)
     cid_to_client_config_id: Dict[str, str] = field(default_factory=dict)
+    # Ground-truth per-round V/P/D split, keyed by round number, keyed by
+    # role ("verified" | "promoted" | "decoy"), value = sorted client-cid
+    # list. Necessary for forensics: tier_evolution defaults absent clients
+    # to Tier 1, so RandomSkip and FullVerification arms show every client
+    # as verified in that field even though the strategy's own record has
+    # them promoted. This field is the ground truth and every arm populates
+    # it via its configure_fit override. Empty for older cached runs that
+    # predate this field.
+    round_assignments: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
 
 class TAVSESPPipeline:
     def __init__(self, config: PipelineConfig):
@@ -238,6 +255,7 @@ class TAVSESPPipeline:
                         # different noisy clients corrupt DIFFERENT samples,
                         # and each client's corrupted set is stable across arms.
                         seed=self.config.seed * 10_000 + cid,
+                        noise_type=self.config.label_noise_type,
                     )
                 logger.info(
                     f"Label noise injected: {num_noisy}/{self.config.num_clients} "
@@ -512,6 +530,11 @@ class TAVSESPPipeline:
 
         trust_state = strategy.export_complete_state()
         cid_map = trust_state.get("cid_to_client_config_id", {}) if isinstance(trust_state, dict) else {}
+        # Ground-truth per-round V/P/D from the strategy's own record.
+        round_assn_raw = trust_state.get("round_assignments", {}) if isinstance(trust_state, dict) else {}
+        # JSON keys are strings; keep round numbers as strings on the way out
+        # so json.dump / json.load round-trip cleanly.
+        round_assignments = {str(r): assn for r, assn in round_assn_raw.items()}
         trust_evolution, tier_evolution = {}, {}
 
         for analytics in strategy.round_analytics:
@@ -568,6 +591,7 @@ class TAVSESPPipeline:
             noisy_pool_indices=pool_indices,
             noisy_client_config_ids=noisy_config_ids,
             cid_to_client_config_id=dict(cid_map),
+            round_assignments=round_assignments,
         )
 
     def _save_results(self, results: PipelineResults):

@@ -212,43 +212,114 @@ class NoisyLabelSubset(Dataset):
         run without this determinism would move the label noise across
         seeds and confound the "does trust identify the noisy client"
         question with dataset-shuffle luck.
-      - The corrupted label is any class other than the true one, drawn
-        uniformly. That is the classical symmetric-noise regime; it is not
-        pair-flip and it is not adversarial.
+      - noise_type controls how the wrong label is chosen:
+          "uniform"  : any of the (num_classes - 1) wrong labels, uniform draw.
+                       This is the classical symmetric-noise regime -- easy
+                       for FedAvg to dampen because per-round wrong-gradients
+                       point in random directions and largely cancel.
+          "pairflip" : each true class maps to a fixed confusable partner
+                       (see pair_map below). Wrong-gradients under pair-flip
+                       point in a consistent direction, so they do NOT cancel
+                       on aggregation -- this is the regime where a trust
+                       signal has something to actually latch onto.
       - The wrapper never mutates the underlying dataset. Two clients that
         share a base dataset are independent: their noise decisions do not
         collide.
     """
 
+    # CIFAR-10 pair-flip default. Extends the canonical Patrini et al. 2017
+    # asymmetric map (`bird->airplane, deer->horse, cat<->dog, truck->automobile`)
+    # to a SYMMETRIC map that covers all 10 classes:
+    #   airplane <-> bird           canonical pair, both fly on sky background
+    #   automobile <-> truck        canonical pair, wheeled vehicles
+    #   cat <-> dog                 canonical pair, four-legged pets
+    #   deer <-> horse              canonical pair, four-legged large mammals
+    #   frog <-> ship               EXTENSION (not from literature); chosen so
+    #                               every class has a partner and the effective
+    #                               noise rate stays uniform across classes
+    # Callers reproducing Patrini's exact asymmetric benchmark should pass their
+    # own 4-entry map via pair_map; the constructor will then reject partial
+    # coverage, so if you use the asymmetric benchmark you must exclude
+    # samples of the unmapped classes from the noisy set.
+    _CIFAR10_PAIRFLIP = {0: 2, 2: 0, 1: 9, 9: 1, 3: 5, 5: 3, 4: 7, 7: 4, 6: 8, 8: 6}
+
     def __init__(self, base: Dataset, noise_fraction: float,
-                 num_classes: int = 10, seed: int = 0):
+                 num_classes: int = 10, seed: int = 0,
+                 noise_type: str = "uniform",
+                 pair_map: dict = None):
         if not (0.0 <= noise_fraction <= 1.0):
             raise ValueError(f"noise_fraction must be in [0, 1]; got {noise_fraction}")
         if num_classes < 2:
             raise ValueError(f"num_classes must be >= 2; got {num_classes}")
+        if noise_type not in ("uniform", "pairflip"):
+            raise ValueError(
+                f"noise_type must be 'uniform' or 'pairflip'; got {noise_type!r}"
+            )
 
         self.base = base
         self.num_classes = num_classes
+        self.noise_type = noise_type
+
+        # Pair-flip map. Default to the CIFAR-10 pattern; callers with a
+        # different class count or a different pairing must pass one in.
+        if noise_type == "pairflip":
+            resolved = pair_map if pair_map is not None else self._CIFAR10_PAIRFLIP
+            # Sanity-check the map: keys and values must be valid class
+            # ids, no self-loops, AND full coverage over range(num_classes).
+            #
+            # Partial coverage was previously permitted with a silent
+            # `continue` in the flip loop below -- that let samples of
+            # unmapped classes keep their true label, silently reducing
+            # the effective noise rate below what noise_fraction advertised.
+            # For an asymmetric benchmark (e.g. Patrini's 4-entry map), the
+            # caller must exclude samples of the unmapped classes from the
+            # noisy pool themselves; the wrapper refuses partial coverage.
+            for src, dst in resolved.items():
+                if not (0 <= src < num_classes) or not (0 <= dst < num_classes):
+                    raise ValueError(
+                        f"pair_map entry {src}->{dst} out of range for "
+                        f"num_classes={num_classes}"
+                    )
+                if src == dst:
+                    raise ValueError(
+                        f"pair_map has self-loop {src}->{src}; "
+                        "self-loops silently reduce effective noise rate"
+                    )
+            missing = set(range(num_classes)) - set(resolved.keys())
+            if missing:
+                raise ValueError(
+                    f"pair_map missing entries for classes {sorted(missing)}; "
+                    f"full coverage over range({num_classes}) is required so "
+                    f"the effective noise rate matches noise_fraction. For an "
+                    f"asymmetric benchmark, restrict noise to samples whose "
+                    f"class IS in pair_map's keys and pass that subset."
+                )
+            self.pair_map = dict(resolved)
+        else:
+            self.pair_map = None
 
         n = len(base)
         n_noisy = int(round(noise_fraction * n))
 
-        # Draw the noisy index set and the replacement labels ahead of time.
-        # Doing it in __getitem__ would need re-seeded randomness per call to
-        # keep the same sample corrupted every epoch; caching once is simpler
-        # and cheaper.
         rng = np.random.default_rng(seed)
         noisy_indices = rng.choice(n, size=n_noisy, replace=False) if n_noisy else np.array([], dtype=np.int64)
-        # Pre-sample the WRONG class for each noisy index. Draw a random class
-        # in [0, num_classes-1) and shift up if it collides with the true class;
-        # this yields a uniform draw over the (num_classes - 1) wrong labels
-        # without a rejection-sampling loop.
+
+        # Wrong-label draw depends on noise_type. Uniform: rejection-free
+        # shift-past-collision as before. Pair-flip: look up the fixed
+        # confusable partner. A class outside the pair_map's keys (rare;
+        # only if the caller passed a partial map) keeps its true label,
+        # equivalent to that sample not being flipped.
+        # pair_map is now validated to cover every class in range(num_classes),
+        # so the pair-flip branch always finds a partner. No silent skips.
         self._noisy = {}
         for idx in noisy_indices:
             true_label = self._raw_label(int(idx))
-            wrong = int(rng.integers(0, num_classes - 1))
-            if wrong >= true_label:
-                wrong += 1
+            if noise_type == "pairflip":
+                wrong = int(self.pair_map[true_label])
+            else:
+                wrong = int(rng.integers(0, num_classes - 1))
+                if wrong >= true_label:
+                    wrong += 1
             self._noisy[int(idx)] = wrong
 
     def _raw_label(self, idx: int) -> int:

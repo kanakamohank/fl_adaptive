@@ -263,6 +263,139 @@ def test_pipeline_level_noisy_client_stability():
     return True
 
 
+def test_pairflip_uses_pair_map_and_never_self_flips():
+    """noise_type='pairflip' must swap each noisy sample with its confusable
+    partner from the pair map -- no random draws, no self-loops. The default
+    CIFAR-10 map is symmetric so every flip's inverse is also a valid flip.
+
+    A silent regression here (e.g., wrong dict lookup, off-by-one) would
+    quietly turn pair-flip into a garbled uniform-noise variant, defeating
+    the whole point of the Priority-3 experiment.
+    """
+    print("\nTesting pair-flip uses the pair map without self-flips...")
+    base = DummyDataset(1000, num_classes=10)
+    wrap = NoisyLabelSubset(
+        base, noise_fraction=1.0, num_classes=10, seed=1,
+        noise_type="pairflip",
+    )
+    expected = NoisyLabelSubset._CIFAR10_PAIRFLIP
+    assert wrap.num_noisy == 1000  # every sample flipped (fraction=1.0)
+    for idx, wrong in wrap._noisy.items():
+        true_label = idx % 10
+        assert wrong == expected[true_label], (
+            f"idx={idx} true={true_label}: expected flip to {expected[true_label]}, got {wrong}"
+        )
+        assert wrong != true_label, "pair-flip produced a self-loop"
+    print("✓ every flip follows the pair map exactly, no self-loops")
+
+    # Custom pair map path: same rule, different targets.
+    custom = {0: 1, 1: 0, 2: 3, 3: 2, 4: 5, 5: 4, 6: 7, 7: 6, 8: 9, 9: 8}
+    wrap2 = NoisyLabelSubset(
+        base, noise_fraction=1.0, num_classes=10, seed=1,
+        noise_type="pairflip", pair_map=custom,
+    )
+    for idx, wrong in wrap2._noisy.items():
+        assert wrong == custom[idx % 10]
+    print("✓ custom pair_map overrides the default")
+    return True
+
+
+def test_pairflip_rejects_bad_config():
+    """Constructor guards against silent misuses of the pair-flip path.
+
+    Includes the full-coverage guard added after reviewer feedback: a
+    partial pair_map used to silently skip flips for uncovered classes,
+    reducing the effective noise rate below what noise_fraction advertised.
+    Now the constructor refuses partial coverage; the caller must either
+    supply a full map or use a different noise_type.
+    """
+    print("\nTesting pair-flip config validation...")
+    base = DummyDataset(100, num_classes=10)
+
+    # Unknown noise_type
+    try:
+        NoisyLabelSubset(base, 0.3, noise_type="adversarial")
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("bad noise_type should have raised")
+
+    # Self-loop in pair_map
+    try:
+        NoisyLabelSubset(base, 0.3, noise_type="pairflip",
+                         pair_map={i: (i + 1) % 10 for i in range(10)} |
+                                  {0: 0})    # first entry self-loops
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("self-loop pair_map should have raised")
+
+    # Out-of-range class id
+    try:
+        NoisyLabelSubset(base, 0.3, num_classes=5, noise_type="pairflip",
+                         pair_map={0: 99, 1: 0, 2: 1, 3: 4, 4: 3})
+    except ValueError:
+        pass
+    else:
+        raise AssertionError("out-of-range pair_map should have raised")
+
+    # Partial coverage -- new guard.
+    try:
+        NoisyLabelSubset(base, 0.3, num_classes=10, noise_type="pairflip",
+                         pair_map={0: 2, 2: 0, 3: 5, 5: 3})   # 6 classes uncovered
+    except ValueError as e:
+        assert "full coverage" in str(e).lower() or "missing" in str(e).lower()
+    else:
+        raise AssertionError("partial coverage pair_map should have raised")
+
+    print("✓ constructor rejects bad noise_type, self-loops, out-of-range ids, "
+          "and partial coverage")
+    return True
+
+
+def test_default_cifar10_pairflip_map_is_frozen():
+    """Freeze the default CIFAR-10 pair-flip map.
+
+    Explicitly enumerates the pairs so a silent edit (e.g. someone reordering
+    dict entries or 'improving' the extension pair) trips CI. The frog<->ship
+    entry is not from the noisy-labels literature; that is our extension for
+    full coverage. If we ever swap to the canonical Patrini asymmetric map,
+    this test must be updated deliberately, not by accident.
+    """
+    print("\nTesting default CIFAR-10 pair-flip map is frozen...")
+    expected = {0: 2, 2: 0, 1: 9, 9: 1, 3: 5, 5: 3, 4: 7, 7: 4, 6: 8, 8: 6}
+    assert NoisyLabelSubset._CIFAR10_PAIRFLIP == expected, (
+        f"CIFAR-10 pair-flip map has drifted; got "
+        f"{NoisyLabelSubset._CIFAR10_PAIRFLIP}, expected {expected}"
+    )
+    # And every class is covered (symmetric + full).
+    assert set(expected.keys()) == set(range(10))
+    assert set(expected.values()) == set(range(10))
+    print("✓ CIFAR-10 pair-flip map matches frozen expected values")
+    return True
+
+
+def test_pairflip_vs_uniform_are_different():
+    """Same seed, same noise_fraction, different noise_type -> different
+    corrupted labels. Guards against a wiring bug where noise_type is
+    accepted but ignored."""
+    print("\nTesting pair-flip and uniform produce different labels at same seed...")
+    base = DummyDataset(500, num_classes=10)
+    u = NoisyLabelSubset(base, 0.5, num_classes=10, seed=7, noise_type="uniform")
+    p = NoisyLabelSubset(base, 0.5, num_classes=10, seed=7, noise_type="pairflip")
+    # Same corrupted INDEX set (same seed drives the choice draw).
+    assert set(u._noisy) == set(p._noisy)
+    # Different WRONG labels for most of them (pair-flip is deterministic
+    # given class; uniform hits the partner ~1/9 of the time).
+    disagreements = sum(1 for i in u._noisy if u._noisy[i] != p._noisy[i])
+    assert disagreements > 0.5 * len(u._noisy), (
+        f"pair-flip should disagree with uniform on the majority of samples; "
+        f"got {disagreements}/{len(u._noisy)}"
+    )
+    print(f"✓ pair-flip differs from uniform on {disagreements}/{len(u._noisy)} samples")
+    return True
+
+
 def test_noise_diagnostic_computes_expected_stats():
     """`_noise_diagnostic` reports gap, bottom-k overlap, and per-group trust
     lists correctly. Uses a hand-crafted trust map so the expected numbers
@@ -408,6 +541,10 @@ def main():
         test_base_dataset_is_not_mutated,
         test_getitem_returns_true_label_off_the_noisy_set,
         test_pipeline_level_noisy_client_stability,
+        test_pairflip_uses_pair_map_and_never_self_flips,
+        test_pairflip_rejects_bad_config,
+        test_default_cifar10_pairflip_map_is_frozen,
+        test_pairflip_vs_uniform_are_different,
         test_noise_diagnostic_computes_expected_stats,
     ]
     for t in tests:
