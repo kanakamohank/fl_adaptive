@@ -100,6 +100,10 @@ sys.modules['flwr.server.strategy'].Strategy = MockStrategy
 sys.modules['flwr.server.client_proxy'] = MagicMock()
 sys.modules['flwr.server.client_manager'] = MagicMock()
 
+class MockGetPropertiesIns:
+    def __init__(self, config=None):
+        self.config = config or {}
+
 class MockCommon:
     def __init__(self):
         self.parameters_to_ndarrays = mock_parameters_to_ndarrays
@@ -109,8 +113,13 @@ class MockCommon:
         self.FitRes = MockFitRes
         self.EvaluateRes = MockEvaluateRes
         self.Parameters = MockParameters
-        self.Scalar = float  
-        self.NDArrays = list  
+        self.Scalar = float
+        self.NDArrays = list
+        # Strategy imports GetPropertiesIns for the partition-map bootstrap. The
+        # MockClientManager in this file has no wait_for/get_properties, so
+        # _ensure_partition_map early-outs and this symbol is only needed at
+        # import time.
+        self.GetPropertiesIns = MockGetPropertiesIns
 
 sys.modules['flwr.common'] = MockCommon()
 

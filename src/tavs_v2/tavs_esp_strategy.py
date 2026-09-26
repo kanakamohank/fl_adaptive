@@ -8,7 +8,8 @@ import torch
 
 import flwr as fl
 from flwr.common import (
-    FitIns, FitRes, Parameters, Scalar, ndarrays_to_parameters, parameters_to_ndarrays
+    FitIns, FitRes, GetPropertiesIns, Parameters, Scalar,
+    ndarrays_to_parameters, parameters_to_ndarrays,
 )
 from flwr.server.client_proxy import ClientProxy
 from flwr.server.strategy import Strategy
@@ -286,6 +287,25 @@ class TavsEspStrategy(Strategy):
         # Round index, set by configure_fit so cohort sampling can be keyed on it.
         self._current_round = 0
 
+        # Cohort sampling is done in partition-id space, NOT cid space.
+        #
+        # Flower's simulation runtime assigns each ClientProxy a 64-bit random
+        # integer as its cid, and those integers are fresh for every
+        # run_simulation() call. Two runs with identical Python seeds and
+        # identical strategy config still see different cid strings, so any
+        # sampling that keys on cid (including "sorted(cids) + seeded
+        # rng.sample") lands on a different set of clients in each arm --
+        # verified by a Flower-only probe with the model and data removed.
+        #
+        # The fix is to sample in a namespace that is identical across arms
+        # by construction: the partition-id 0..N-1 that we hand each client
+        # via node_config. _ensure_partition_map() populates these bidirectional
+        # maps once from a GetProperties sweep at the top of round 1; the
+        # cohort selector then draws partition-ids and translates back to cids.
+        self._partition_to_cid: Dict[int, str] = {}
+        self._cid_to_partition: Dict[str, int] = {}
+        self._partition_map_built: bool = False
+
         # Global parameters handed out this round, kept as blocks. The cosine
         # gate needs them as the origin: clients send full parameters, so a
         # "direction" only exists relative to where the round started.
@@ -338,9 +358,82 @@ class TavsEspStrategy(Strategy):
                 blocks[name] = torch.tensor(arr, dtype=torch.float32)
         return blocks
 
+    def _ensure_partition_map(self, client_manager) -> None:
+        """
+        Build cid <-> partition-id maps once, from a synchronous GetProperties
+        sweep of every registered ClientProxy.
+
+        The partition-id is what makes cohorts comparable across arms: it is
+        assigned deterministically by Flower's simulation node_config
+        ("partition-id" == the supernode index 0..N-1) and is echoed by each
+        client's get_properties(). The cid, by contrast, is a fresh random
+        64-bit integer per simulation call, so it cannot be used as a stable
+        identity across arms.
+
+        Idempotent; no-op after the first successful build. Any failure
+        (client manager without wait_for, proxies without get_properties, a
+        proxy that fails to answer, or a client whose properties omit
+        partition-id) leaves the maps empty and _sample_cohort falls back to
+        the legacy sorted-cid path, so unit tests with mock managers keep
+        working.
+        """
+        if self._partition_map_built:
+            return
+        if not hasattr(client_manager, "all"):
+            return
+
+        # Wait for the full expected pool, if the manager supports it. Ray brings
+        # supernodes up lazily, so client_manager.all() at initialize_parameters
+        # or the first configure_fit can be short by several proxies.
+        expected = getattr(self.config, "min_available_clients", 0) or 0
+        if expected and hasattr(client_manager, "wait_for"):
+            try:
+                client_manager.wait_for(num_clients=expected, timeout=30)
+            except Exception:
+                # Fall through: we will map whatever is registered.
+                pass
+
+        proxies = client_manager.all()
+        pid_to_cid: Dict[int, str] = {}
+        cid_to_pid: Dict[str, int] = {}
+        for cid, proxy in proxies.items():
+            if not hasattr(proxy, "get_properties"):
+                return  # mock manager -- leave maps empty
+            try:
+                res = proxy.get_properties(
+                    ins=GetPropertiesIns(config={}), timeout=30, group_id=None
+                )
+                pid = res.properties.get("partition-id")
+            except Exception:
+                return
+            if pid is None:
+                return
+            pid_int = int(pid)
+            if pid_int in pid_to_cid:
+                # Two proxies claiming the same partition-id: something is very
+                # wrong; refuse to build the map rather than silently pick one.
+                return
+            pid_to_cid[pid_int] = cid
+            cid_to_pid[cid] = pid_int
+
+        # Sanity: partition-ids must form a contiguous 0..N-1 range for the
+        # index-based sampling below to be well-defined.
+        n = len(pid_to_cid)
+        if n == 0 or sorted(pid_to_cid.keys()) != list(range(n)):
+            return
+
+        self._partition_to_cid = pid_to_cid
+        self._cid_to_partition = cid_to_pid
+        self._partition_map_built = True
+
     def _sample_cohort(self, client_manager) -> Dict[str, ClientProxy]:
         """
         Select this round's participating clients, keyed by client id.
+
+        Sampling happens in partition-id space (0..N-1) whenever the partition
+        map can be built -- this is what makes cohorts across arms with the
+        same seed line up on the same underlying data clients. See
+        _ensure_partition_map for why cid-space sampling is not enough.
 
         Falls back to full participation only when the client manager cannot
         sample, so older mocks and single-cohort setups keep working.
@@ -353,15 +446,37 @@ class TavsEspStrategy(Strategy):
         sample_size = max(1, min(requested, num_available))
         min_num = min(getattr(self.config, "min_available_clients", sample_size), num_available)
 
+        deterministic = getattr(self.config, "deterministic_sampling", True)
+
+        # Preferred path: partition-id-space sampling. Stable across arms.
+        if deterministic:
+            self._ensure_partition_map(client_manager)
+            if self._partition_map_built:
+                pool_size = len(self._partition_to_cid)
+                k = min(sample_size, pool_size)
+                rng = random.Random(
+                    f"{getattr(self.config, 'sampling_seed', 0)}_{self._current_round}"
+                )
+                selected_pids = rng.sample(range(pool_size), k)
+                proxies = client_manager.all()
+                sampled = []
+                for pid in selected_pids:
+                    cid = self._partition_to_cid[pid]
+                    proxy = proxies.get(cid)
+                    if proxy is not None:
+                        sampled.append(proxy)
+                if sampled:
+                    return {p.cid: p for p in sampled}
+            # If the map failed to build, fall through to the legacy path so
+            # tests with mock managers still get a well-defined cohort.
+
         sampled = client_manager.sample(num_clients=sample_size, min_num_clients=min_num)
 
-        # Flower samples with its own module-level RNG, which our seed never
-        # touches. That is why re-running the same seed changed verification
-        # counts (107 -> 112) and moved late accuracy by up to 0.092. Re-select
-        # deterministically from the returned pool instead: sort by client id so
-        # the order does not depend on Flower's internal state, then draw with a
-        # generator keyed on (round, seed).
-        if getattr(self.config, "deterministic_sampling", True) and hasattr(client_manager, "all"):
+        # Legacy fallback: sort cids and re-draw with our own seeded RNG. Not
+        # stable across arms in a real Flower simulation (that is exactly what
+        # the partition-id path above is for), but keeps unit tests that hand
+        # us a mock ClientManager deterministic.
+        if deterministic and hasattr(client_manager, "all"):
             pool = sorted(client_manager.all().values(), key=lambda p: p.cid)
             if len(pool) >= sample_size:
                 rng = random.Random(
