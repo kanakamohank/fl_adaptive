@@ -36,13 +36,26 @@ REPO = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)
 sys.path.insert(0, REPO)
 
 
-def _has_simulation_backend() -> bool:
+def _require_simulation_backend() -> None:
+    """
+    Fail loudly rather than silently skipping.
+
+    The cohort-alignment invariant is exactly what would silently regress if
+    the partition-map code path breaks; a test that prints SKIP and returns
+    True in a ray-less env would go green while the real bug came back. Any
+    env intended to run the pilot MUST have flwr[simulation] + ray, so if
+    they are missing we raise -- CI notices, we notice, the pilot doesn't
+    silently run on stale infra.
+    """
     try:
         import ray  # noqa: F401
         from flwr.simulation import run_simulation  # noqa: F401
-        return True
-    except Exception:
-        return False
+    except Exception as e:
+        raise RuntimeError(
+            "test_cohort_alignment requires flwr[simulation] + ray so that "
+            "the partition-map path can actually be exercised. Missing: "
+            f"{type(e).__name__}: {e}. Install with `pip install \"flwr[simulation]\"`."
+        )
 
 
 def _run_arm(arm_name, strategy_cls, seed=42, num_clients=12, cpr=4, rounds=3):
@@ -132,20 +145,23 @@ def _run_arm(arm_name, strategy_cls, seed=42, num_clients=12, cpr=4, rounds=3):
     return {r: v[0] for r, v in partitions_by_round.items()}
 
 
+NUM_CLIENTS = 12
+CPR = 4
+NUM_ROUNDS = 3
+
+
 def test_cross_arm_cohort_alignment():
     """The three strategies must sample IDENTICAL partition-id cohorts per
     round when handed the same seed."""
-    if not _has_simulation_backend():
-        print("SKIP: flwr[simulation] / ray not installed in this env")
-        return True
+    _require_simulation_backend()
 
     from src.tavs_v2.tavs_esp_strategy import (
         FullVerificationStrategy, RandomSkipStrategy,
     )
 
-    tavs = _run_arm("tavs", None)
-    rand = _run_arm("random", RandomSkipStrategy)
-    full = _run_arm("full", FullVerificationStrategy)
+    tavs = _run_arm("tavs", None, num_clients=NUM_CLIENTS, cpr=CPR, rounds=NUM_ROUNDS)
+    rand = _run_arm("random", RandomSkipStrategy, num_clients=NUM_CLIENTS, cpr=CPR, rounds=NUM_ROUNDS)
+    full = _run_arm("full", FullVerificationStrategy, num_clients=NUM_CLIENTS, cpr=CPR, rounds=NUM_ROUNDS)
 
     # 1) All three saw the same rounds
     assert set(tavs) == set(rand) == set(full), (
@@ -160,18 +176,29 @@ def test_cross_arm_cohort_alignment():
             f"  random = {rand[r]}\n"
             f"  full   = {full[r]}"
         )
-        # 3) Sanity: no bogus -1 sentinels leaked in (would mean partition
-        # map was incomplete).
+        # 3) No bogus -1 sentinels (would mean partition map was incomplete).
         assert all(p >= 0 for p in tavs[r]), f"round {r}: partition map incomplete: {tavs[r]}"
 
-    # 4) Cohorts should differ ROUND TO ROUND (otherwise we froze the
-    # federation). Cross-arm identity plus round-to-round variation is the
-    # exact invariant we want.
+        # 4) Partial participation actually happened: cohort size == cpr and
+        # strictly smaller than the pool. Without this a subclass override
+        # returning "everyone" would still trivially pass the cross-arm
+        # equality above, proving nothing about partition-id-space sampling.
+        assert len(tavs[r]) == CPR, (
+            f"round {r}: expected cohort of size {CPR}, got {len(tavs[r])}"
+        )
+        assert len(tavs[r]) < NUM_CLIENTS, (
+            f"round {r}: cohort {tavs[r]} contains every client; partial "
+            f"participation was not exercised"
+        )
+
+    # 5) Every round's cohort is distinct. A regression that froze cohorts
+    # for most rounds but not all would slip past a weaker "some pair differs"
+    # check; requiring full distinctness catches it.
     rounds = sorted(tavs.keys())
-    assert len(rounds) >= 2
-    changed = any(tavs[rounds[i]] != tavs[rounds[i + 1]]
-                  for i in range(len(rounds) - 1))
-    assert changed, f"cohorts identical across every round: {tavs}"
+    unique_cohorts = {tuple(tavs[r]) for r in rounds}
+    assert len(unique_cohorts) == len(rounds), (
+        f"cohorts repeat across rounds: {tavs}"
+    )
 
     print(f"✓ per-round cohorts identical across TAVS / RandomSkip / FullVerify")
     for r in rounds:
@@ -179,13 +206,112 @@ def test_cross_arm_cohort_alignment():
     return True
 
 
+def test_partition_map_failure_raises_in_deterministic_mode():
+    """A get_properties failure MUST NOT silently fall back to the cid-sort
+    path -- that would reintroduce cross-arm divergence invisibly. In
+    deterministic_sampling mode the strategy raises and the run aborts."""
+    _require_simulation_backend()
+
+    from src.tavs_v2.tavs_esp_strategy import (
+        TavsEspStrategy, TavsEspConfig,
+    )
+    from src.core.models import ModelStructure
+
+    struct = ModelStructure()
+    struct.add_block("b0", (2,), 2)
+
+    cfg = TavsEspConfig()
+    cfg.min_fit_clients = 2
+    cfg.min_available_clients = 4
+    cfg.deterministic_sampling = True
+    cfg.sampling_seed = 42
+    strat = TavsEspStrategy(config=cfg, model_structure=struct)
+
+    class BadProxy:
+        cid = "bad-cid"
+        def get_properties(self, ins=None, timeout=None, group_id=None):
+            raise TimeoutError("simulated ray race")
+
+    class ManagerWithBadProxy:
+        def all(self):
+            return {"bad-cid": BadProxy()}
+        def num_available(self):
+            return 1
+        def sample(self, num_clients, min_num_clients):
+            return [BadProxy()]
+        def wait_for(self, num_clients, timeout):
+            return True
+
+    strat._current_round = 1
+    try:
+        strat._sample_cohort(ManagerWithBadProxy())
+    except RuntimeError as e:
+        assert "Partition-map bootstrap failed" in str(e), (
+            f"expected explicit refusal message; got {e!r}"
+        )
+        assert strat._partition_map_status == "failed"
+        print("✓ get_properties failure raises RuntimeError in deterministic mode "
+              "(no silent fallback)")
+        return True
+    raise AssertionError(
+        "_sample_cohort silently fell back after get_properties failure -- "
+        "this is exactly the regression the fix was written to prevent."
+    )
+
+
+def test_partition_map_status_latches():
+    """Once _partition_map_status is set, it does NOT re-attempt the sweep
+    every round. Prevents the 30s wait_for perf cliff on repeated failure."""
+    _require_simulation_backend()
+
+    from src.tavs_v2.tavs_esp_strategy import TavsEspStrategy, TavsEspConfig
+    from src.core.models import ModelStructure
+
+    struct = ModelStructure()
+    struct.add_block("b0", (2,), 2)
+
+    cfg = TavsEspConfig()
+    cfg.min_fit_clients = 2
+    cfg.min_available_clients = 4
+    strat = TavsEspStrategy(config=cfg, model_structure=struct)
+
+    call_count = {"n": 0}
+
+    class TrackingManager:
+        def all(self):
+            call_count["n"] += 1
+            return {}
+        def wait_for(self, num_clients, timeout):
+            return True
+
+    strat._ensure_partition_map(TrackingManager())
+    assert strat._partition_map_status == "failed"
+    first_calls = call_count["n"]
+
+    # Additional calls must NOT invoke .all() again -- the latch is what
+    # keeps the 30s wait_for from being paid every round in a broken run.
+    for _ in range(3):
+        strat._ensure_partition_map(TrackingManager())
+    assert call_count["n"] == first_calls, (
+        f"_ensure_partition_map re-ran the sweep after status was latched "
+        f"({first_calls} -> {call_count['n']})"
+    )
+    print("✓ _partition_map_status latches; no repeated get_properties sweeps")
+    return True
+
+
 def main():
     print("🧪 Cross-arm cohort alignment test")
     print("=" * 60)
-    ok = test_cross_arm_cohort_alignment()
-    if ok:
-        print("\n🎯 cohort alignment test PASSED")
-    return ok
+    tests = [
+        test_cross_arm_cohort_alignment,
+        test_partition_map_failure_raises_in_deterministic_mode,
+        test_partition_map_status_latches,
+    ]
+    for t in tests:
+        assert t() is True
+    print("\n🎯 all cohort alignment tests PASSED")
+    return True
 
 
 if __name__ == "__main__":

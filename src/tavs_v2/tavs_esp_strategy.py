@@ -298,13 +298,28 @@ class TavsEspStrategy(Strategy):
         # verified by a Flower-only probe with the model and data removed.
         #
         # The fix is to sample in a namespace that is identical across arms
-        # by construction: the partition-id 0..N-1 that we hand each client
-        # via node_config. _ensure_partition_map() populates these bidirectional
+        # by construction: the partition-id that we hand each client via
+        # node_config. _ensure_partition_map() populates these bidirectional
         # maps once from a GetProperties sweep at the top of round 1; the
         # cohort selector then draws partition-ids and translates back to cids.
+        #
+        # Status values:
+        #   "unbuilt"         - not yet attempted
+        #   "ready"           - map built successfully
+        #   "not_applicable"  - client manager is a mock (no get_properties on
+        #                       its proxies); legacy sorted-cid path is used
+        #                       and cross-arm alignment is out of scope
+        #                       (unit-test-only)
+        #   "failed"          - real Flower manager but the sweep failed. In
+        #                       deterministic_sampling mode this raises rather
+        #                       than silently falling back, so a Ray race or
+        #                       proxy timeout can never invisibly reintroduce
+        #                       the cohort-divergence bug the fix targets.
+        # Once "ready", "not_applicable", or "failed", the status is latched
+        # for the run.
         self._partition_to_cid: Dict[int, str] = {}
         self._cid_to_partition: Dict[str, int] = {}
-        self._partition_map_built: bool = False
+        self._partition_map_status: str = "unbuilt"
 
         # Global parameters handed out this round, kept as blocks. The cosine
         # gate needs them as the origin: clients send full parameters, so a
@@ -364,79 +379,127 @@ class TavsEspStrategy(Strategy):
         sweep of every registered ClientProxy.
 
         The partition-id is what makes cohorts comparable across arms: it is
-        assigned deterministically by Flower's simulation node_config
-        ("partition-id" == the supernode index 0..N-1) and is echoed by each
-        client's get_properties(). The cid, by contrast, is a fresh random
+        assigned deterministically by Flower's simulation node_config and is
+        echoed by each client's get_properties(). The cid is a fresh random
         64-bit integer per simulation call, so it cannot be used as a stable
         identity across arms.
 
-        Idempotent; no-op after the first successful build. Any failure
-        (client manager without wait_for, proxies without get_properties, a
-        proxy that fails to answer, or a client whose properties omit
-        partition-id) leaves the maps empty and _sample_cohort falls back to
-        the legacy sorted-cid path, so unit tests with mock managers keep
-        working.
+        Latches its result into self._partition_map_status:
+            "ready"          -- map built, sampling can key on partition-ids
+            "not_applicable" -- mock client manager (unit tests); sample
+                                cohort falls back to the legacy sorted-cid
+                                path with no cross-arm alignment guarantee
+            "failed"         -- real manager but the sweep failed; _sample_cohort
+                                REFUSES to silently fall back in deterministic
+                                mode and raises instead. The point of this
+                                latch is that a Ray race or proxy timeout can
+                                never invisibly reintroduce the cohort-
+                                divergence bug this method was written to fix.
+
+        Once latched, the method is a no-op (which also prevents a failed
+        first attempt from being retried at 30s cost every round).
+
+        Deliberately does NOT require partition-ids to form a contiguous
+        0..N-1 range. Whatever pids answer are what we sample from -- as long
+        as the set is the same across arms (which is true because
+        node_config partition-ids are assigned by Flower, not by the
+        strategy), sampling on that set gives identical cohorts across arms.
         """
-        if self._partition_map_built:
+        if self._partition_map_status != "unbuilt":
             return
         if not hasattr(client_manager, "all"):
+            self._partition_map_status = "not_applicable"
             return
 
-        # Wait for the full expected pool, if the manager supports it. Ray brings
-        # supernodes up lazily, so client_manager.all() at initialize_parameters
-        # or the first configure_fit can be short by several proxies.
         expected = getattr(self.config, "min_available_clients", 0) or 0
         if expected and hasattr(client_manager, "wait_for"):
             try:
                 client_manager.wait_for(num_clients=expected, timeout=30)
-            except Exception:
-                # Fall through: we will map whatever is registered.
-                pass
+            except Exception as e:
+                # wait_for failing means we cannot trust we have all clients;
+                # do not silently push through with a partial map.
+                logger.error(
+                    "partition-map bootstrap: wait_for(%s, timeout=30) raised %s: %s",
+                    expected, type(e).__name__, e,
+                )
+                self._partition_map_status = "failed"
+                return
 
         proxies = client_manager.all()
+        if not proxies:
+            logger.error("partition-map bootstrap: client_manager.all() returned empty")
+            self._partition_map_status = "failed"
+            return
+
+        # Detect the mock-manager case: at least one proxy without a real
+        # get_properties method means we are in a unit test. That is fine but
+        # we cannot align cohorts across arms, so mark not_applicable.
+        for _cid, proxy in proxies.items():
+            if not hasattr(proxy, "get_properties"):
+                self._partition_map_status = "not_applicable"
+                return
+
         pid_to_cid: Dict[int, str] = {}
         cid_to_pid: Dict[str, int] = {}
         for cid, proxy in proxies.items():
-            if not hasattr(proxy, "get_properties"):
-                return  # mock manager -- leave maps empty
             try:
                 res = proxy.get_properties(
                     ins=GetPropertiesIns(config={}), timeout=30, group_id=None
                 )
-                pid = res.properties.get("partition-id")
-            except Exception:
+            except Exception as e:
+                logger.error(
+                    "partition-map bootstrap: get_properties on cid=%s raised %s: %s",
+                    cid, type(e).__name__, e,
+                )
+                self._partition_map_status = "failed"
                 return
+            pid = res.properties.get("partition-id") if getattr(res, "properties", None) else None
             if pid is None:
+                logger.error("partition-map bootstrap: cid=%s reported no partition-id", cid)
+                self._partition_map_status = "failed"
                 return
             pid_int = int(pid)
             if pid_int in pid_to_cid:
-                # Two proxies claiming the same partition-id: something is very
-                # wrong; refuse to build the map rather than silently pick one.
+                # Two proxies claiming the same partition-id is not a benign
+                # skew; refuse rather than silently pick one.
+                logger.error(
+                    "partition-map bootstrap: duplicate partition-id %s (cids %s and %s)",
+                    pid_int, pid_to_cid[pid_int], cid,
+                )
+                self._partition_map_status = "failed"
                 return
             pid_to_cid[pid_int] = cid
             cid_to_pid[cid] = pid_int
 
-        # Sanity: partition-ids must form a contiguous 0..N-1 range for the
-        # index-based sampling below to be well-defined.
-        n = len(pid_to_cid)
-        if n == 0 or sorted(pid_to_cid.keys()) != list(range(n)):
+        if not pid_to_cid:
+            self._partition_map_status = "failed"
             return
 
         self._partition_to_cid = pid_to_cid
         self._cid_to_partition = cid_to_pid
-        self._partition_map_built = True
+        self._partition_map_status = "ready"
 
     def _sample_cohort(self, client_manager) -> Dict[str, ClientProxy]:
         """
         Select this round's participating clients, keyed by client id.
 
-        Sampling happens in partition-id space (0..N-1) whenever the partition
-        map can be built -- this is what makes cohorts across arms with the
-        same seed line up on the same underlying data clients. See
-        _ensure_partition_map for why cid-space sampling is not enough.
+        Sampling happens in partition-id space whenever the partition map
+        builds (`_partition_map_status == "ready"`). That is the path that
+        aligns cohorts across arms with the same seed.
 
-        Falls back to full participation only when the client manager cannot
-        sample, so older mocks and single-cohort setups keep working.
+        The three failure modes are handled explicitly, NOT by silently
+        falling through:
+          * "ready"          -> sample partition-ids, translate to cids.
+                                Every selected pid MUST resolve to a proxy;
+                                if any does not, raise, because the alt-path
+                                is exactly the divergent behaviour this
+                                method was written to eliminate.
+          * "not_applicable" -> legacy sorted-cid path. Unit tests with mock
+                                ClientManagers land here; they are already
+                                out of scope for cross-arm alignment.
+          * "failed"         -> raise in deterministic_sampling mode. Silent
+                                fallback here is what would reintroduce the
+                                cohort-divergence bug invisibly.
         """
         if not hasattr(client_manager, "sample") or not hasattr(client_manager, "num_available"):
             return dict(client_manager.all())
@@ -445,37 +508,65 @@ class TavsEspStrategy(Strategy):
         requested = getattr(self.config, "min_fit_clients", num_available)
         sample_size = max(1, min(requested, num_available))
         min_num = min(getattr(self.config, "min_available_clients", sample_size), num_available)
-
         deterministic = getattr(self.config, "deterministic_sampling", True)
 
-        # Preferred path: partition-id-space sampling. Stable across arms.
         if deterministic:
             self._ensure_partition_map(client_manager)
-            if self._partition_map_built:
-                pool_size = len(self._partition_to_cid)
-                k = min(sample_size, pool_size)
+            status = self._partition_map_status
+
+            if status == "ready":
+                # Sort available pids so the rng draws from a stable ordering
+                # across arms (the pid SET is stable by construction, but the
+                # dict insertion order isn't guaranteed to be).
+                available_pids = sorted(self._partition_to_cid.keys())
+                k = min(sample_size, len(available_pids))
+                if k <= 0:
+                    raise RuntimeError(
+                        f"_sample_cohort: computed sample_size={sample_size} with "
+                        f"{len(available_pids)} partitions available; cannot sample."
+                    )
                 rng = random.Random(
                     f"{getattr(self.config, 'sampling_seed', 0)}_{self._current_round}"
                 )
-                selected_pids = rng.sample(range(pool_size), k)
+                selected_pids = rng.sample(available_pids, k)
                 proxies = client_manager.all()
                 sampled = []
+                missing_pids = []
                 for pid in selected_pids:
                     cid = self._partition_to_cid[pid]
                     proxy = proxies.get(cid)
-                    if proxy is not None:
+                    if proxy is None:
+                        missing_pids.append(pid)
+                    else:
                         sampled.append(proxy)
-                if sampled:
-                    return {p.cid: p for p in sampled}
-            # If the map failed to build, fall through to the legacy path so
-            # tests with mock managers still get a well-defined cohort.
+                if missing_pids:
+                    raise RuntimeError(
+                        f"_sample_cohort: partition-map contained {len(missing_pids)} "
+                        f"partition-ids whose cids are no longer in client_manager.all(): "
+                        f"{missing_pids}. Refusing to fall back to a divergent "
+                        f"code path silently."
+                    )
+                return {p.cid: p for p in sampled}
+
+            if status == "failed":
+                # Loud on purpose. Do NOT let the divergent legacy path run
+                # under deterministic sampling.
+                raise RuntimeError(
+                    "Partition-map bootstrap failed; refusing to fall back to "
+                    "the legacy sorted-cid path in deterministic_sampling mode "
+                    "because that path does not align cohorts across arms. "
+                    "See tavs_esp_strategy.py::_ensure_partition_map error log."
+                )
+            # status == "not_applicable" (mock manager): fall through to the
+            # legacy path below.
 
         sampled = client_manager.sample(num_clients=sample_size, min_num_clients=min_num)
 
-        # Legacy fallback: sort cids and re-draw with our own seeded RNG. Not
-        # stable across arms in a real Flower simulation (that is exactly what
-        # the partition-id path above is for), but keeps unit tests that hand
-        # us a mock ClientManager deterministic.
+        # Legacy fallback: sort cids and re-draw with our own seeded RNG.
+        # Only reached for mock ClientManagers (not_applicable) or with
+        # deterministic_sampling explicitly disabled. Not stable across arms
+        # in a real Flower simulation; that is what the partition-id path is
+        # for.
         if deterministic and hasattr(client_manager, "all"):
             pool = sorted(client_manager.all().values(), key=lambda p: p.cid)
             if len(pool) >= sample_size:
