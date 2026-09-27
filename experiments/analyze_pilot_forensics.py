@@ -234,22 +234,45 @@ def trust_bimodality(experiment_summary: Dict) -> Dict:
     }
 
 
+def _promoted_by_client_config_id(pr: Dict, arm: str = "") -> Optional[List[set]]:
+    """Same as _per_round_promoted_by_cid, but translated to
+    client_config_id ("honest_XX") sets using this run's own
+    cid_to_client_config_id bridge. Required for cross-arm comparisons:
+    Flower's simulation assigns each ClientProxy a fresh random cid per
+    run_simulation() call, so two arms' cid namespaces are disjoint even
+    when their partition-id cohorts are IDENTICAL after the cohort-alignment
+    fix. Comparing promoted-sets by cid then yields Jaccard=0 by
+    construction rather than as a real measurement.
+    """
+    p_by_cid = _per_round_promoted_by_cid(pr, arm)
+    if p_by_cid is None:
+        return None
+    bridge = pr.get("cid_to_client_config_id") or {}
+    if not bridge:
+        return None
+    return [{bridge.get(cid, cid) for cid in s} for s in p_by_cid]
+
+
 def skip_decision_overlap(pr_a: Dict, pr_b: Dict,
                           arm_a: str = "", arm_b: str = "") -> Dict:
     """Per-round Jaccard between the promoted sets of two arms (same seed).
+
+    Compared in client_config_id ("honest_XX") space, not cid space. See
+    _promoted_by_client_config_id for why the cid-namespace comparison
+    that this function used previously was broken (Jaccard always 0).
 
     If Jaccard is high (>0.7) across most rounds, the two policies pick
     nearly the same clients to skip -- they are effectively the same policy
     on THIS data, and any accuracy difference is coming from something other
     than "who to skip."
     """
-    Pa = _per_round_promoted_by_cid(pr_a, arm_a)
-    Pb = _per_round_promoted_by_cid(pr_b, arm_b)
+    Pa = _promoted_by_client_config_id(pr_a, arm_a)
+    Pb = _promoted_by_client_config_id(pr_b, arm_b)
     if Pa is None or Pb is None:
         return {"per_round_jaccard": [], "mean": None,
                 "unavailable": True,
-                "reason": "one or both arms lack round_assignments in cache "
-                          "and cannot use the tier_evolution fallback"}
+                "reason": "one or both arms lack round_assignments or the "
+                          "cid_to_client_config_id bridge in cache"}
     rounds = min(len(Pa), len(Pb))
     jacs = []
     for r in range(rounds):
