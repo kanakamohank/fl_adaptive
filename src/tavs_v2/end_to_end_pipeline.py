@@ -331,7 +331,8 @@ class TAVSESPPipeline:
                 return create_tavs_flower_client(
                     config=client_config,
                     train_loader=train_loader,
-                    test_loader=None
+                    test_loader=None,
+                    partition_id=partition_id,
                 ).to_client()
 
             except Exception as e:

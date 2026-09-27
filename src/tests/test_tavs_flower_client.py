@@ -382,6 +382,38 @@ def test_evaluation_functionality():
     return True
 
 
+def test_get_properties_reports_partition_id():
+    """The strategy builds its cid <-> partition-id map from
+    proxy.get_properties(); if this returns anything other than a
+    {'partition-id': <int>} dict, _ensure_partition_map raises and the
+    whole run aborts (which is exactly what happened before this test
+    existed). Lock the contract."""
+    from src.clients.tavs_flower_client import TAVSFlowerClient, TAVSClientConfig
+    print("\nTesting get_properties partition-id reporting...")
+
+    cfg = TAVSClientConfig(
+        client_id="honest_07", client_type="honest", model_type="cifar_cnn",
+        epochs=1, batch_size=32, learning_rate=0.01,
+    )
+    client = TAVSFlowerClient(cfg, train_loader=create_mock_data_loader(),
+                              partition_id=7)
+    props = client.get_properties({})
+    assert props == {"partition-id": 7}, (
+        f"expected {{'partition-id': 7}}, got {props!r}"
+    )
+
+    # Without partition_id, the client returns the -1 sentinel so the
+    # strategy's duplicate-pid check catches it loudly rather than a
+    # KeyError deep inside GetProperties handling.
+    fallback = TAVSFlowerClient(cfg, train_loader=create_mock_data_loader())
+    props2 = fallback.get_properties({})
+    assert props2 == {"partition-id": -1}, (
+        f"expected fallback {{'partition-id': -1}}, got {props2!r}"
+    )
+    print("✓ get_properties reports partition-id (real and -1 fallback)")
+    return True
+
+
 def main():
     """Run all TAVS Flower client tests."""
     print("🧪 TAVS Flower Client Test Suite")
@@ -409,7 +441,10 @@ def main():
         # Test 7: Evaluation
         success7 = test_evaluation_functionality()
 
-        if all([success1, success2, success3, success4, success5, success6, success7]):
+        # Test 8: partition-id reporting for the cohort-alignment contract
+        success8 = test_get_properties_reports_partition_id()
+
+        if all([success1, success2, success3, success4, success5, success6, success7, success8]):
             print(f"\n🎯 All TAVS Flower Client tests PASSED!")
             print("✓ Client initialization working")
             print("✓ Parameter serialization working")
