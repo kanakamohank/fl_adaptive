@@ -76,7 +76,8 @@ class TAVSFlowerClient(NumPyClient):
     def __init__(self,
                  config: TAVSClientConfig,
                  train_loader = None,
-                 test_loader = None):
+                 test_loader = None,
+                 partition_id: int = None):
         """
         Initialize TAVS Flower client.
 
@@ -84,12 +85,17 @@ class TAVSFlowerClient(NumPyClient):
             config: Client configuration including type and parameters
             train_loader: Training data loader
             test_loader: Test data loader (optional)
+            partition_id: The client's partition index (0..num_clients-1) as
+                assigned by Flower's node_config. Reported via get_properties
+                so the strategy can build a stable cid <-> partition-id map
+                for cross-arm cohort alignment.
         """
         super().__init__()
 
         self.config = config
         self.train_loader = train_loader
         self.test_loader = test_loader
+        self.partition_id = partition_id
 
         # Initialize underlying client based on type
         self.underlying_client = self._create_underlying_client()
@@ -107,6 +113,21 @@ class TAVSFlowerClient(NumPyClient):
         self.assignment_history = []
 
         logger.info(f"TAVS Flower Client initialized: {config.client_id} ({config.client_type})")
+
+    def get_properties(self, config: Dict[str, Scalar]) -> Dict[str, Scalar]:
+        """Report the client's partition-id so the strategy can build a
+        stable cid <-> partition-id map. The strategy uses this to sample
+        cohorts in partition-id space, which is identical across arms with
+        the same seed (cid is a per-simulation random 64-bit int and cannot
+        be used for cross-arm alignment). See TavsEspStrategy._ensure_partition_map.
+
+        Returns -1 when the client was constructed without partition_id --
+        old-style tests / direct instantiations. Strategy code treats a
+        missing partition-id as a bootstrap failure and raises loudly, so
+        real pipelines cannot silently regress to divergent cohorts.
+        """
+        pid = self.partition_id if self.partition_id is not None else -1
+        return {"partition-id": int(pid)}
 
     def get_parameters(self, config: Dict[str, Scalar]) -> NDArrays:
         """Get model parameters as NumPy arrays."""
@@ -447,7 +468,8 @@ class TAVSFlowerClient(NumPyClient):
 
 def create_tavs_flower_client(config: TAVSClientConfig,
                              train_loader = None,
-                             test_loader = None) -> TAVSFlowerClient:
+                             test_loader = None,
+                             partition_id: int = None) -> TAVSFlowerClient:
     """
     Factory function to create TAVS Flower clients.
 
@@ -455,6 +477,8 @@ def create_tavs_flower_client(config: TAVSClientConfig,
         config: Client configuration
         train_loader: Training data loader
         test_loader: Test data loader (optional)
+        partition_id: Partition index for cross-arm cohort alignment
+            (see TAVSFlowerClient.__init__).
 
     Returns:
         Configured TAVSFlowerClient instance
@@ -462,5 +486,6 @@ def create_tavs_flower_client(config: TAVSClientConfig,
     return TAVSFlowerClient(
         config=config,
         train_loader=train_loader,
-        test_loader=test_loader
+        test_loader=test_loader,
+        partition_id=partition_id,
     )
