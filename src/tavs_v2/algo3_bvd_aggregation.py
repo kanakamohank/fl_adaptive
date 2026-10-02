@@ -103,12 +103,69 @@ class BlockVarianceDetector:
                 self.sigma_sq[m] = max(median_dist, self.epsilon_stab)
 
         # 2b. Standardised deviation and the outlier verdict.
+        #
+        # Record per-client (raw_distance, sigma_sq, max_z) at the argmax block
+        # so a downstream diagnostic can split noisy vs clean and ask three
+        # questions in isolation:
+        #   - do noisy clients' raw distances separate from clean ones?
+        #   - does sigma_sq slow-move enough to swallow the signal?
+        #   - is tau_z calibrated for the actual Z distribution?
+        # Prior analysis assumed BVD was scale-invariant; the code is not --
+        # sigma is a slow EMA (alpha_sigma=0.9 by default), so a small gap in
+        # raw_distance can still fail to cross tau_z=5 if the gap is below
+        # natural round-to-round variance.
+        per_client_stats: Dict[str, Dict[str, float]] = {}
+        # Build per-block rank tables for the argmax-block rank lookup below.
+        # The rank is 1-indexed: the client with the SMALLEST raw_distance at a
+        # block has rank 1, the LARGEST has rank n. Lets a downstream diagnostic
+        # distinguish "noisy clients are the top-raw-dist clients but Z still
+        # misses" from "noisy clients aren't even in the top-k by raw distance."
+        per_block_rank: Dict[str, Dict[str, int]] = {}
+        for m in first_client.keys():
+            ordered = sorted(verified_clients,
+                             key=lambda c: raw_distances[c].get(m, 0.0))
+            per_block_rank[m] = {cid: rank for rank, cid in enumerate(ordered, start=1)}
+
         for cid in verified_clients:
-            max_z = max(
-                raw_distances[cid][m] / (self.sigma_sq[m] + self.epsilon_stab)
-                for m in raw_distances[cid]
-            ) if raw_distances[cid] else 0.0
+            if not raw_distances[cid]:
+                client_max_distances[cid] = 0.0
+                inliers.add(cid)
+                per_client_stats[cid] = {
+                    "max_z": 0.0, "raw_dist_at_argmax": 0.0,
+                    "sigma_sq_at_argmax": 0.0, "argmax_block": "",
+                    "rank_raw_at_argmax": 0, "cohort_size_at_argmax": 0,
+                }
+                continue
+            # Seed best_z with -inf and track whether we ever saw a non-NaN
+            # candidate. A client whose every Z is NaN would otherwise end up
+            # with best_block=None and KeyError below.
+            best_block, best_z = None, float("-inf")
+            for m, dist in raw_distances[cid].items():
+                denom = self.sigma_sq[m] + self.epsilon_stab
+                z = dist / denom
+                if math.isnan(z):
+                    continue
+                if z > best_z:
+                    best_z, best_block = z, m
+            if best_block is None:
+                client_max_distances[cid] = 0.0
+                inliers.add(cid)
+                per_client_stats[cid] = {
+                    "max_z": 0.0, "raw_dist_at_argmax": 0.0,
+                    "sigma_sq_at_argmax": 0.0, "argmax_block": "",
+                    "rank_raw_at_argmax": 0, "cohort_size_at_argmax": 0,
+                }
+                continue
+            max_z = best_z
             client_max_distances[cid] = max_z
+            per_client_stats[cid] = {
+                "max_z": float(max_z),
+                "raw_dist_at_argmax": float(raw_distances[cid][best_block]),
+                "sigma_sq_at_argmax": float(self.sigma_sq[best_block]),
+                "argmax_block": best_block,
+                "rank_raw_at_argmax": int(per_block_rank[best_block][cid]),
+                "cohort_size_at_argmax": int(len(per_block_rank[best_block])),
+            }
             if max_z > self.tau_z:
                 outliers.add(cid)
             else:
@@ -174,6 +231,12 @@ class BlockVarianceDetector:
             "sigma_sq_median": sorted(self.sigma_sq.values())[len(self.sigma_sq) // 2]
                                if self.sigma_sq else None,
             "sigma_sq_max": max(self.sigma_sq.values()) if self.sigma_sq else None,
+            # Per-verified-client (cid -> {max_z, raw_dist_at_argmax,
+            # sigma_sq_at_argmax, argmax_block}). Serialised into
+            # scheduling_history by the strategy; a downstream diagnostic joins
+            # against the noisy-client identity map to split noisy vs clean and
+            # distinguish SNR-too-low from sigma-eating-signal from tau_z-too-high.
+            "per_client": per_client_stats,
         }
 
         # 4. Calculate continuous behavior scores \varphi_i(r) for trust EMA.
