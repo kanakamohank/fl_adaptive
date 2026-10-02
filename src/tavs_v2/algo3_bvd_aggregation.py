@@ -115,11 +115,15 @@ class BlockVarianceDetector:
         # raw_distance can still fail to cross tau_z=5 if the gap is below
         # natural round-to-round variance.
         per_client_stats: Dict[str, Dict[str, float]] = {}
-        # Build per-block rank tables for the argmax-block rank lookup below.
-        # The rank is 1-indexed: the client with the SMALLEST raw_distance at a
-        # block has rank 1, the LARGEST has rank n. Lets a downstream diagnostic
-        # distinguish "noisy clients are the top-raw-dist clients but Z still
-        # misses" from "noisy clients aren't even in the top-k by raw distance."
+        # Build per-block COHORT-RANK tables for the argmax-block rank lookup
+        # below. Rank is 1-indexed over the full verified_clients set
+        # (INCLUDES the client being ranked): client with smallest raw_distance
+        # at a block ranks 1, largest ranks N. Note this is NOT leave-one-out:
+        # the client's own distance is in the sort, which matters conceptually
+        # at small N but gives a well-defined comparison at any size. Lets a
+        # downstream diagnostic distinguish "noisy clients are the top-raw-dist
+        # clients but Z still misses" from "noisy clients aren't even in the
+        # top-k by raw distance."
         per_block_rank: Dict[str, Dict[str, int]] = {}
         for m in first_client.keys():
             ordered = sorted(verified_clients,

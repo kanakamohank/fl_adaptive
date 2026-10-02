@@ -190,7 +190,7 @@ def report(rows, noisy, tau_z: float = 5.0):
     if all_noisy_rank and cohort_sizes:
         med_rank = sorted(all_noisy_rank)[len(all_noisy_rank)//2]
         med_cs = sorted(cohort_sizes)[len(cohort_sizes)//2]
-        print(f"  noisy clients' median LOO-rank at argmax block: "
+        print(f"  noisy clients' median cohort-rank at argmax block: "
               f"{med_rank}/{med_cs} (rank=cohort_size would mean 'always top-raw')")
 
     print()
@@ -201,7 +201,7 @@ def report(rows, noisy, tau_z: float = 5.0):
           f"({(100.0*cross_count/noisy_rows_total) if noisy_rows_total else 0.0:.1f}%)")
 
     verdict = _verdict(sep_rounds_rawdist, sep_rounds_z, cross_count,
-                       noisy_rows_total, len(rounds))
+                       noisy_rows_total, len(rounds), tau_z=tau_z)
     print()
     print(f"VERDICT (single-run; aggregate across seeds before claiming the mechanism works):")
     for line in verdict.split("\n"):
@@ -209,17 +209,27 @@ def report(rows, noisy, tau_z: float = 5.0):
     return verdict
 
 
-def _verdict(sep_raw: int, sep_z: int, cross: int, noisy_total: int, rounds: int) -> str:
+_SEP_FRAC = 0.6     # >= this fraction of rounds with noisy-median > clean-median
+_FIRES_FRAC = 0.25  # >= this fraction of noisy-client-rounds crossing tau_z
+
+
+def _verdict(sep_raw: int, sep_z: int, cross: int, noisy_total: int,
+             rounds: int, tau_z: float = 5.0) -> str:
     """Classify this single run.
 
     Deliberately covers all four quadrants of (raw_strong, z_strong), plus
-    the two detector-fires-anyway cases. Thresholds are intentionally loose
-    on a single run (>=60% of rounds for separation; >=25% noisy-rows across
-    tau_z for detector-fires). Aggregating across seeds should tighten these.
+    the two detector-fires-anyway cases. Thresholds (_SEP_FRAC, _FIRES_FRAC)
+    are exposed as module-level constants so tests can import them rather
+    than coupling to magic numbers. Aggregating across seeds should tighten
+    these.
+
+    tau_z is threaded through only to appear accurately in the calibration-
+    miss message. All classification is on the pre-computed counts; the
+    threshold itself was applied upstream when `cross` was tallied.
     """
-    raw_strong = sep_raw >= 0.6 * rounds
-    z_strong   = sep_z   >= 0.6 * rounds
-    detector_fires = (cross / noisy_total) >= 0.25 if noisy_total else False
+    raw_strong = sep_raw >= _SEP_FRAC * rounds
+    z_strong   = sep_z   >= _SEP_FRAC * rounds
+    detector_fires = (cross / noisy_total) >= _FIRES_FRAC if noisy_total else False
 
     if detector_fires and z_strong and raw_strong:
         return ("detector fires on noisy clients in THIS run (>=25% cross tau_z) "
@@ -240,9 +250,9 @@ def _verdict(sep_raw: int, sep_z: int, cross: int, noisy_total: int, rounds: int
                 "(raw medians separate) but Z does NOT. Try lowering alpha_sigma "
                 "(0.9 -> 0.5) or weighting the fresh median more vs the EMA.")
     if raw_strong and z_strong and not detector_fires:
-        return ("calibration miss: both raw_dist and Z separate noisy from clean, "
-                "but Z stays below tau_z={}. Lower tau_z or widen the behaviour "
-                "score tail.".format(5.0))
+        return (f"calibration miss: both raw_dist and Z separate noisy from clean, "
+                f"but Z stays below tau_z={tau_z}. Lower tau_z or widen the "
+                f"behaviour score tail.")
     # not raw_strong and not z_strong -- SNR too low. The honest default.
     return ("SNR too low in THIS run: noisy clients do not show larger raw "
             "distances than clean ones. Mechanism cannot work at this noise "
