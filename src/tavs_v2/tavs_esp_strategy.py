@@ -607,8 +607,15 @@ class TavsEspStrategy(Strategy):
             f"({len(D)} of them decoys), {len(P)} Promoted"
         )
 
+        # `sampled` records the full cohort this round, independent of how
+        # the scheduler split it. Previously omitted; cohort-composition
+        # analyses that want "who was in the cohort" would otherwise need to
+        # reconstruct it from V ∪ P ∪ D round-by-round, and ad-hoc probes
+        # that read `.get("sampled")` would silently see no cohort. Decoys
+        # live inside V (D is a subset of V) so the union here is just V ∪ P.
         self._round_assignments[server_round] = {
             "verified": set(V), "promoted": set(P), "decoy": set(D),
+            "sampled": set(V) | set(P),
         }
 
         fit_configurations = []
@@ -981,6 +988,15 @@ class FullVerificationStrategy(TavsEspStrategy):
         if not sampled:
             return []
 
+        # Record cohort composition so cross-arm diagnostics (cohort-fix era)
+        # can audit who participated each round for the full-verify arm too.
+        # V = everyone, P = empty, by construction.
+        sampled_cids = {proxy.cid for proxy in sampled}
+        self._round_assignments[server_round] = {
+            "verified": set(sampled_cids), "promoted": set(), "decoy": set(),
+            "sampled": set(sampled_cids),
+        }
+
         # Every sampled client is verified. aggregate_fit splits verified from
         # promoted on the is_verified flag the client echoes back, so setting it
         # True here routes all of them down the verified path.
@@ -1054,6 +1070,7 @@ class RandomSkipStrategy(TavsEspStrategy):
 
         self._round_assignments[server_round] = {
             "verified": set(V), "promoted": set(P), "decoy": set(),
+            "sampled": set(V) | set(P),
         }
         # Staleness accounting is meaningless without a trust-based promotion
         # policy; record zero so downstream summarisation does not choke.
