@@ -174,7 +174,7 @@ def test_configure_fit_scheduling():
     )
 
     assert len(fit_configs) == 8, "Did not configure all available clients"
-    
+
     verified_count = 0
     promoted_count = 0
 
@@ -187,6 +187,52 @@ def test_configure_fit_scheduling():
             promoted_count += 1
 
     print(f"✓ V2 Assignments: {verified_count} verified, {promoted_count} promoted")
+    return True
+
+def test_round_assignments_sampled_is_populated():
+    """Regression: analyses that read `round_assignments[r]["sampled"]`
+    were silently defaulting to [] every round because the strategy only
+    wrote verified/promoted/decoy. configure_fit on all three strategies
+    must now populate `sampled` as V ∪ P ∪ D.
+
+    This directly prevents the dormant 'missing clients' confusion the
+    forensics diagnostic surfaced -- the key was never written, not that
+    clients were missing from the run.
+    """
+    from src.tavs_v2.tavs_esp_strategy import (
+        FullVerificationStrategy, RandomSkipStrategy,
+    )
+    print("\nTesting round_assignments 'sampled' key population...")
+
+    initial_params = MockParameters([np.random.randn(150000)])
+
+    for name, cls, kwargs in [
+        ("TavsEspStrategy", TavsEspStrategy, {}),
+        ("FullVerificationStrategy", FullVerificationStrategy, {}),
+        ("RandomSkipStrategy", RandomSkipStrategy, {"skip_rate": 0.4, "skip_seed": 0}),
+    ]:
+        config = DummyConfig()
+        if cls is RandomSkipStrategy:
+            strategy = cls(config=config, **kwargs)
+        else:
+            strategy = cls(config=config)
+        cm = MockClientManager(num_clients=8)
+        strategy.configure_fit(server_round=1, parameters=initial_params,
+                                client_manager=cm)
+        ra = strategy._round_assignments.get(1)
+        assert ra is not None, f"{name}: no round_assignments entry for round 1"
+        assert "sampled" in ra, (
+            f"{name}: 'sampled' key missing -- this was the dormant bug "
+            f"the forensics script silently defaulted to [] on."
+        )
+        expected = set(ra.get("verified", set())) | set(ra.get("promoted", set())) | set(ra.get("decoy", set()))
+        assert set(ra["sampled"]) == expected, (
+            f"{name}: sampled {ra['sampled']} != V∪P∪D {expected}"
+        )
+        assert len(ra["sampled"]) > 0, (
+            f"{name}: sampled is empty despite 8 clients being configured"
+        )
+    print("✓ 'sampled' key populated as V∪P∪D on all three strategies")
     return True
 
 def test_aggregate_fit_esp_layer():
@@ -670,9 +716,10 @@ def main():
         rs7 = test_random_skip_is_verified_flag_matches_split()
         rs8 = test_disable_trust_weighted_aggregation_flag_changes_aggregate()
         rs9 = test_initial_trust_and_bootstrap_gate_wired_through()
+        rs10 = test_round_assignments_sampled_is_populated()
 
         if all([success1, success2, success3, success4, success5,
-                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9]):
+                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
             return True
         else:
