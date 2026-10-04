@@ -22,6 +22,7 @@ from src.clients.tavs_flower_client import TAVSFlowerClient, TAVSClientConfig, c
 from src.core.models import ModelStructure, get_model
 from src.utils.data_utils import (
     load_cifar10, create_dirichlet_splits, create_iid_splits, NoisyLabelSubset,
+    load_cifar10n_labels,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,9 +73,23 @@ class PipelineConfig:
     # noisy sample to its confusable partner via a fixed map (CIFAR-10
     # default: airplane<->bird, cat<->dog, deer<->horse, ...) -- structured
     # errors that FedAvg cannot dampen by averaging random directions.
-    # Pair-flip is the regime where a trust signal should actually beat
-    # random skipping.
+    # "cifar10n" swaps the ground-truth label with the matching human-
+    # annotator label from CIFAR-10N (Wei et al. ICLR 2022). Pair-flip is
+    # COLLUSIVE (all noisy clients share one flip map, so their wrong-
+    # gradients align and BVD's median center gets captured). CIFAR-10N
+    # noise is NOT collusive because different annotators make different
+    # mistakes, which is why we fall back to this when pair-flip at high
+    # rates breaks the detector.
     label_noise_type: str = "uniform"
+    # cifar10n-only: which annotator stream to use. One of "aggre"
+    # (~9% effective noise, 3-worker majority), "random1"/"random2"/"random3"
+    # (~17-18% each, single worker), "worst" (~40%, worst-case worker per
+    # image). Ignored unless label_noise_type == "cifar10n".
+    cifar10n_label_set: str = "random1"
+    # Local path to CIFAR-10_human.pt (download from
+    # github.com/UCSC-REAL/cifar-10-100n). Required when label_noise_type ==
+    # "cifar10n"; the pipeline refuses to synthesize or auto-download.
+    cifar10n_path: str = None
 
     tavs_config: TavsEspConfig = None
 
@@ -246,6 +261,23 @@ class TAVSESPPipeline:
                 pick_rng = np.random.default_rng(self.config.seed)
                 self.noisy_client_ids = sorted(pick_rng.choice(
                     self.config.num_clients, size=num_noisy, replace=False).tolist())
+
+                # For CIFAR-10N: load the human-annotator label stream ONCE
+                # (not per-client) and pass the array into every noisy
+                # client's wrapper. The wrapper indexes it by the global
+                # CIFAR-10 image id via its own base.indices.
+                cifar10n_labels = None
+                if self.config.label_noise_type == "cifar10n":
+                    if not self.config.cifar10n_path:
+                        raise ValueError(
+                            "label_noise_type='cifar10n' requires "
+                            "cifar10n_path to point at CIFAR-10_human.pt"
+                        )
+                    cifar10n_labels = load_cifar10n_labels(
+                        self.config.cifar10n_path,
+                        self.config.cifar10n_label_set,
+                    )
+
                 for cid in self.noisy_client_ids:
                     self.client_datasets[cid] = NoisyLabelSubset(
                         base=self.client_datasets[cid],
@@ -256,10 +288,14 @@ class TAVSESPPipeline:
                         # and each client's corrupted set is stable across arms.
                         seed=self.config.seed * 10_000 + cid,
                         noise_type=self.config.label_noise_type,
+                        cifar10n_labels=cifar10n_labels,
                     )
+                extra = (f" ({self.config.cifar10n_label_set})"
+                         if self.config.label_noise_type == "cifar10n" else "")
                 logger.info(
                     f"Label noise injected: {num_noisy}/{self.config.num_clients} "
                     f"clients at rate {self.config.label_noise_rate:.2f} "
+                    f"[type={self.config.label_noise_type}{extra}] "
                     f"(client ids: {self.noisy_client_ids[:8]}"
                     f"{'...' if num_noisy > 8 else ''})"
                 )

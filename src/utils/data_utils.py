@@ -54,6 +54,70 @@ def load_cifar10(data_dir: str = "./data") -> Tuple[Dataset, Dataset]:
     return trainset, testset
 
 
+# CIFAR-10N label-set names, verbatim keys inside the human-annotated .pt file
+# released by Wei et al. ICLR 2022 (https://github.com/UCSC-REAL/cifar-10-100n).
+# Noise rates measured by the dataset authors against ground-truth clean_label:
+#   clean         0% (sanity key; identical to vanilla CIFAR-10 labels)
+#   aggre_label   9.03%   majority of 3 annotators
+#   random_label1 17.23%  single-annotator rounds
+#   random_label2 18.12%
+#   random_label3 17.64%
+#   worse_label   40.21%  worst single-annotator per image
+_CIFAR10N_LABEL_SETS = (
+    "clean", "aggre", "random1", "random2", "random3", "worst",
+)
+_CIFAR10N_KEY_MAP = {
+    "clean":   "clean_label",
+    "aggre":   "aggre_label",
+    "random1": "random_label1",
+    "random2": "random_label2",
+    "random3": "random_label3",
+    "worst":   "worse_label",
+}
+
+
+def load_cifar10n_labels(path: str, label_set: str) -> np.ndarray:
+    """Return a numpy int64 array of length 50000 of human-annotator labels
+    for the CIFAR-10 training set, keyed by global image index.
+
+    Args:
+        path: Path to CIFAR-10_human.pt downloaded from Wei et al. 2022
+              (https://github.com/UCSC-REAL/cifar-10-100n). The file is a
+              torch.load dict with keys clean_label, aggre_label, worse_label,
+              random_label1, random_label2, random_label3.
+        label_set: One of "clean", "aggre", "worst", "random1", "random2",
+                   "random3". Determines which annotator stream to return.
+
+    Raises:
+        ValueError: unknown label_set, or the file is missing the expected
+                    key, or the returned array is not length 50000.
+    """
+    if label_set not in _CIFAR10N_LABEL_SETS:
+        raise ValueError(
+            f"label_set must be one of {_CIFAR10N_LABEL_SETS}; got {label_set!r}"
+        )
+    try:
+        blob = torch.load(path, map_location="cpu", weights_only=False)
+    except TypeError:
+        # Older torch versions do not accept weights_only; fall back.
+        blob = torch.load(path, map_location="cpu")
+    key = _CIFAR10N_KEY_MAP[label_set]
+    if key not in blob:
+        raise ValueError(
+            f"CIFAR-10N file at {path} missing key {key!r}; "
+            f"got keys {sorted(blob.keys())}"
+        )
+    labels = blob[key]
+    if hasattr(labels, "numpy"):
+        labels = labels.numpy()
+    labels = np.asarray(labels, dtype=np.int64)
+    if labels.shape != (50000,):
+        raise ValueError(
+            f"CIFAR-10N {key!r} must have shape (50000,); got {labels.shape}"
+        )
+    return labels
+
+
 def load_cifar100(data_dir: str = "./data") -> Tuple[Dataset, Dataset]:
     """Load CIFAR-100 dataset."""
     transform_train = transforms.Compose([
@@ -246,19 +310,48 @@ class NoisyLabelSubset(Dataset):
     def __init__(self, base: Dataset, noise_fraction: float,
                  num_classes: int = 10, seed: int = 0,
                  noise_type: str = "uniform",
-                 pair_map: dict = None):
+                 pair_map: dict = None,
+                 cifar10n_labels: "np.ndarray" = None):
         if not (0.0 <= noise_fraction <= 1.0):
             raise ValueError(f"noise_fraction must be in [0, 1]; got {noise_fraction}")
         if num_classes < 2:
             raise ValueError(f"num_classes must be >= 2; got {num_classes}")
-        if noise_type not in ("uniform", "pairflip"):
+        if noise_type not in ("uniform", "pairflip", "cifar10n"):
             raise ValueError(
-                f"noise_type must be 'uniform' or 'pairflip'; got {noise_type!r}"
+                f"noise_type must be 'uniform', 'pairflip', or 'cifar10n'; "
+                f"got {noise_type!r}"
             )
 
         self.base = base
         self.num_classes = num_classes
         self.noise_type = noise_type
+
+        # CIFAR-10N: real-human mislabels from Wei et al. ICLR 2022. Instead
+        # of synthesizing wrong labels, we swap in the human-annotator label
+        # for the noisy sample. The caller passes an array of length
+        # `len(underlying_cifar10)` (typically 50000 for the training set),
+        # one human label per image index into the FULL CIFAR-10 dataset.
+        # NoisyLabelSubset wraps a torch.utils.data.Subset; we read the
+        # underlying global index via base.indices to look up the human label.
+        #
+        # Why this is not collusive like synthetic pair-flip: different human
+        # workers made different mistakes, so two noisy clients labelled by
+        # (say) worker-random1 do NOT share a fixed flip map. The resulting
+        # per-client gradients do not point in a shared wrong direction, which
+        # is what killed BVD under pair-flip at 30% flip rate.
+        if noise_type == "cifar10n":
+            if cifar10n_labels is None:
+                raise ValueError(
+                    "noise_type='cifar10n' requires cifar10n_labels=<array of "
+                    "human labels indexed by global CIFAR-10 image index>"
+                )
+            if not hasattr(cifar10n_labels, "__len__"):
+                raise ValueError(
+                    "cifar10n_labels must be a 1-D array-like of ints"
+                )
+            self.cifar10n_labels = cifar10n_labels
+        else:
+            self.cifar10n_labels = None
 
         # Pair-flip map. Default to the CIFAR-10 pattern; callers with a
         # different class count or a different pairing must pass one in.
@@ -311,16 +404,48 @@ class NoisyLabelSubset(Dataset):
         # equivalent to that sample not being flipped.
         # pair_map is now validated to cover every class in range(num_classes),
         # so the pair-flip branch always finds a partner. No silent skips.
+        # self._noisy maps subset-local idx -> wrong label, and len(self._noisy)
+        # is counted as num_noisy. Semantics across all three noise types:
+        # an entry here means the sample's final label DIFFERS from ground
+        # truth. Uniform and pairflip guarantee a strict wrong label by
+        # construction; cifar10n only registers an entry when the human label
+        # actually disagrees with ground truth (no-op swaps where the
+        # annotator happened to get it right are skipped). That keeps
+        # num_noisy == "effective flips" and keeps parity with the other
+        # noise types for downstream analyses and paper tables.
+        #
+        # Follow-ons that need "how many samples the cifar10n path visited"
+        # (as opposed to flipped) can read num_cifar10n_candidates below.
         self._noisy = {}
+        skipped_cifar10n_agreements = 0
         for idx in noisy_indices:
             true_label = self._raw_label(int(idx))
             if noise_type == "pairflip":
                 wrong = int(self.pair_map[true_label])
+            elif noise_type == "cifar10n":
+                # Resolve this subset-local idx to the global CIFAR-10 index.
+                # NoisyLabelSubset is typically wrapped around a Subset; the
+                # Subset's .indices maps subset-local to dataset-global. If
+                # base has no .indices (plain full dataset or custom wrapper
+                # exposing targets directly), use idx itself as global.
+                global_idx = (int(getattr(self.base, "indices", range(len(self.base)))[int(idx)]))
+                wrong = int(self.cifar10n_labels[global_idx])
+                if wrong == true_label:
+                    # Human annotator happened to agree with ground truth
+                    # for this sample. Not a flip. Skip the entry so
+                    # num_noisy stays an honest flip count.
+                    skipped_cifar10n_agreements += 1
+                    continue
             else:
                 wrong = int(rng.integers(0, num_classes - 1))
                 if wrong >= true_label:
                     wrong += 1
             self._noisy[int(idx)] = wrong
+        # Exposed so callers can tell the difference between "the wrapper
+        # visited N candidate samples" and "N samples were effectively
+        # noisy." For non-cifar10n paths these are always equal.
+        self.num_cifar10n_candidates = len(noisy_indices)
+        self.num_cifar10n_agreements_skipped = skipped_cifar10n_agreements
 
     def _raw_label(self, idx: int) -> int:
         # Read the label WITHOUT running the base's transforms.

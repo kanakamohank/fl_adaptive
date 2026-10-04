@@ -36,6 +36,9 @@ class _Args:
         self.label_noise_rate = 0.3
         self.label_noise_type = "uniform"
         self.label_noise_num_classes = 10
+        # cifar10n label-set, ignored by _config_tag unless label_noise_type
+        # == "cifar10n". Default matches the CLI default.
+        self.cifar10n_label_set = "random1"
         for k, v in overrides.items():
             setattr(self, k, v)
 
@@ -78,6 +81,17 @@ def test_priority_configurations_get_distinct_tags():
         "priority_1b_4_5pct":
             (_Args(noisy_client_fraction=0.3, label_noise_rate=0.15),
              "split-iid_noiseC30_R15"),
+        # cifar10n annotator-stream variants must each land in their own
+        # directory, and must not collide with pair-flip or uniform tags.
+        "cifar10n_worst":
+            (_Args(label_noise_type="cifar10n", cifar10n_label_set="worst"),
+             "split-iid_noiseC40_R30_type-cifar10n-worst"),
+        "cifar10n_aggre":
+            (_Args(label_noise_type="cifar10n", cifar10n_label_set="aggre"),
+             "split-iid_noiseC40_R30_type-cifar10n-aggre"),
+        "cifar10n_random1":
+            (_Args(label_noise_type="cifar10n", cifar10n_label_set="random1"),
+             "split-iid_noiseC40_R30_type-cifar10n-random1"),
     }
     seen = set()
     for label, (args, expected) in cases.items():
@@ -85,7 +99,7 @@ def test_priority_configurations_get_distinct_tags():
         assert got == expected, f"{label}: expected {expected!r} got {got!r}"
         assert got not in seen, f"{label}: tag {got!r} collides with an earlier priority"
         seen.add(got)
-    print(f"✓ five planned experiments produce distinct expected tags")
+    print(f"✓ {len(cases)} planned experiments produce distinct expected tags")
     return True
 
 

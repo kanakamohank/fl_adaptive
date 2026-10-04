@@ -107,7 +107,16 @@ def _config_tag(args) -> str:
         parts.append(f"noiseC{nf:02d}_R{nr:02d}")
         noise_type = getattr(args, "label_noise_type", "uniform")
         if noise_type != "uniform":
-            parts.append(f"type-{noise_type}")
+            # For cifar10n, encode the chosen annotator stream too so runs at
+            # different noise characteristics (worst vs aggre vs random1 ...)
+            # do not collide at the same path. For pairflip/uniform the type
+            # alone is sufficient.
+            if noise_type == "cifar10n":
+                parts.append(
+                    f"type-cifar10n-{getattr(args, 'cifar10n_label_set', 'random1')}"
+                )
+            else:
+                parts.append(f"type-{noise_type}")
         if getattr(args, "label_noise_num_classes", 10) != 10:
             parts.append(f"K{args.label_noise_num_classes}")
     else:
@@ -210,6 +219,8 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         label_noise_client_fraction=args.noisy_client_fraction,
         label_noise_rate=args.label_noise_rate,
         label_noise_type=args.label_noise_type,
+        cifar10n_path=getattr(args, "cifar10n_path", None),
+        cifar10n_label_set=getattr(args, "cifar10n_label_set", "random1"),
         seed=seed,
         # Encode the label-noise config in the path so IID+noise runs do not
         # overwrite the earlier no-noise r20/skip49 results the analysis
@@ -436,17 +447,26 @@ def main():
                              "--noisy-client-fraction=0.4 that is 12%% of total labels "
                              "corrupted, up from 4%% in pilot 2.")
     parser.add_argument("--label-noise-type", default="uniform",
-                        choices=("uniform", "pairflip"),
-                        help="Noise TYPE. 'uniform' (default, historical): wrong "
-                             "label drawn uniformly at random over the other "
-                             "classes. 'pairflip': each noisy sample is swapped "
-                             "with its confusable partner via a fixed CIFAR-10 "
-                             "map (airplane<->bird, automobile<->truck, "
-                             "cat<->dog, deer<->horse, frog<->ship). Uniform "
-                             "wrong-gradients cancel on aggregation; pair-flip "
-                             "wrong-gradients accumulate. The pair-flip regime "
-                             "is where trust-based scheduling should actually "
-                             "outperform random skipping.")
+                        choices=("uniform", "pairflip", "cifar10n"),
+                        help="Noise TYPE. 'uniform': wrong label drawn uniformly "
+                             "at random. 'pairflip': noisy sample swapped with its "
+                             "confusable partner (CIFAR-10 default map). 'cifar10n': "
+                             "use real human-annotator labels from Wei et al. ICLR "
+                             "2022; noise is NON-collusive because different "
+                             "annotators make different mistakes, which is the "
+                             "regime pair-flip at 30%% broke BVD in. Requires "
+                             "--cifar10n-path and --cifar10n-label-set.")
+    parser.add_argument("--cifar10n-path", default=None,
+                        help="Path to CIFAR-10_human.pt (download from "
+                             "github.com/UCSC-REAL/cifar-10-100n). Required when "
+                             "--label-noise-type=cifar10n.")
+    parser.add_argument("--cifar10n-label-set", default="random1",
+                        choices=("clean", "aggre", "worst",
+                                 "random1", "random2", "random3"),
+                        help="Which CIFAR-10N annotator stream to use. Approximate "
+                             "noise rates against clean labels: aggre ~9%% (3-worker "
+                             "majority), random1/2/3 ~17-18%% (single worker), worst "
+                             "~40%%. Ignored unless --label-noise-type=cifar10n.")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
     parser.add_argument("--skip-completed", action="store_true",
                         help="For each (arm, seed), skip re-execution if the arm's "
