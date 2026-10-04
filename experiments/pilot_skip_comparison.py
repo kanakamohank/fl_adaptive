@@ -121,6 +121,12 @@ def _config_tag(args) -> str:
             parts.append(f"K{args.label_noise_num_classes}")
     else:
         parts.append("clean")
+    # Non-default trust signal lands in its own directory so a bvd baseline
+    # and a small-loss-fraction run never collide on disk even at identical
+    # noise config.
+    trust_signal = getattr(args, "trust_signal", "bvd")
+    if trust_signal != "bvd":
+        parts.append(f"trust-{trust_signal.replace('_', '-')}")
     return "_".join(parts)
 
 
@@ -184,6 +190,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         clip_promoted_updates=True, promoted_clip_factor=2.0,
         cosine_filter_promoted=False,
         enable_outlier_detection=True,
+        trust_signal=getattr(args, "trust_signal", "bvd"),
     )
 
     # PipelineConfig takes a strategy CLASS, not an instance, and the pipeline
@@ -467,6 +474,17 @@ def main():
                              "noise rates against clean labels: aggre ~9%% (3-worker "
                              "majority), random1/2/3 ~17-18%% (single worker), worst "
                              "~40%%. Ignored unless --label-noise-type=cifar10n.")
+    parser.add_argument("--trust-signal", default="bvd",
+                        choices=("bvd", "small_loss_fraction"),
+                        help="Which signal drives the trust EMA. 'bvd' (default) "
+                             "uses the BVD outlier Z-score. 'small_loss_fraction' "
+                             "swaps in a per-client scalar: the fraction of a "
+                             "local 10%% held-out val split that the INCOMING "
+                             "global model predicts correctly against the "
+                             "client's own labels. Co-teaching-style "
+                             "(Han et al. 2018), adapted for FL as a drop-in "
+                             "replacement for BVD when BVD does not separate "
+                             "noisy from clean clients.")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
     parser.add_argument("--skip-completed", action="store_true",
                         help="For each (arm, seed), skip re-execution if the arm's "

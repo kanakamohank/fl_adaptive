@@ -39,6 +39,8 @@ class _Args:
         # cifar10n label-set, ignored by _config_tag unless label_noise_type
         # == "cifar10n". Default matches the CLI default.
         self.cifar10n_label_set = "random1"
+        # Trust signal, ignored by _config_tag unless it's non-default ("bvd").
+        self.trust_signal = "bvd"
         for k, v in overrides.items():
             setattr(self, k, v)
 
@@ -92,6 +94,17 @@ def test_priority_configurations_get_distinct_tags():
         "cifar10n_random1":
             (_Args(label_noise_type="cifar10n", cifar10n_label_set="random1"),
              "split-iid_noiseC40_R30_type-cifar10n-random1"),
+        # Non-default trust signals must land in their own path so a bvd
+        # baseline and a small-loss-fraction run at the SAME noise never
+        # overwrite each other on disk.
+        "slf_cifar10n_random1":
+            (_Args(label_noise_type="cifar10n", cifar10n_label_set="random1",
+                   trust_signal="small_loss_fraction"),
+             "split-iid_noiseC40_R30_type-cifar10n-random1_trust-small-loss-fraction"),
+        "slf_pairflip":
+            (_Args(label_noise_type="pairflip",
+                   trust_signal="small_loss_fraction"),
+             "split-iid_noiseC40_R30_type-pairflip_trust-small-loss-fraction"),
     }
     seen = set()
     for label, (args, expected) in cases.items():

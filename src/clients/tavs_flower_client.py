@@ -77,7 +77,8 @@ class TAVSFlowerClient(NumPyClient):
                  config: TAVSClientConfig,
                  train_loader = None,
                  test_loader = None,
-                 partition_id: int = None):
+                 partition_id: int = None,
+                 val_loader = None):
         """
         Initialize TAVS Flower client.
 
@@ -89,12 +90,21 @@ class TAVSFlowerClient(NumPyClient):
                 assigned by Flower's node_config. Reported via get_properties
                 so the strategy can build a stable cid <-> partition-id map
                 for cross-arm cohort alignment.
+            val_loader: Local held-out validation DataLoader. When present,
+                fit() evaluates the INCOMING global model on it before local
+                training and reports the fraction of correct predictions
+                ('small_loss_fraction') in the fit metrics. The strategy uses
+                this as a drop-in replacement for BVD's behavior_score when
+                config.trust_signal == 'small_loss_fraction'. None disables
+                the signal; the server-side override simply falls back to
+                BVD's score for that client.
         """
         super().__init__()
 
         self.config = config
         self.train_loader = train_loader
         self.test_loader = test_loader
+        self.val_loader = val_loader
         self.partition_id = partition_id
 
         # Initialize underlying client based on type
@@ -209,6 +219,16 @@ class TAVSFlowerClient(NumPyClient):
             # Set initial parameters
             self.set_parameters(parameters)
 
+            # BEFORE any local training, measure how well the INCOMING global
+            # model fits this client's own held-out val labels. See
+            # TAVSFlowerClient.__init__ docstring on val_loader. We compute
+            # this now (pre-training) because Co-teaching's small-loss insight
+            # is about the model's current fit to the LABELS, not the model's
+            # fit after it has been trained on them -- the latter would let
+            # noisy clients fit their wrong labels by memorisation and erase
+            # the signal.
+            small_loss_fraction = self._small_loss_fraction_on_val()
+
             # Execute training based on client type and assignment
             num_examples = self._execute_training(config)
 
@@ -217,6 +237,8 @@ class TAVSFlowerClient(NumPyClient):
 
             # Prepare metrics for server
             metrics = self._prepare_fit_metrics(num_examples)
+            if small_loss_fraction is not None:
+                metrics["small_loss_fraction"] = float(small_loss_fraction)
 
             logger.info(f"Client {self.config.client_id}: Training complete "
                        f"(round {self.round_number}, {self.current_assignment}, "
@@ -427,6 +449,70 @@ class TAVSFlowerClient(NumPyClient):
 
         return num_examples
 
+    def _small_loss_fraction_on_val(self):
+        """Return the fraction of val samples whose label the current model
+        predicts correctly on top-1.
+
+        What we actually compute: top-1 accuracy of the just-set model
+        against the client's own (possibly-noisy) val labels, over the
+        local held-out val loader.
+
+        How we frame it: as a cheap proxy for the "small-loss fraction"
+        intuition in Co-teaching (Han et al. 2018). Co-teaching's own
+        small-loss selection operates per-sample inside a batch; what we
+        send to the server is an aggregate SCALAR per client. The equivalence
+        between "accuracy" and "fraction with cross-entropy below some tau"
+        only holds once the model is above random chance -- in round 1 it
+        does not. The signal becomes useful once the global model has
+        learned the easy classes. Reviewer: closer precedent is
+        FedCorr-style client-reliability signals. We retain the
+        `small_loss_fraction` key to match the config-flag name, but it
+        is top-1 accuracy on val, not a loss-threshold fraction.
+
+        Returns None when:
+          - no val_loader attached (server-side override falls back to BVD)
+          - the underlying client exposes no .model handle (future variants)
+          - the val loader produces no (x, y) pairs
+        Device handling: moves (x, y) to the model's device before each
+        forward so GPU/MPS runs do not silently throw inside the forward
+        and get swallowed by the broad except.
+        """
+        if self.val_loader is None:
+            return None
+        # Underlying client (honest / attacker variants) exposes its model
+        # directly on .model. Give up silently if a future variant lacks
+        # that handle so the pipeline keeps running with BVD fallback.
+        model = getattr(self.underlying_client, "model", None)
+        if model is None:
+            return None
+        model.eval()
+        try:
+            device = next(model.parameters()).device
+        except StopIteration:
+            # Model with no parameters -- degenerate case; fall back silently.
+            return None
+        correct = 0
+        total = 0
+        import torch as _torch
+        with _torch.no_grad():
+            for batch in self.val_loader:
+                if isinstance(batch, (list, tuple)) and len(batch) == 2:
+                    x, y = batch
+                else:
+                    continue
+                try:
+                    x = x.to(device)
+                    y = y.to(device)
+                    out = model(x)
+                except Exception:
+                    return None
+                pred = out.argmax(dim=1)
+                correct += int((pred == y).sum().item())
+                total += int(y.shape[0])
+        if total == 0:
+            return None
+        return correct / total
+
     def _prepare_fit_metrics(self, num_examples: int) -> Dict[str, Scalar]:
         """Prepare metrics to send back to server."""
         metrics = {
@@ -469,7 +555,8 @@ class TAVSFlowerClient(NumPyClient):
 def create_tavs_flower_client(config: TAVSClientConfig,
                              train_loader = None,
                              test_loader = None,
-                             partition_id: int = None) -> TAVSFlowerClient:
+                             partition_id: int = None,
+                             val_loader = None) -> TAVSFlowerClient:
     """
     Factory function to create TAVS Flower clients.
 
@@ -478,6 +565,8 @@ def create_tavs_flower_client(config: TAVSClientConfig,
         train_loader: Training data loader
         test_loader: Test data loader (optional)
         partition_id: Partition index for cross-arm cohort alignment
+            (see TAVSFlowerClient.__init__).
+        val_loader: Held-out local val loader for small_loss_fraction
             (see TAVSFlowerClient.__init__).
 
     Returns:
@@ -488,4 +577,5 @@ def create_tavs_flower_client(config: TAVSClientConfig,
         train_loader=train_loader,
         test_loader=test_loader,
         partition_id=partition_id,
+        val_loader=val_loader,
     )
