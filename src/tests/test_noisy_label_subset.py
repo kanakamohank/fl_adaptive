@@ -528,6 +528,209 @@ def test_noise_diagnostic_computes_expected_stats():
     return True
 
 
+def test_cifar10n_requires_label_array():
+    """noise_type='cifar10n' with no cifar10n_labels must raise, loudly.
+    Silently falling back to synthetic noise would be a correctness bug."""
+    print("\nTesting cifar10n requires label array...")
+    base = DummyDataset(50)
+    try:
+        NoisyLabelSubset(base, 0.5, num_classes=10, seed=0,
+                         noise_type="cifar10n")
+    except ValueError as e:
+        assert "cifar10n_labels" in str(e)
+        print("✓ cifar10n without labels raises ValueError")
+        return True
+    raise AssertionError("expected ValueError for missing cifar10n_labels")
+
+
+def test_cifar10n_swaps_to_human_labels():
+    """When noise_type='cifar10n', the wrapper swaps a noisy sample's label
+    with the entry at cifar10n_labels[global_idx] where global_idx comes
+    from base.indices. Build a Subset so the index mapping is nontrivial.
+    Use a human-labels array that always disagrees with ground truth so
+    this test is not sensitive to the agreement-skip semantics."""
+    from torch.utils.data import Subset
+    print("\nTesting cifar10n swaps labels from the human-labels array...")
+
+    full = DummyDataset(100)
+    subset_indices = [3, 11, 24, 37, 48, 55, 61, 72, 83, 94]
+    subset = Subset(full, subset_indices)
+
+    # human[g] = (original + 1) mod 10 -- always differs from ground truth.
+    # Pins "every slot flips to the human stream" without entangling with
+    # the agreement-skip code path tested separately below.
+    human = np.array([(i + 1) % 10 for i in range(100)], dtype=np.int64)
+
+    wrapped = NoisyLabelSubset(subset, 1.0, num_classes=10, seed=0,
+                               noise_type="cifar10n", cifar10n_labels=human)
+    assert wrapped.num_noisy == len(subset), (
+        f"all 10 subset samples should be noisy (human disagrees everywhere); "
+        f"got num_noisy={wrapped.num_noisy}"
+    )
+    for i, g in enumerate(subset_indices):
+        _, lab = wrapped[i]
+        assert lab == human[g], (
+            f"subset-local idx {i} (global {g}): expected human label "
+            f"{human[g]}, got {lab}"
+        )
+    print("✓ cifar10n sample labels pulled from cifar10n_labels[global_idx]")
+    return True
+
+
+def test_cifar10n_skips_agreements_with_ground_truth():
+    """When the human annotator happened to agree with ground truth for a
+    noisy slot, that slot is NOT registered as noisy. This keeps num_noisy
+    an honest 'effective flips' count, consistent with uniform/pairflip.
+
+    Build a human-labels array where exactly half of the first 10 global
+    indices agree with ground truth: human[i] == i%10 for even i, else
+    (i+3) % 10. Then noise_fraction=1.0 should produce num_noisy==5."""
+    from torch.utils.data import Subset
+    print("\nTesting cifar10n agreement-skip semantics...")
+    full = DummyDataset(10)
+    subset = Subset(full, list(range(10)))
+    # Even-index samples: human agrees with ground truth (skip).
+    # Odd-index samples: human disagrees (keep as flip).
+    human = np.array(
+        [(i % 10) if (i % 2 == 0) else ((i + 3) % 10) for i in range(10)],
+        dtype=np.int64,
+    )
+    wrapped = NoisyLabelSubset(subset, 1.0, num_classes=10, seed=0,
+                               noise_type="cifar10n", cifar10n_labels=human)
+    # Exactly 5 slots should be registered as noisy (odd indices).
+    assert wrapped.num_noisy == 5, (
+        f"expected 5 effective flips (5 agreements skipped); "
+        f"got num_noisy={wrapped.num_noisy}"
+    )
+    assert wrapped.num_cifar10n_candidates == 10
+    assert wrapped.num_cifar10n_agreements_skipped == 5
+    # Odd-index samples should return the human (wrong) label; even-index
+    # samples should return ground truth.
+    for i in range(10):
+        _, lab = wrapped[i]
+        if i % 2 == 1:
+            assert lab == human[i], f"odd idx {i}: expected flip to {human[i]}, got {lab}"
+        else:
+            assert lab == full[i][1], f"even idx {i}: expected ground truth {full[i][1]}, got {lab}"
+    print("✓ agreement-skip: num_noisy counts effective flips, exposes candidate+skip counts")
+    return True
+
+
+def test_cifar10n_respects_noise_fraction():
+    """noise_fraction < 1.0: only that fraction of samples is considered;
+    with human labels guaranteed-different from ground truth, every
+    considered sample becomes an effective flip."""
+    from torch.utils.data import Subset
+    print("\nTesting cifar10n honours noise_fraction < 1.0...")
+    full = DummyDataset(200)
+    subset = Subset(full, list(range(100)))
+    # human[g] = (g+1) mod 10 -- guaranteed disagreement with ground truth
+    # at every index, so num_noisy == num_cifar10n_candidates == 30.
+    human = np.array([(i + 1) % 10 for i in range(200)], dtype=np.int64)
+
+    wrapped = NoisyLabelSubset(subset, 0.3, num_classes=10, seed=42,
+                               noise_type="cifar10n", cifar10n_labels=human)
+    assert wrapped.num_cifar10n_candidates == 30
+    assert wrapped.num_noisy == 30, f"expected 30 effective flips, got {wrapped.num_noisy}"
+    # Every sample in the noisy set must now return human[global_idx]
+    # (even when that happens to equal the ground truth -- a no-op swap is
+    # still a swap by this wrapper's semantics). Every sample NOT in the
+    # noisy set must still return ground truth.
+    for i in range(len(subset)):
+        g = subset.indices[i]
+        _, lab = wrapped[i]
+        if i in wrapped._noisy:
+            assert lab == human[g], (
+                f"idx {i} (global {g}): noisy sample should return "
+                f"human[{g}]={human[g]}, got {lab}"
+            )
+        else:
+            assert lab == full[g][1], (
+                f"idx {i} (global {g}): non-noisy sample should return "
+                f"ground truth {full[g][1]}, got {lab}"
+            )
+    print(f"✓ noise_fraction=0.3 marks 30/100 samples; swap targets human labels")
+    return True
+
+
+def test_cifar10n_falls_back_to_idx_without_indices():
+    """If base has no `.indices` (e.g. a plain Dataset, not a Subset),
+    cifar10n must use idx itself as the global index."""
+    print("\nTesting cifar10n no-indices fallback...")
+    base = DummyDataset(50)
+    # Guaranteed-disagreement human labels so every slot flips.
+    human = np.array([(i + 1) % 10 for i in range(50)], dtype=np.int64)
+    wrapped = NoisyLabelSubset(base, 1.0, num_classes=10, seed=0,
+                               noise_type="cifar10n", cifar10n_labels=human)
+    assert wrapped.num_noisy == 50
+    for i in range(len(base)):
+        _, lab = wrapped[i]
+        assert lab == human[i], f"idx {i}: expected {human[i]}, got {lab}"
+    print("✓ no-indices fallback uses local idx as global")
+    return True
+
+
+def test_load_cifar10n_labels_roundtrip(tmp_path=None):
+    """load_cifar10n_labels: happy-path with a synthetic .pt file, bad
+    label_set rejected, missing key rejected, wrong-shape rejected."""
+    import tempfile
+    import torch as _torch
+    from src.utils.data_utils import load_cifar10n_labels
+    print("\nTesting load_cifar10n_labels...")
+
+    with tempfile.TemporaryDirectory() as td:
+        good_path = os.path.join(td, "cifar10n_good.pt")
+        bad_path = os.path.join(td, "cifar10n_bad.pt")
+        wrong_shape_path = os.path.join(td, "cifar10n_wrong_shape.pt")
+
+        _torch.save({
+            "clean_label":   np.arange(50000) % 10,
+            "aggre_label":   (np.arange(50000) + 1) % 10,
+            "random_label1": (np.arange(50000) + 2) % 10,
+            "random_label2": (np.arange(50000) + 3) % 10,
+            "random_label3": (np.arange(50000) + 4) % 10,
+            "worse_label":   (np.arange(50000) + 5) % 10,
+        }, good_path)
+        # Happy path: each stream returns an int64 (50000,) array.
+        for ls, offset in [("clean", 0), ("aggre", 1), ("random1", 2),
+                           ("random2", 3), ("random3", 4), ("worst", 5)]:
+            labels = load_cifar10n_labels(good_path, ls)
+            assert labels.shape == (50000,)
+            assert labels.dtype == np.int64
+            assert labels[7] == (7 + offset) % 10, (
+                f"{ls}: expected {(7 + offset) % 10}, got {labels[7]}"
+            )
+
+        # Unknown label_set is rejected.
+        try:
+            load_cifar10n_labels(good_path, "banana")
+        except ValueError as e:
+            assert "banana" in str(e) or "label_set" in str(e)
+        else:
+            raise AssertionError("unknown label_set should raise")
+
+        # Missing key is rejected.
+        _torch.save({"clean_label": np.arange(50000) % 10}, bad_path)
+        try:
+            load_cifar10n_labels(bad_path, "worst")
+        except ValueError as e:
+            assert "worse_label" in str(e) or "missing" in str(e)
+        else:
+            raise AssertionError("missing key should raise")
+
+        # Wrong shape is rejected.
+        _torch.save({"worse_label": np.arange(100)}, wrong_shape_path)
+        try:
+            load_cifar10n_labels(wrong_shape_path, "worst")
+        except ValueError as e:
+            assert "50000" in str(e) or "shape" in str(e)
+        else:
+            raise AssertionError("wrong-shape label array should raise")
+
+    print("✓ load_cifar10n_labels: happy path + 3 rejection cases")
+    return True
+
+
 def main():
     print("🧪 NoisyLabelSubset Test Suite")
     print("=" * 50)
@@ -546,6 +749,12 @@ def main():
         test_default_cifar10_pairflip_map_is_frozen,
         test_pairflip_vs_uniform_are_different,
         test_noise_diagnostic_computes_expected_stats,
+        test_cifar10n_requires_label_array,
+        test_cifar10n_swaps_to_human_labels,
+        test_cifar10n_skips_agreements_with_ground_truth,
+        test_cifar10n_respects_noise_fraction,
+        test_cifar10n_falls_back_to_idx_without_indices,
+        test_load_cifar10n_labels_roundtrip,
     ]
     for t in tests:
         assert t() is True
