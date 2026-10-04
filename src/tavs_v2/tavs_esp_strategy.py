@@ -141,6 +141,22 @@ class TavsEspConfig:
     # defence entirely.
     enable_outlier_detection: bool = True
 
+    # Which signal drives the trust EMA when a client is verified.
+    #   "bvd"                 (default, historical) -- BVD's behavior_score from
+    #                         detect_outliers (Z-score vs cohort median). Across
+    #                         pair-flip 15/30% and CIFAR-10N random1 (5 seeds),
+    #                         this did not separate noisy from clean clients.
+    #   "small_loss_fraction" -- the client's self-reported fraction of a local
+    #                         held-out val set the INCOMING global model fits
+    #                         (correct predictions / val_size). Clean clients
+    #                         should report higher; noisy clients lower because
+    #                         ~17% of their val labels disagree with what the
+    #                         federation taught the model. One scalar per client
+    #                         per round; keeps the T1/T2/T3 structure unchanged.
+    #                         Honest-but-noisy threat model only: a malicious
+    #                         client could spoof the number.
+    trust_signal: str = "bvd"
+
     # Re-draw the per-round cohort with our own seeded RNG instead of relying on
     # Flower's module-level one, which the run seed does not reach. Without this
     # the same seed produced different cohorts across runs.
@@ -739,6 +755,39 @@ class TavsEspStrategy(Strategy):
             inliers, outliers = set(V_ids), set()
             behavior_scores = {cid: 1.0 for cid in V_ids}
         logger.info(f"Round {server_round} Detection: {len(inliers)} Inliers, {len(outliers)} Outliers")
+
+        # Replace BVD's behavior_scores with each client's self-reported
+        # small-loss fraction, if the client sent one AND the config asks for
+        # it. BVD still ran (we keep its inlier/outlier set for the cosine +
+        # magnitude gates in aggregation), but the TRUST EMA update below is
+        # driven by this signal instead of BVD's Z-score.
+        #
+        # Keyed by cid; fallback is BVD's own score for clients that did not
+        # report one. Clients that reported a score but weren't verified in
+        # this round are ignored -- trust only updates on verification.
+        trust_signal = getattr(self.config, "trust_signal", "bvd")
+        if trust_signal == "small_loss_fraction":
+            overridden = 0
+            for proxy, fit_res in results:
+                cid = proxy.cid
+                if cid not in V_ids:
+                    continue
+                reported = (fit_res.metrics or {}).get("small_loss_fraction")
+                if reported is None:
+                    continue
+                try:
+                    val = float(reported)
+                except (TypeError, ValueError):
+                    continue
+                # Clip to [0, 1] -- the trust scheduler expects behavior_score
+                # in that range (higher = cleaner, same semantic as BVD's).
+                if not (0.0 <= val <= 1.0):
+                    val = max(0.0, min(1.0, val))
+                behavior_scores[cid] = val
+                overridden += 1
+            logger.info(f"Round {server_round} trust_signal='small_loss_fraction': "
+                        f"overrode {overridden}/{len(V_ids)} verified clients' "
+                        f"behavior_score from BVD to client-reported val fit")
 
         if getattr(self.config, "soft_outlier_weighting", True):
             # Everyone verified contributes; behaviour_score sets how much.

@@ -304,6 +304,42 @@ class TAVSESPPipeline:
         else:
             self.noisy_client_ids = []
 
+        # Split each client's dataset into train / held-out val when the
+        # trust signal needs it. The 10% held-out subset stays on the client
+        # and is used only to compute each round's small_loss_fraction (how
+        # well the INCOMING global model fits the client's own labels).
+        # Noise, if any, has ALREADY been applied above, so the val labels
+        # are from the SAME distribution as the client's training labels --
+        # the client does not know which are mislabelled.
+        #
+        # When trust_signal != "small_loss_fraction" we skip the split so
+        # existing BVD runs are byte-identical to their pre-change
+        # trajectories.
+        trust_signal = getattr(self.config.tavs_config, "trust_signal", "bvd")
+        self.client_val_datasets: List = [None] * self.config.num_clients
+        if trust_signal == "small_loss_fraction":
+            split_rng = np.random.default_rng(self.config.seed * 10 + 7)
+            val_frac = 0.10
+            for cid in range(self.config.num_clients):
+                ds = self.client_datasets[cid]
+                n = len(ds)
+                val_size = max(1, int(round(val_frac * n)))
+                perm = split_rng.permutation(n)
+                val_idx = perm[:val_size].tolist()
+                train_idx = perm[val_size:].tolist()
+                # Subset the client's existing (possibly NoisyLabelSubset-
+                # wrapped) dataset by LOCAL indices. The outer Subset
+                # forwards __getitem__ through, so noisy labels (if any)
+                # are preserved on the val split too.
+                from torch.utils.data import Subset as _Subset
+                self.client_val_datasets[cid] = _Subset(ds, val_idx)
+                self.client_datasets[cid] = _Subset(ds, train_idx)
+            logger.info(
+                f"trust_signal='small_loss_fraction': split each client's "
+                f"dataset {int((1 - val_frac) * 100)}/{int(val_frac * 100)} "
+                f"train/val for local noise-detection signal"
+            )
+
         model = get_model(self.config.model_type, num_classes=10)
         if hasattr(model, 'structure'):
             self.model_structure = model.structure
@@ -363,12 +399,31 @@ class TAVSESPPipeline:
                     num_workers=0,
                 )
 
+                # Build the held-out val loader when a val split exists for
+                # this client (populated by setup_data_and_model when
+                # trust_signal == 'small_loss_fraction'). Shuffle off: the
+                # whole val set is swept each round, order does not matter,
+                # and no-shuffle avoids one more RNG consumer.
+                val_dataset = (self.client_val_datasets[partition_id]
+                               if hasattr(self, "client_val_datasets")
+                               else None)
+                val_loader = None
+                if val_dataset is not None and len(val_dataset) > 0:
+                    val_loader = DataLoader(
+                        val_dataset,
+                        batch_size=client_config.batch_size,
+                        shuffle=False,
+                        drop_last=False,
+                        num_workers=0,
+                    )
+
                 # .to_client() forces modern serialization
                 return create_tavs_flower_client(
                     config=client_config,
                     train_loader=train_loader,
                     test_loader=None,
                     partition_id=partition_id,
+                    val_loader=val_loader,
                 ).to_client()
 
             except Exception as e:

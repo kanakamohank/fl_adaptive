@@ -611,6 +611,88 @@ def test_disable_trust_weighted_aggregation_flag_changes_aggregate():
     return True
 
 
+def test_trust_signal_default_is_bvd():
+    """The config default must remain 'bvd' so existing pilots are
+    byte-identical. A silent flip to 'small_loss_fraction' would alter
+    every historical result."""
+    print("\nTesting TavsEspConfig default trust_signal...")
+    from src.tavs_v2 import TavsEspConfig
+    cfg = TavsEspConfig()
+    assert getattr(cfg, "trust_signal", "bvd") == "bvd", (
+        f"TavsEspConfig() default trust_signal flipped to {cfg.trust_signal!r}"
+    )
+    print("✓ default trust_signal = 'bvd'")
+    return True
+
+
+def test_small_loss_fraction_override_replaces_bvd_scores():
+    """When trust_signal='small_loss_fraction', clients that reported a
+    small_loss_fraction in their fit metrics must have their behavior_score
+    replaced by that scalar in the trust-EMA update. Clients that did not
+    report one fall back to BVD's score.
+
+    The test uses TWO strategies with identical clients and updates.
+    Strategy A (default bvd) uses whatever BVD scores detect_outliers
+    produces. Strategy B (small_loss_fraction) overrides those scores
+    for clients that reported a value. Final trust scores for the
+    overridden clients must differ between A and B. Trust for the one
+    client that did NOT report (fallback cid) must be IDENTICAL in both
+    runs."""
+    print("\nTesting small_loss_fraction overrides BVD-driven behavior_score...")
+
+    def _one_run(trust_signal: str, reported: dict):
+        cfg = DummyConfig()
+        cfg.trust_signal = trust_signal
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+        for i, p in enumerate(proxies):
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.5
+            strategy.scheduler.clean_streaks[p.cid] = 3
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        rng = np.random.RandomState(0)
+        results = []
+        for i, p in enumerate(proxies):
+            m = {"is_verified": True, "client_id": f"honest_{i:02d}"}
+            if p.cid in reported:
+                m["small_loss_fraction"] = reported[p.cid]
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+                metrics=m,
+            )))
+        strategy.aggregate_fit(1, results, [])
+        return dict(strategy.scheduler.trust_scores)
+
+    # Reported scores: 4 clients report, 1 does not. All values well below
+    # 1.0 so they're guaranteed-different from BVD's inlier default (1.0),
+    # which would otherwise collapse the override to a no-op by coincidence.
+    reported = {"c0": 0.1, "c1": 0.3, "c2": 0.5, "c3": 0.7}
+    bvd_run = _one_run("bvd", reported)
+    sml_run = _one_run("small_loss_fraction", reported)
+    # Reported clients: trust diverges between the two runs.
+    for cid in reported:
+        if cid not in bvd_run or cid not in sml_run:
+            continue
+        d = abs(bvd_run[cid] - sml_run[cid])
+        assert d > 1e-6, (
+            f"{cid}: trust identical across bvd / small_loss_fraction runs "
+            f"({bvd_run[cid]:.6f} vs {sml_run[cid]:.6f}); override not firing"
+        )
+    # The non-reporting client falls back to BVD's score, so its final trust
+    # must match bit-for-bit between the two runs.
+    fallback = "c4"
+    if fallback in bvd_run and fallback in sml_run:
+        assert bvd_run[fallback] == sml_run[fallback], (
+            f"non-reporting client trust diverged "
+            f"({bvd_run[fallback]:.6f} vs {sml_run[fallback]:.6f}); the "
+            f"override should only touch clients that reported a value"
+        )
+    print("✓ small_loss_fraction overrides reporting clients' scores; "
+          "non-reporters fall back to BVD")
+    return True
+
+
 def test_cid_to_client_config_id_populated_and_stable():
     """`aggregate_fit` records proxy.cid -> "honest_XX" from FitRes metrics.
 
@@ -717,9 +799,11 @@ def main():
         rs8 = test_disable_trust_weighted_aggregation_flag_changes_aggregate()
         rs9 = test_initial_trust_and_bootstrap_gate_wired_through()
         rs10 = test_round_assignments_sampled_is_populated()
+        rs11 = test_trust_signal_default_is_bvd()
+        rs12 = test_small_loss_fraction_override_replaces_bvd_scores()
 
         if all([success1, success2, success3, success4, success5,
-                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10]):
+                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10, rs11, rs12]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
             return True
         else:
