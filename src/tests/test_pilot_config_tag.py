@@ -41,6 +41,9 @@ class _Args:
         self.cifar10n_label_set = "random1"
         # Trust signal, ignored by _config_tag unless it's non-default ("bvd").
         self.trust_signal = "bvd"
+        # Optional small-loss-fraction rescale, 'lo,hi'. Ignored by
+        # _config_tag unless trust_signal == 'small_loss_fraction'.
+        self.small_loss_rescale = None
         for k, v in overrides.items():
             setattr(self, k, v)
 
@@ -105,6 +108,13 @@ def test_priority_configurations_get_distinct_tags():
             (_Args(label_noise_type="pairflip",
                    trust_signal="small_loss_fraction"),
              "split-iid_noiseC40_R30_type-pairflip_trust-small-loss-fraction"),
+        # Rescale encodes two percentages so different rescale windows at
+        # the SAME trust signal + noise land in separate directories.
+        "slf_cifar10n_rescale":
+            (_Args(label_noise_type="cifar10n", cifar10n_label_set="random1",
+                   trust_signal="small_loss_fraction",
+                   small_loss_rescale="0.3,0.7"),
+             "split-iid_noiseC40_R30_type-cifar10n-random1_trust-small-loss-fraction_rescale-30-70"),
     }
     seen = set()
     for label, (args, expected) in cases.items():

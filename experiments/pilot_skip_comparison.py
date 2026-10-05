@@ -127,6 +127,15 @@ def _config_tag(args) -> str:
     trust_signal = getattr(args, "trust_signal", "bvd")
     if trust_signal != "bvd":
         parts.append(f"trust-{trust_signal.replace('_', '-')}")
+    # Encode a non-default small-loss rescale so SLF runs at different
+    # rescale windows do not collide on disk.
+    rescale = getattr(args, "small_loss_rescale", None)
+    if rescale and trust_signal == "small_loss_fraction":
+        parts_r = [p.strip() for p in str(rescale).split(",") if p.strip()]
+        if len(parts_r) == 2:
+            lo = int(round(float(parts_r[0]) * 100))
+            hi = int(round(float(parts_r[1]) * 100))
+            parts.append(f"rescale-{lo:02d}-{hi:02d}")
     return "_".join(parts)
 
 
@@ -182,6 +191,14 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
     #     MORE than tavs (skip 0.368 vs 0.461), opposite of the ablation's
     #     stated intent. Cleanly isolating the floor requires co-moving
     #     gamma_budget/c_lambda too, which is a separate design pass.
+    rescale = getattr(args, "small_loss_rescale", None)
+    rescale_lo, rescale_hi = 0.0, 1.0
+    if rescale:
+        parts_r = [p.strip() for p in rescale.split(",")]
+        if len(parts_r) != 2:
+            raise ValueError(f"--small-loss-rescale must be 'lo,hi'; got {rescale!r}")
+        rescale_lo = float(parts_r[0])
+        rescale_hi = float(parts_r[1])
     tavs_config = TavsEspConfig(
         theta_low=0.3, theta_high=0.7, alpha_trust=0.9, gamma_budget=0.35,
         tau_ramp=5.0,
@@ -191,7 +208,47 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         cosine_filter_promoted=False,
         enable_outlier_detection=True,
         trust_signal=getattr(args, "trust_signal", "bvd"),
+        small_loss_rescale_lo=rescale_lo,
+        small_loss_rescale_hi=rescale_hi,
     )
+
+    # EMA-convergence preflight for non-BVD trust signals. BVD's inlier
+    # default (~0.9) trivially clears theta_low; non-BVD signals (e.g.
+    # small-loss-fraction, val-accuracy) live in different numerical
+    # ranges and can leave trust pinned below theta_low for the whole
+    # pilot, which collapses the skip rate (what we saw at SLF seed=1).
+    # Project the midpoint of the rescale window and refuse to launch
+    # if even that fails to clear theta_low + 0.02 margin.
+    if tavs_config.trust_signal != "bvd":
+        from src.tavs_v2 import TavsEspStrategy as _S
+        _probe = _S(config=tavs_config)
+        raw_mid = (rescale_lo + rescale_hi) / 2.0
+        rescaled_mid = ((raw_mid - rescale_lo) / (rescale_hi - rescale_lo)
+                        if rescale_hi > rescale_lo else 0.5)
+        projected = _probe.scheduler.expected_trust_from_participation(
+            expected_raw=rescaled_mid,
+            total_rounds=args.rounds,
+            clients_per_round=args.clients_per_round,
+            num_clients=args.num_clients,
+            initial_trust=tavs_config.initial_trust,
+        )
+        margin = 0.02
+        print(f"[preflight] trust_signal={tavs_config.trust_signal} "
+              f"rescale=[{rescale_lo:.2f},{rescale_hi:.2f}] "
+              f"midpoint_rescaled={rescaled_mid:.2f} "
+              f"projected_trust_after_pilot={projected:.3f} "
+              f"theta_low={tavs_config.theta_low:.2f}")
+        if projected < tavs_config.theta_low + margin:
+            raise RuntimeError(
+                f"preflight: midpoint signal {rescaled_mid:.2f} projects "
+                f"trust={projected:.3f} < theta_low+margin="
+                f"{tavs_config.theta_low + margin:.3f} after "
+                f"{args.rounds} rounds with ~"
+                f"{args.rounds * args.clients_per_round / max(1, args.num_clients):.1f} "
+                f"verifications per client. Expected skip collapse. "
+                f"Fix: pass --small-loss-rescale lo,hi to stretch the "
+                f"signal range, or lower alpha_trust / initial_trust."
+            )
 
     # PipelineConfig takes a strategy CLASS, not an instance, and the pipeline
     # calls strategy_class(config=..., model_structure=...). RandomSkipStrategy
@@ -485,6 +542,17 @@ def main():
                              "(Han et al. 2018), adapted for FL as a drop-in "
                              "replacement for BVD when BVD does not separate "
                              "noisy from clean clients.")
+    parser.add_argument("--small-loss-rescale", default=None,
+                        help="Optional 'lo,hi' linear rescale of the raw "
+                             "small_loss_fraction value before it enters the "
+                             "trust EMA. e.g. '0.3,0.7' stretches val_acc "
+                             "0.3-0.7 across trust [0, 1]. Needed because "
+                             "raw val-accuracy on a mid-training model "
+                             "(~0.3-0.6) never climbs above theta_low=0.3 under "
+                             "the default EMA; without rescaling the Tier-1 "
+                             "floor clamps everyone to Verified and collapses "
+                             "the skip rate. Ignored unless --trust-signal="
+                             "small_loss_fraction. Default: no rescale.")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
     parser.add_argument("--skip-completed", action="store_true",
                         help="For each (arm, seed), skip re-execution if the arm's "

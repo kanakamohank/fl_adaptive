@@ -625,6 +625,124 @@ def test_trust_signal_default_is_bvd():
     return True
 
 
+def test_small_loss_rescale_maps_to_zero_one():
+    """When trust_signal='small_loss_fraction' and a (lo, hi) rescale is set,
+    the reported val-accuracy is linearly stretched to [0, 1] before entering
+    the trust EMA. (0.3, 0.7) maps 0.3->0, 0.5->0.5, 0.7->1.0, saturates
+    outside. (0, 1) is a no-op. (hi <= lo) is treated as no-op to avoid
+    division by zero."""
+    print("\nTesting small_loss_rescale linear mapping...")
+
+    def _one_run(lo, hi, reported):
+        cfg = DummyConfig()
+        cfg.trust_signal = "small_loss_fraction"
+        cfg.small_loss_rescale_lo = lo
+        cfg.small_loss_rescale_hi = hi
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(len(reported))]
+        # Set trust=0.25 (below theta_low=0.3) so when we populate the
+        # _round_assignments[1] record ourselves (bypassing configure_fit),
+        # the aggregate_fit path treats all these clients as Verified.
+        # EMA step: trust_after = 0.9*0.25 + 0.1*behavior = 0.225 + 0.1*b
+        # => behavior = (trust_after - 0.225) / 0.1
+        for i, p in enumerate(proxies):
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25
+            strategy.scheduler.clean_streaks[p.cid] = 0
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        # Populate _round_assignments so aggregate_fit routes everyone to V.
+        strategy._round_assignments[1] = {
+            "verified": {p.cid for p in proxies},
+            "promoted": set(),
+            "decoy": set(),
+            "sampled": {p.cid for p in proxies},
+        }
+        rng = np.random.RandomState(0)
+        results = []
+        for p in proxies:
+            v = reported[p.cid]
+            m = {"is_verified": True, "client_id": p.cid, "small_loss_fraction": v}
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000)*0.1).astype(np.float32)]),
+                metrics=m,
+            )))
+        strategy.aggregate_fit(1, results, [])
+        return {p.cid: (strategy.scheduler.trust_scores[p.cid] - 0.225) / 0.1
+                for p in proxies}
+
+    # Pad to 5 clients so BVD's LOO median has >=2 others per client,
+    # matching the working test_small_loss_fraction_override_replaces test.
+    # The extra clients report values that don't trigger assertion checks.
+    pad = {"c3": 0.5, "c4": 0.5}
+
+    # (0.3, 0.7) rescale, three reported values at boundary and middle:
+    scores = _one_run(0.3, 0.7, {**{"c0": 0.3, "c1": 0.5, "c2": 0.7}, **pad})
+    assert abs(scores["c0"] - 0.0) < 1e-6, f"0.3 should map to 0, got {scores['c0']}"
+    assert abs(scores["c1"] - 0.5) < 1e-6, f"0.5 should map to 0.5, got {scores['c1']}"
+    assert abs(scores["c2"] - 1.0) < 1e-6, f"0.7 should map to 1, got {scores['c2']}"
+
+    # Saturation: 0.1 -> 0, 0.9 -> 1.
+    scores = _one_run(0.3, 0.7, {**{"c0": 0.1, "c1": 0.9}, **pad, "c2": 0.5})
+    assert abs(scores["c0"] - 0.0) < 1e-6
+    assert abs(scores["c1"] - 1.0) < 1e-6
+
+    # No-op (0, 1).
+    scores = _one_run(0.0, 1.0, {**pad, "c0": 0.5, "c1": 0.5, "c2": 0.5})
+    assert abs(scores["c0"] - 0.5) < 1e-6
+
+    # Degenerate hi<=lo -> treated as no-op.
+    scores = _one_run(0.7, 0.3, {**pad, "c0": 0.5, "c1": 0.5, "c2": 0.5})
+    assert abs(scores["c0"] - 0.5) < 1e-6, (
+        f"degenerate hi<=lo should fall back to no-op; got {scores['c0']}"
+    )
+    print("✓ rescale maps (lo, hi) -> [0, 1] linearly with saturation; degenerate hi<=lo is no-op")
+    return True
+
+
+def test_expected_trust_after_rounds_matches_closed_form():
+    """TavsScheduler.expected_trust_after_verifications returns the closed-form
+    EMA projection. This is the sanity check that would have flagged the
+    SLF seed=1 config bug: with raw~0.55 and only ~4 verifications per
+    client across 20 rounds, trust tops out below theta_low=0.3."""
+    print("\nTesting expected_trust_after_verifications (would-have-caught-SLF-bug)...")
+    from src.tavs_v2 import TavsEspConfig
+    cfg = TavsEspConfig()
+    cfg.initial_trust = 0.25
+    strategy = TavsEspStrategy(config=cfg)
+    sch = strategy.scheduler
+    # n=verifications (NOT rounds). In the 50-client/10-cpr/20-round pilot,
+    # a client is verified ~4 times. At raw=0.55, that is 0.25*0.9^4 +
+    # 0.55*(1-0.9^4) = 0.164 + 0.189 = 0.353 (barely above theta_low).
+    t4 = sch.expected_trust_after_verifications(expected_raw=0.55,
+                                                num_verifications=4,
+                                                initial_trust=0.25)
+    expected4 = 0.25 * (0.9 ** 4) + 0.55 * (1 - 0.9 ** 4)
+    assert abs(t4 - expected4) < 1e-6, f"{t4} vs closed-form {expected4}"
+    # Case 2: short-run (n=2) matches early-round regime.
+    t2 = sch.expected_trust_after_verifications(expected_raw=0.55,
+                                                num_verifications=2,
+                                                initial_trust=0.25)
+    expected2 = 0.25 * (0.9 ** 2) + 0.55 * (1 - 0.9 ** 2)
+    assert abs(t2 - expected2) < 1e-6
+    # Rescale: with (0.3, 0.7), raw=0.55 → 0.625 → clears theta_low faster.
+    t2_rescaled = sch.expected_trust_after_verifications(expected_raw=0.625,
+                                                         num_verifications=2,
+                                                         initial_trust=0.25)
+    assert t2_rescaled > 0.3
+
+    # Participation wrapper: 20 rounds, 10 cpr, 50 clients -> expected 4 verif.
+    t_part = sch.expected_trust_from_participation(expected_raw=0.55,
+                                                   total_rounds=20,
+                                                   clients_per_round=10,
+                                                   num_clients=50,
+                                                   initial_trust=0.25)
+    assert abs(t_part - t4) < 1e-6, f"participation wrapper mismatch: {t_part} vs {t4}"
+    print(f"✓ expected_trust: raw=0.55 n_verif=4 → {t4:.3f}; "
+          f"participation(20,10,50) → {t_part:.3f}; rescaled n=2 → {t2_rescaled:.3f}")
+    return True
+
+
 def test_small_loss_fraction_override_replaces_bvd_scores():
     """When trust_signal='small_loss_fraction', clients that reported a
     small_loss_fraction in their fit metrics must have their behavior_score
@@ -801,9 +919,12 @@ def main():
         rs10 = test_round_assignments_sampled_is_populated()
         rs11 = test_trust_signal_default_is_bvd()
         rs12 = test_small_loss_fraction_override_replaces_bvd_scores()
+        rs13 = test_small_loss_rescale_maps_to_zero_one()
+        rs14 = test_expected_trust_after_rounds_matches_closed_form()
 
         if all([success1, success2, success3, success4, success5,
-                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10, rs11, rs12]):
+                rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10,
+                rs11, rs12, rs13, rs14]):
             print(f"\n🎯 All TAVS-ESP Strategy tests PASSED!")
             return True
         else:
