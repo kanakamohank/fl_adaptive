@@ -365,6 +365,44 @@ class TavsScheduler:
             float(self.k_trust),
         )))
 
+    def expected_trust_after_verifications(self, expected_raw: float,
+                                           num_verifications: int,
+                                           initial_trust: float = None) -> float:
+        """Closed-form projection of trust after N VERIFICATIONS of a client
+        under a constant raw behavior signal.
+
+        T_n = alpha^n * T_0 + expected_raw * (1 - alpha^n)
+
+        IMPORTANT: n is the number of times THIS CLIENT is verified, NOT
+        the number of federation rounds. A client sampled with probability
+        p per round is verified ~p * total_rounds times. In a 50-client /
+        10-cpr / 20-round pilot each client is verified ~4 times, not 20.
+        Use `expected_trust_from_participation` to project from rounds.
+        """
+        import math
+        init = initial_trust if initial_trust is not None else self.initial_trust
+        alpha = float(self.alpha_trust)
+        n = int(num_verifications)
+        if n <= 0 or alpha >= 1.0:
+            return float(init)
+        if alpha <= 0.0:
+            return float(expected_raw)
+        return float(init) * (alpha ** n) + float(expected_raw) * (1.0 - alpha ** n)
+
+    def expected_trust_from_participation(self, expected_raw: float,
+                                          total_rounds: int,
+                                          clients_per_round: int,
+                                          num_clients: int,
+                                          initial_trust: float = None) -> float:
+        """Convenience wrapper: project trust after `total_rounds` for a
+        client sampled uniformly, so expected verifications = total_rounds *
+        clients_per_round / num_clients. This is the correct n for a pilot
+        preflight check: with 20 rounds, 10 cpr, 50 clients a client is
+        verified ~4 times, so the raw signal has only 4 chances to pull
+        trust away from init."""
+        n_verif = max(0, int(round(total_rounds * clients_per_round / max(1, num_clients))))
+        return self.expected_trust_after_verifications(expected_raw, n_verif, initial_trust)
+
     def describe_promotion_feasibility(self, num_rounds: int, initial_trust: float = 0.25) -> Dict:
         """
         Diagnostic for experiment configuration: can TAVS promote anyone within

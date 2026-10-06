@@ -156,6 +156,21 @@ class TavsEspConfig:
     #                         Honest-but-noisy threat model only: a malicious
     #                         client could spoof the number.
     trust_signal: str = "bvd"
+    # Optional linear rescaling of the raw small_loss_fraction (val-accuracy)
+    # value BEFORE it enters the trust EMA. Needed because raw val-accuracy
+    # on a 55%-trained model lands around 0.3-0.6, which under
+    # (alpha_trust=0.9, initial_trust=0.25) never climbs above theta_low=0.3
+    # in 20 rounds -- the Tier-1 floor then routes everyone to Verified and
+    # the signal is clamped out of existence. (This is what we saw at the
+    # first SLF seed=1 run: skip rate collapsed from 46% to 9%.)
+    #
+    # When rescale_lo < rescale_hi, maps val_acc linearly into [0, 1]:
+    #   rescaled = clip((val_acc - rescale_lo) / (rescale_hi - rescale_lo), 0, 1)
+    # So setting (0.3, 0.7) stretches the useful 0.3-0.7 window of val-acc
+    # across the full trust range and sends clients outside it to the floor
+    # or ceiling. Default (0.0, 1.0) is a no-op pass-through.
+    small_loss_rescale_lo: float = 0.0
+    small_loss_rescale_hi: float = 1.0
 
     # Re-draw the per-round cohort with our own seeded RNG instead of relying on
     # Flower's module-level one, which the run seed does not reach. Without this
@@ -767,6 +782,13 @@ class TavsEspStrategy(Strategy):
         # this round are ignored -- trust only updates on verification.
         trust_signal = getattr(self.config, "trust_signal", "bvd")
         if trust_signal == "small_loss_fraction":
+            lo = float(getattr(self.config, "small_loss_rescale_lo", 0.0))
+            hi = float(getattr(self.config, "small_loss_rescale_hi", 1.0))
+            # Guard a degenerate (hi <= lo) config as "no rescale" rather
+            # than crashing on division: the pass-through (0, 1) is the
+            # correct no-op.
+            if hi <= lo:
+                lo, hi = 0.0, 1.0
             overridden = 0
             for proxy, fit_res in results:
                 cid = proxy.cid
@@ -779,15 +801,17 @@ class TavsEspStrategy(Strategy):
                     val = float(reported)
                 except (TypeError, ValueError):
                     continue
-                # Clip to [0, 1] -- the trust scheduler expects behavior_score
-                # in that range (higher = cleaner, same semantic as BVD's).
-                if not (0.0 <= val <= 1.0):
-                    val = max(0.0, min(1.0, val))
+                # Linear rescale, then clip to [0, 1]. See
+                # small_loss_rescale_* config docstring for why rescaling
+                # is sometimes required to clear theta_low in 20 rounds.
+                val = (val - lo) / (hi - lo)
+                val = max(0.0, min(1.0, val))
                 behavior_scores[cid] = val
                 overridden += 1
             logger.info(f"Round {server_round} trust_signal='small_loss_fraction': "
                         f"overrode {overridden}/{len(V_ids)} verified clients' "
-                        f"behavior_score from BVD to client-reported val fit")
+                        f"behavior_score from BVD to client-reported val fit "
+                        f"(rescale: [{lo:.2f}, {hi:.2f}] -> [0, 1])")
 
         if getattr(self.config, "soft_outlier_weighting", True):
             # Everyone verified contributes; behaviour_score sets how much.
