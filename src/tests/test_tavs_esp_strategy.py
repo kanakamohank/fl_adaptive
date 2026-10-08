@@ -758,9 +758,26 @@ def test_oracle_signal_history_captures_client_metrics():
                   "pretrain_loss_mean", "pretrain_loss_var",
                   "cosine_vs_weighted_mean", "cosine_vs_simple_mean",
                   "per_class_pretrain_loss", "per_class_pretrain_count",
-                  # BVD readouts added for the "wrong readout" ablation.
-                  "bvd_behavior_score"):
+                  # BVD readouts for the "wrong readout" ablation: every
+                  # verified client should carry all four fields so a
+                  # downstream analysis can compare behavior_score (what
+                  # trust EMA consumes) against max_z (raw outlier score)
+                  # and the two denominators that produced it.
+                  "bvd_behavior_score", "bvd_max_z",
+                  "bvd_raw_dist", "bvd_sigma_sq"):
             assert k in e, f"client {p.cid} missing oracle key {k}; keys={list(e.keys())}"
+        # Numeric sanity on the BVD fields -- they are floats, not strings.
+        for k in ("bvd_behavior_score", "bvd_max_z",
+                  "bvd_raw_dist", "bvd_sigma_sq"):
+            assert isinstance(e[k], float), f"{k} must be float, got {type(e[k])}"
+        # behavior_score is in [0, 1] by BVD construction.
+        assert 0.0 <= e["bvd_behavior_score"] <= 1.0, (
+            f"bvd_behavior_score out of [0,1]: {e['bvd_behavior_score']}"
+        )
+        # max_z and sigma_sq are non-negative; raw_dist is a squared L2.
+        assert e["bvd_max_z"] >= 0.0
+        assert e["bvd_raw_dist"] >= 0.0
+        assert e["bvd_sigma_sq"] >= 0.0
         assert len(e["per_class_pretrain_loss"]) == 10
         # Cosine with itself bounded in [-1, 1].
         assert -1.001 <= e["cosine_vs_weighted_mean"] <= 1.001
