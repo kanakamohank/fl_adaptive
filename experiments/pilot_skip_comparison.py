@@ -136,6 +136,13 @@ def _config_tag(args) -> str:
             lo = int(round(float(parts_r[0]) * 100))
             hi = int(round(float(parts_r[1]) * 100))
             parts.append(f"rescale-{lo:02d}-{hi:02d}")
+    # Encode non-default local_epochs so oracle runs do not clobber pilot
+    # runs at the same noise config but different epoch counts.
+    _le = getattr(args, "local_epochs", None)
+    if _le is not None:
+        parts.append(f"ep{int(_le)}")
+    if getattr(args, "log_oracle_signals", False):
+        parts.append("oracle")
     return "_".join(parts)
 
 
@@ -210,6 +217,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         trust_signal=getattr(args, "trust_signal", "bvd"),
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
+        log_oracle_signals=bool(getattr(args, "log_oracle_signals", False)),
     )
 
     # EMA-convergence preflight for non-BVD trust signals. BVD's inlier
@@ -268,6 +276,10 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         _BoundStrategy.__name__ = f"{base_cls.__name__}_r{int(skip_rate * 100)}"
         strategy_class = _BoundStrategy
 
+    _client_epochs_override = getattr(args, "local_epochs", None)
+    _pipeline_kwargs = {}
+    if _client_epochs_override is not None:
+        _pipeline_kwargs["client_epochs"] = int(_client_epochs_override)
     config = PipelineConfig(
         num_rounds=args.rounds,
         num_clients=args.num_clients,
@@ -275,6 +287,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         byzantine_fraction=0.0,   # honest only
         tavs_config=tavs_config,
         strategy_class=strategy_class,
+        **_pipeline_kwargs,
         data_split=args.data_split,
         data_alpha=args.data_alpha,
         # Label noise on a subset of clients: the only source of client-level
@@ -553,6 +566,19 @@ def main():
                              "floor clamps everyone to Verified and collapses "
                              "the skip rate. Ignored unless --trust-signal="
                              "small_loss_fraction. Default: no rescale.")
+    parser.add_argument("--log-oracle-signals", action="store_true",
+                        help="Opt-in diagnostic logging for the oracle "
+                             "noise-detection experiment. Each client logs "
+                             "pre-training per-class loss / variance, "
+                             "memorization gap (epoch_1 loss - epoch_last), "
+                             "update norm, first-batch grad norm; the strategy "
+                             "logs cosine vs weighted/simple mean per client "
+                             "per round. All dumped into "
+                             "pipeline_results['oracle_signal_history']. "
+                             "Zero cost when off. Does not change scheduling.")
+    parser.add_argument("--local-epochs", type=int, default=None,
+                        help="Override local_epochs for the oracle experiment. "
+                             "Default pulls from PipelineConfig (currently 2).")
     parser.add_argument("--results-dir", default="results/pilot_skip_comparison")
     parser.add_argument("--skip-completed", action="store_true",
                         help="For each (arm, seed), skip re-execution if the arm's "

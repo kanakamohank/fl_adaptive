@@ -700,6 +700,103 @@ def test_small_loss_rescale_maps_to_zero_one():
     return True
 
 
+def test_oracle_signal_history_captures_client_metrics():
+    """When TavsEspConfig.log_oracle_signals=True, aggregate_fit records
+    per-(round, cid) signals received from clients plus server-side
+    cosine-vs-mean. Off by default (verified separately) and must not
+    affect aggregation. Here we check the on-path."""
+    print("\nTesting oracle_signal_history collection...")
+    cfg = DummyConfig()
+    cfg.log_oracle_signals = True
+    strategy = TavsEspStrategy(config=cfg)
+    proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+    for p in proxies:
+        strategy.scheduler.join_rounds[p.cid] = -100
+        strategy.scheduler.trust_scores[p.cid] = 0.25
+        strategy.scheduler.clean_streaks[p.cid] = 0
+        strategy.scheduler.last_verified_round[p.cid] = 0
+        strategy.scheduler.appearances_since_verified[p.cid] = 0
+    strategy._round_assignments[1] = {
+        "verified": {p.cid for p in proxies},
+        "promoted": set(),
+        "decoy": set(),
+        "sampled": {p.cid for p in proxies},
+    }
+    rng = np.random.RandomState(42)
+    results = []
+    for i, p in enumerate(proxies):
+        m = {
+            "is_verified": True,
+            "client_id": p.cid,
+            "memorization_gap": 0.1 * (i + 1),
+            "loss_epoch_first": 2.0,
+            "loss_epoch_last": 2.0 - 0.1 * (i + 1),
+            "update_norm": 1.0 + 0.1 * i,
+            "first_batch_grad_norm": 0.5 + 0.05 * i,
+            "pretrain_loss_mean": 1.2 + 0.1 * i,
+            "pretrain_loss_var": 0.3,
+            "per_class_pretrain_loss": [1.0, 1.1, float("nan"), 1.3, 1.4,
+                                        1.5, 1.6, 1.7, 1.8, 1.9],
+            "per_class_pretrain_count": [10, 10, 0, 10, 10, 10, 10, 10, 10, 10],
+        }
+        results.append((p, MockFitRes(
+            parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+            metrics=m,
+        )))
+    strategy.aggregate_fit(1, results, [])
+    hist = getattr(strategy, "_oracle_signal_history", {})
+    assert 1 in hist, f"oracle_signal_history should contain round 1; got {list(hist.keys())}"
+    r1 = hist[1]
+    assert len(r1) == 5, f"expected 5 clients in round-1 history; got {len(r1)}"
+    for p in proxies:
+        e = r1[p.cid]
+        for k in ("memorization_gap", "update_norm", "first_batch_grad_norm",
+                  "pretrain_loss_mean", "pretrain_loss_var",
+                  "cosine_vs_weighted_mean", "cosine_vs_simple_mean",
+                  "per_class_pretrain_loss", "per_class_pretrain_count"):
+            assert k in e, f"client {p.cid} missing oracle key {k}; keys={list(e.keys())}"
+        assert len(e["per_class_pretrain_loss"]) == 10
+        # Cosine with itself bounded in [-1, 1].
+        assert -1.001 <= e["cosine_vs_weighted_mean"] <= 1.001
+        assert -1.001 <= e["cosine_vs_simple_mean"] <= 1.001
+    # Export surfaces it.
+    exported = strategy.export_complete_state()
+    assert "oracle_signal_history" in exported
+    assert 1 in exported["oracle_signal_history"]
+    print(f"✓ oracle_signal_history populated for round 1 with "
+          f"{len(r1)} clients and all 9 expected keys per client")
+    return True
+
+
+def test_oracle_signal_history_off_by_default():
+    """With log_oracle_signals=False (default), the strategy does NOT
+    allocate or populate _oracle_signal_history. aggregation path is
+    unchanged."""
+    cfg = DummyConfig()
+    assert getattr(cfg, "log_oracle_signals", False) is False
+    strategy = TavsEspStrategy(config=cfg)
+    proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+    for p in proxies:
+        strategy.scheduler.join_rounds[p.cid] = -100
+        strategy.scheduler.trust_scores[p.cid] = 0.25
+    strategy._round_assignments[1] = {
+        "verified": {p.cid for p in proxies},
+        "promoted": set(), "decoy": set(),
+        "sampled": {p.cid for p in proxies},
+    }
+    rng = np.random.RandomState(0)
+    results = [(p, MockFitRes(
+        parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+        metrics={"is_verified": True, "client_id": p.cid},
+    )) for p in proxies]
+    strategy.aggregate_fit(1, results, [])
+    assert not getattr(strategy, "_oracle_signal_history", None), (
+        "oracle_signal_history must stay empty when flag is off"
+    )
+    print("✓ log_oracle_signals=False keeps history empty (zero-cost default)")
+    return True
+
+
 def test_expected_trust_after_rounds_matches_closed_form():
     """TavsScheduler.expected_trust_after_verifications returns the closed-form
     EMA projection. This is the sanity check that would have flagged the
@@ -921,6 +1018,9 @@ def main():
         rs12 = test_small_loss_fraction_override_replaces_bvd_scores()
         rs13 = test_small_loss_rescale_maps_to_zero_one()
         rs14 = test_expected_trust_after_rounds_matches_closed_form()
+        rs15 = test_oracle_signal_history_captures_client_metrics()
+        rs16 = test_oracle_signal_history_off_by_default()
+        assert rs15 is True and rs16 is True
 
         if all([success1, success2, success3, success4, success5,
                 rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10,
