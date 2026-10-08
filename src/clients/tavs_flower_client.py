@@ -276,8 +276,20 @@ class TAVSFlowerClient(NumPyClient):
                 except Exception:
                     pass
                 if oracle_pretrain is not None:
+                    # Flower's protobuf serde for fit metrics accepts only
+                    # Scalar (bool/bytes/float/int/str) -- a list raises
+                    # ValueError at serde time, AFTER fit() returns, which
+                    # Flower reports as a client-side failure. The whole
+                    # fit result is then dropped and the model never
+                    # updates. Encode list-valued fields as JSON strings;
+                    # aggregate_fit decodes them before writing to
+                    # oracle_signal_history.
+                    import json as _json
                     for k, v in oracle_pretrain.items():
-                        metrics[k] = v
+                        if isinstance(v, (list, tuple)):
+                            metrics[k] = _json.dumps(list(v))
+                        else:
+                            metrics[k] = v
 
             logger.info(f"Client {self.config.client_id}: Training complete "
                        f"(round {self.round_number}, {self.current_assignment}, "

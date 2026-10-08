@@ -1040,9 +1040,16 @@ class TavsEspStrategy(Strategy):
                     for key in ("per_class_pretrain_loss",
                                 "per_class_pretrain_count"):
                         if key in m:
+                            # Shipped as a JSON string over Flower's protobuf
+                            # (list is not a Scalar type Flower accepts).
+                            raw = m[key]
                             try:
-                                entry[key] = list(m[key])
-                            except TypeError:
+                                if isinstance(raw, str):
+                                    import json as _json
+                                    entry[key] = list(_json.loads(raw))
+                                else:
+                                    entry[key] = list(raw)
+                            except (TypeError, ValueError):
                                 pass
                     if stacked is not None and cid in flat_updates:
                         v = flat_updates[cid]
