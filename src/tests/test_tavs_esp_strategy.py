@@ -735,9 +735,13 @@ def test_oracle_signal_history_captures_client_metrics():
             "first_batch_grad_norm": 0.5 + 0.05 * i,
             "pretrain_loss_mean": 1.2 + 0.1 * i,
             "pretrain_loss_var": 0.3,
-            "per_class_pretrain_loss": [1.0, 1.1, float("nan"), 1.3, 1.4,
-                                        1.5, 1.6, 1.7, 1.8, 1.9],
-            "per_class_pretrain_count": [10, 10, 0, 10, 10, 10, 10, 10, 10, 10],
+            # Lists are not Flower-Scalar; the client encodes them as JSON
+            # strings and the strategy decodes them. Simulate that here so
+            # the test exercises the real serde path.
+            "per_class_pretrain_loss": __import__("json").dumps(
+                [1.0, 1.1, float("nan"), 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9]),
+            "per_class_pretrain_count": __import__("json").dumps(
+                [10, 10, 0, 10, 10, 10, 10, 10, 10, 10]),
         }
         results.append((p, MockFitRes(
             parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
