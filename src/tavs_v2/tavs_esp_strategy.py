@@ -1021,6 +1021,12 @@ class TavsEspStrategy(Strategy):
                         return float(np.dot(a, b) / (na * nb))
                 else:
                     stacked = None
+                # BVD readouts: `behavior_scores` is BVD's output used by the
+                # trust EMA; `_last_per_client_stats` has the raw max_z and
+                # the sigma_sq at the argmax block. Logged so a post-hoc
+                # analysis can test "was BVD the wrong readout" against the
+                # loss-family signals.
+                bvd_stats = getattr(self.detector, "_last_per_client_stats", {}) or {}
                 for proxy, res in results:
                     cid = proxy.cid
                     m = res.metrics or {}
@@ -1028,6 +1034,21 @@ class TavsEspStrategy(Strategy):
                         "num_examples": int(res.num_examples),
                         "is_verified": cid in V_ids,
                     }
+                    if cid in behavior_scores:
+                        try:
+                            entry["bvd_behavior_score"] = float(behavior_scores[cid])
+                        except (TypeError, ValueError):
+                            pass
+                    if cid in bvd_stats:
+                        s = bvd_stats[cid]
+                        for k_src, k_dst in (("max_z", "bvd_max_z"),
+                                             ("raw_dist_at_argmax", "bvd_raw_dist"),
+                                             ("sigma_sq_at_argmax", "bvd_sigma_sq")):
+                            if k_src in s:
+                                try:
+                                    entry[k_dst] = float(s[k_src])
+                                except (TypeError, ValueError):
+                                    pass
                     for key in ("memorization_gap", "loss_epoch_first",
                                 "loss_epoch_last", "update_norm",
                                 "first_batch_grad_norm", "pretrain_loss_mean",

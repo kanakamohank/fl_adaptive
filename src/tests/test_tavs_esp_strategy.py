@@ -757,7 +757,9 @@ def test_oracle_signal_history_captures_client_metrics():
         for k in ("memorization_gap", "update_norm", "first_batch_grad_norm",
                   "pretrain_loss_mean", "pretrain_loss_var",
                   "cosine_vs_weighted_mean", "cosine_vs_simple_mean",
-                  "per_class_pretrain_loss", "per_class_pretrain_count"):
+                  "per_class_pretrain_loss", "per_class_pretrain_count",
+                  # BVD readouts added for the "wrong readout" ablation.
+                  "bvd_behavior_score"):
             assert k in e, f"client {p.cid} missing oracle key {k}; keys={list(e.keys())}"
         assert len(e["per_class_pretrain_loss"]) == 10
         # Cosine with itself bounded in [-1, 1].
