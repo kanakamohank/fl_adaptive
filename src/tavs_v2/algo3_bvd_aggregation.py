@@ -267,6 +267,11 @@ class BlockVarianceDetector:
             else:
                 behavior_scores[cid] = max(0.0, 1.0 - excess / self.tau_z)
 
+        # Cache per-client stats for the oracle diagnostic pathway. Not used
+        # by scheduling; only read by TavsEspStrategy's oracle logging block
+        # when log_oracle_signals=True.
+        self._last_per_client_stats = per_client_stats
+
         return inliers, outliers, behavior_scores
 
 

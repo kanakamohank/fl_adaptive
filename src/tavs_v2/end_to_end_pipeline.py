@@ -316,8 +316,13 @@ class TAVSESPPipeline:
         # existing BVD runs are byte-identical to their pre-change
         # trajectories.
         trust_signal = getattr(self.config.tavs_config, "trust_signal", "bvd")
+        # Also honour the oracle flag: the diagnostic experiment logs
+        # small_loss_fraction as one readout to compare against pretrain-loss
+        # and cosine, so the 90/10 split must be created even when
+        # trust_signal is 'bvd'.
+        log_oracle = bool(getattr(self.config.tavs_config, "log_oracle_signals", False))
         self.client_val_datasets: List = [None] * self.config.num_clients
-        if trust_signal == "small_loss_fraction":
+        if trust_signal == "small_loss_fraction" or log_oracle:
             split_rng = np.random.default_rng(self.config.seed * 10 + 7)
             val_frac = 0.10
             for cid in range(self.config.num_clients):
