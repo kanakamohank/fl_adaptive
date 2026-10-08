@@ -229,6 +229,14 @@ class TAVSFlowerClient(NumPyClient):
             # the signal.
             small_loss_fraction = self._small_loss_fraction_on_val()
 
+            # Pre-training oracle diagnostics (opt-in; off by default).
+            # Must happen BEFORE training so noisy clients haven't memorised
+            # their wrong labels yet. See reviewer note on signal collapse.
+            oracle_pretrain = None
+            if getattr(self, "_log_oracle_signals", False):
+                num_classes = (self.config.model_kwargs or {}).get("num_classes", 10)
+                oracle_pretrain = self._oracle_signals_on_train(num_classes=num_classes)
+
             # Execute training based on client type and assignment
             num_examples = self._execute_training(config)
 
@@ -239,6 +247,37 @@ class TAVSFlowerClient(NumPyClient):
             metrics = self._prepare_fit_metrics(num_examples)
             if small_loss_fraction is not None:
                 metrics["small_loss_fraction"] = float(small_loss_fraction)
+
+            if getattr(self, "_log_oracle_signals", False):
+                # Update-norm from incoming vs outgoing params (not grad-norm;
+                # the two diverge over 5 local epochs with momentum, so this
+                # is a trajectory-length proxy, not a per-step gradient size).
+                try:
+                    import numpy as _np
+                    diff_sq = 0.0
+                    for p_in, p_out in zip(parameters, updated_parameters):
+                        d = _np.asarray(p_out).ravel() - _np.asarray(p_in).ravel()
+                        diff_sq += float((d * d).sum())
+                    metrics["update_norm"] = float(diff_sq ** 0.5)
+                except Exception:
+                    pass
+                # Memorization gap from honest_client's epoch_losses, if present.
+                try:
+                    uh = getattr(self.underlying_client, "training_history", None)
+                    if uh:
+                        last = uh[-1]
+                        el = last.get("epoch_losses") or []
+                        if len(el) >= 1:
+                            metrics["loss_epoch_first"] = float(el[0])
+                            metrics["loss_epoch_last"] = float(el[-1])
+                            metrics["memorization_gap"] = float(el[0] - el[-1])
+                        if "first_batch_grad_norm" in last:
+                            metrics["first_batch_grad_norm"] = float(last["first_batch_grad_norm"])
+                except Exception:
+                    pass
+                if oracle_pretrain is not None:
+                    for k, v in oracle_pretrain.items():
+                        metrics[k] = v
 
             logger.info(f"Client {self.config.client_id}: Training complete "
                        f"(round {self.round_number}, {self.current_assignment}, "
@@ -373,6 +412,15 @@ class TAVSFlowerClient(NumPyClient):
         if "is_decoy" in config:
             self.is_decoy = bool(config["is_decoy"])
 
+        if "log_oracle_signals" in config:
+            v = config["log_oracle_signals"]
+            if isinstance(v, str):
+                self._log_oracle_signals = v.lower() in ("true", "1", "yes")
+            else:
+                self._log_oracle_signals = bool(v)
+        else:
+            self._log_oracle_signals = getattr(self, "_log_oracle_signals", False)
+
         # Store assignment history
         self.assignment_history.append({
             "round": self.round_number,
@@ -448,6 +496,71 @@ class TAVSFlowerClient(NumPyClient):
         })
 
         return num_examples
+
+    def _oracle_signals_on_train(self, num_classes: int = 10):
+        """Pre-training diagnostic signals for the oracle noise-detection
+        experiment. Runs ONE eval pass over this client's train_loader with
+        the fresh global weights (no backward, no grad). Measures what the
+        INCOMING global model sees in each sample's label — before any local
+        step can memorise noise.
+
+        Returns a dict with:
+          per_class_pretrain_loss: list[num_classes]  (NaN if class absent)
+          per_class_pretrain_count: list[num_classes]
+          pretrain_loss_mean: float
+          pretrain_loss_var: float   (variance across samples)
+        Or None if train_loader is unavailable / empty.
+        """
+        if self.train_loader is None:
+            return None
+        model = getattr(self.underlying_client, "model", None)
+        if model is None:
+            return None
+        import torch as _torch
+        try:
+            device = next(model.parameters()).device
+        except StopIteration:
+            return None
+        model.eval()
+        loss_fn = _torch.nn.CrossEntropyLoss(reduction="none")
+        per_class_sum = [0.0] * num_classes
+        per_class_cnt = [0] * num_classes
+        all_losses = []
+        with _torch.no_grad():
+            for batch in self.train_loader:
+                if not (isinstance(batch, (list, tuple)) and len(batch) == 2):
+                    continue
+                x, y = batch
+                try:
+                    x = x.to(device)
+                    y = y.to(device, dtype=_torch.long)
+                    out = model(x)
+                    per_sample = loss_fn(out, y)
+                except Exception:
+                    return None
+                for i in range(y.shape[0]):
+                    c = int(y[i].item())
+                    if 0 <= c < num_classes:
+                        per_class_sum[c] += float(per_sample[i].item())
+                        per_class_cnt[c] += 1
+                all_losses.extend(float(v) for v in per_sample.detach().cpu().tolist())
+        if not all_losses:
+            return None
+        per_class_loss = []
+        for c in range(num_classes):
+            per_class_loss.append(
+                (per_class_sum[c] / per_class_cnt[c]) if per_class_cnt[c] > 0
+                else float("nan")
+            )
+        n = len(all_losses)
+        mean = sum(all_losses) / n
+        var = sum((v - mean) ** 2 for v in all_losses) / n if n > 1 else 0.0
+        return {
+            "per_class_pretrain_loss": per_class_loss,
+            "per_class_pretrain_count": per_class_cnt,
+            "pretrain_loss_mean": float(mean),
+            "pretrain_loss_var": float(var),
+        }
 
     def _small_loss_fraction_on_val(self):
         """Return the fraction of val samples whose label the current model

@@ -44,6 +44,10 @@ class _Args:
         # Optional small-loss-fraction rescale, 'lo,hi'. Ignored by
         # _config_tag unless trust_signal == 'small_loss_fraction'.
         self.small_loss_rescale = None
+        # Oracle experiment flags; both default off / unset so historical
+        # tags are preserved.
+        self.local_epochs = None
+        self.log_oracle_signals = False
         for k, v in overrides.items():
             setattr(self, k, v)
 
@@ -115,6 +119,17 @@ def test_priority_configurations_get_distinct_tags():
                    trust_signal="small_loss_fraction",
                    small_loss_rescale="0.3,0.7"),
              "split-iid_noiseC40_R30_type-cifar10n-random1_trust-small-loss-fraction_rescale-30-70"),
+        # Oracle run: non-default local_epochs + log_oracle_signals land in
+        # their own path so the oracle data never collides with a pilot run
+        # at the same noise config.
+        "oracle_cifar10n":
+            (_Args(label_noise_type="cifar10n", cifar10n_label_set="random1",
+                   local_epochs=5, log_oracle_signals=True),
+             "split-iid_noiseC40_R30_type-cifar10n-random1_ep5_oracle"),
+        "oracle_pairflip":
+            (_Args(label_noise_type="pairflip",
+                   local_epochs=5, log_oracle_signals=True),
+             "split-iid_noiseC40_R30_type-pairflip_ep5_oracle"),
     }
     seen = set()
     for label, (args, expected) in cases.items():

@@ -89,6 +89,7 @@ class HonestClient(NumPyClient):
 
         self.model.train()
         epoch_losses = []
+        first_batch_grad_norm = None  # oracle diagnostic; captured below.
 
         for epoch in range(current_epochs):
             epoch_loss = 0.0
@@ -109,10 +110,24 @@ class HonestClient(NumPyClient):
                 output = self.model(data)
                 loss = self.criterion(output, target)
                 loss.backward()
-                
+
+                # Oracle diagnostic: snapshot gradient L2 norm on the very first
+                # batch (fresh global weights, no SGD steps applied yet). Noisy
+                # clients tend to produce larger first-batch grads because many
+                # of their labels disagree with the trained model's predictions.
+                if epoch == 0 and batch_idx == 0 and first_batch_grad_norm is None:
+                    try:
+                        _g2 = 0.0
+                        for _p in self.model.parameters():
+                            if _p.grad is not None:
+                                _g2 += float(_p.grad.detach().pow(2).sum().item())
+                        first_batch_grad_norm = float(_g2 ** 0.5)
+                    except Exception:
+                        first_batch_grad_norm = None
+
                 # ANTI-EXPLOSION SHIELD: Mathematically guarantees the model cannot explode to NaN
                 torch.nn.utils.clip_grad_norm_(self.model.parameters(), max_norm=5.0)
-                
+
                 self.optimizer.step()
 
                 epoch_loss += loss.item()
@@ -126,6 +141,7 @@ class HonestClient(NumPyClient):
             "epoch_losses": epoch_losses,
             "final_loss": epoch_losses[-1] if epoch_losses else 0.0,
             "num_examples": len(self.train_loader.dataset),
+            "first_batch_grad_norm": first_batch_grad_norm,
         }
         self.training_history.append(training_metrics)
 

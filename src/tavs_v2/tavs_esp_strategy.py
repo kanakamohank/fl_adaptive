@@ -171,6 +171,15 @@ class TavsEspConfig:
     # or ceiling. Default (0.0, 1.0) is a no-op pass-through.
     small_loss_rescale_lo: float = 0.0
     small_loss_rescale_hi: float = 1.0
+    # Opt-in diagnostic logging for the oracle noise-detection experiment.
+    # When True, clients add per-(round, cid) signals to fit metrics and the
+    # strategy dumps them into pipeline_results['oracle_signal_history'].
+    # Signals logged: per_class_pretrain_loss (len=num_classes, NaN for absent
+    # classes), per_class_pretrain_count, pretrain_loss_mean/var,
+    # memorization_gap (first-epoch loss minus last), update_norm,
+    # first_batch_grad_norm, and server-side cosine_vs_weighted/simple_mean.
+    # Not used for scheduling; off by default so existing runs are unchanged.
+    log_oracle_signals: bool = False
 
     # Re-draw the per-round cohort with our own seeded RNG instead of relying on
     # Flower's module-level one, which the run seed does not reach. Without this
@@ -669,6 +678,7 @@ class TavsEspStrategy(Strategy):
                 "is_verified": told_verified,
                 "tavs_assignment": "verified" if told_verified else "promoted",
                 "trust_score": float(self.scheduler.get_effective_trust(cid, server_round)),
+                "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
             }
             fit_configurations.append((client_proxy, FitIns(parameters, config_dict)))
 
@@ -974,6 +984,75 @@ class TavsEspStrategy(Strategy):
             else:
                 aggregated_ndarrays.append(flat_agg)
 
+        # Oracle signal collection (opt-in; off by default). Records per-
+        # client-per-round diagnostics for post-hoc noise-detection analysis.
+        # Everything here is diagnostic only — no scheduling or aggregation
+        # decisions depend on these fields.
+        if bool(getattr(self.config, "log_oracle_signals", False)):
+            try:
+                if not hasattr(self, "_oracle_signal_history"):
+                    self._oracle_signal_history = {}
+                round_entry = {}
+                # Flatten per-client update (sum of block L2^2 → vector norm).
+                # Also compute cosine vs the weighted FedAvg mean and the simple
+                # mean of client updates, as per reviewer: both are logged so a
+                # post-hoc check can disentangle them. Weighted uses num_examples,
+                # matching standard FedAvg (trust-weighted mean is more involved
+                # and is deliberately not used here to keep the signal independent
+                # of the trust EMA that would otherwise circularly consume it).
+                flat_updates = {}
+                for cid, blocks in all_updates.items():
+                    try:
+                        parts = [v.detach().cpu().reshape(-1).numpy() for v in blocks.values()]
+                        if parts:
+                            flat_updates[cid] = np.concatenate(parts)
+                    except Exception:
+                        continue
+                if flat_updates:
+                    weights = np.array([float(num_examples.get(cid, 1)) for cid in flat_updates])
+                    weights = weights / max(weights.sum(), 1e-12)
+                    stacked = np.stack([flat_updates[cid] for cid in flat_updates], axis=0)
+                    weighted_mean = (weights[:, None] * stacked).sum(axis=0)
+                    simple_mean = stacked.mean(axis=0)
+                    def _cos(a, b):
+                        na = float(np.linalg.norm(a)); nb = float(np.linalg.norm(b))
+                        if na == 0.0 or nb == 0.0:
+                            return float("nan")
+                        return float(np.dot(a, b) / (na * nb))
+                else:
+                    stacked = None
+                for proxy, res in results:
+                    cid = proxy.cid
+                    m = res.metrics or {}
+                    entry = {
+                        "num_examples": int(res.num_examples),
+                        "is_verified": cid in V_ids,
+                    }
+                    for key in ("memorization_gap", "loss_epoch_first",
+                                "loss_epoch_last", "update_norm",
+                                "first_batch_grad_norm", "pretrain_loss_mean",
+                                "pretrain_loss_var", "small_loss_fraction"):
+                        if key in m:
+                            try:
+                                entry[key] = float(m[key])
+                            except (TypeError, ValueError):
+                                pass
+                    for key in ("per_class_pretrain_loss",
+                                "per_class_pretrain_count"):
+                        if key in m:
+                            try:
+                                entry[key] = list(m[key])
+                            except TypeError:
+                                pass
+                    if stacked is not None and cid in flat_updates:
+                        v = flat_updates[cid]
+                        entry["cosine_vs_weighted_mean"] = _cos(v, weighted_mean)
+                        entry["cosine_vs_simple_mean"] = _cos(v, simple_mean)
+                    round_entry[cid] = entry
+                self._oracle_signal_history[int(server_round)] = round_entry
+            except Exception as _e:
+                logger.warning(f"oracle signal collection failed round {server_round}: {_e}")
+
         return ndarrays_to_parameters(aggregated_ndarrays), {"inliers": len(inliers), "outliers": len(outliers)}
 
     def configure_evaluate(self, server_round, parameters, client_manager):
@@ -1023,6 +1102,7 @@ class TavsEspStrategy(Strategy):
                 r: {k: sorted(v) for k, v in assn.items()}
                 for r, assn in getattr(self, "_round_assignments", {}).items()
             },
+            "oracle_signal_history": dict(getattr(self, "_oracle_signal_history", {})),
         }
 
 class FullVerificationStrategy(TavsEspStrategy):
@@ -1073,7 +1153,11 @@ class FullVerificationStrategy(TavsEspStrategy):
         # Every sampled client is verified. aggregate_fit splits verified from
         # promoted on the is_verified flag the client echoes back, so setting it
         # True here routes all of them down the verified path.
-        config_dict = {"server_round": server_round, "is_verified": True}
+        config_dict = {
+            "server_round": server_round,
+            "is_verified": True,
+            "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
+        }
         return [(proxy, FitIns(parameters, config_dict.copy())) for proxy in sampled]
 
 
@@ -1165,6 +1249,7 @@ class RandomSkipStrategy(TavsEspStrategy):
                 # not read "trust=0.0" as a signal from the server. Random-skip
                 # advertises no trust judgement.
                 "trust_score": 0.5,
+                "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
             }
             fit_configurations.append((proxy, FitIns(parameters, config_dict)))
         return fit_configurations
