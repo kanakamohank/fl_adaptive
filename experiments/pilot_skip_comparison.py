@@ -81,6 +81,10 @@ def _config_tag(args) -> str:
     cpr = getattr(args, "clients_per_round", 20)
     if num_clients != 100 or cpr != 20:
         parts.append(f"N{num_clients}_C{cpr}")
+    # Dataset in the tag so CIFAR-100 runs do not clobber CIFAR-10 paths.
+    _ds = getattr(args, "dataset", "cifar10")
+    if _ds != "cifar10":
+        parts.append(_ds)
 
     # Noise is active only when BOTH knobs are > 0 -- exactly one of them
     # being zero produces zero flips per client, so it is a "clean" run and
@@ -218,6 +222,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
         log_oracle_signals=bool(getattr(args, "log_oracle_signals", False)),
+        log_per_sample_losses_at_round=int(getattr(args, "log_per_sample_losses_at_round", 0)),
     )
 
     # EMA-convergence preflight for non-BVD trust signals. BVD's inlier
@@ -287,6 +292,8 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         byzantine_fraction=0.0,   # honest only
         tavs_config=tavs_config,
         strategy_class=strategy_class,
+        dataset=getattr(args, "dataset", "cifar10"),
+        label_noise_num_classes=int(getattr(args, "label_noise_num_classes", 10)),
         **_pipeline_kwargs,
         data_split=args.data_split,
         data_alpha=args.data_alpha,
@@ -566,6 +573,24 @@ def main():
                              "floor clamps everyone to Verified and collapses "
                              "the skip rate. Ignored unless --trust-signal="
                              "small_loss_fraction. Default: no rescale.")
+    parser.add_argument("--dataset", default="cifar10",
+                        choices=("cifar10", "cifar100"),
+                        help="Which dataset to run. cifar10 (default, 10 classes) "
+                             "or cifar100 (100 classes). CIFAR-100 uses the same "
+                             "small cifar_cnn with its final FC resized to 100.")
+    parser.add_argument("--label-noise-num-classes", type=int, default=10,
+                        help="Number of classes the dataset has. Required to be "
+                             "set to 100 when --dataset=cifar100. Also used by "
+                             "the uniform-noise flipper so a flipped label lands "
+                             "on one of the (K-1) wrong classes. Default: 10.")
+    parser.add_argument("--log-per-sample-losses-at-round", type=int, default=0,
+                        help="One-off diagnostic for the mechanism "
+                             "visualisation. When > 0, each verified client "
+                             "additionally logs its full per-sample pretrain "
+                             "loss list at THAT specific round, dumped into "
+                             "oracle_signal_history. Needed to plot the "
+                             "bimodal-vs-unimodal loss histogram directly. "
+                             "Default 0 = disabled.")
     parser.add_argument("--log-oracle-signals", action="store_true",
                         help="Opt-in diagnostic logging for the oracle "
                              "noise-detection experiment. Each client logs "
@@ -590,6 +615,17 @@ def main():
                              "crash is treated as invalid and re-run.")
     args = parser.parse_args()
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
+    # Guard: cifar100 has 100 classes and the noise flipper + model head both
+    # consult --label-noise-num-classes. A mismatch silently produces a 10-way
+    # head on 100-class data (training degenerates) and a noise map that only
+    # flips among the first 10 labels. Refuse at parse time.
+    _expected_k = {"cifar10": 10, "cifar100": 100}
+    _exp = _expected_k.get(getattr(args, "dataset", "cifar10"))
+    if _exp is not None and int(getattr(args, "label_noise_num_classes", 10)) != _exp:
+        raise SystemExit(
+            f"--dataset={args.dataset} requires --label-noise-num-classes={_exp}; "
+            f"got {args.label_noise_num_classes}."
+        )
 
     logging.basicConfig(level=logging.INFO,
                         format="%(asctime)s - %(name)s - %(levelname)s - %(message)s")

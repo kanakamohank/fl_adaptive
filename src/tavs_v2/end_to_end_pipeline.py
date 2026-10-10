@@ -218,6 +218,9 @@ class TAVSESPPipeline:
 
         if self.config.dataset == "cifar10":
             train_dataset, self.test_dataset = load_cifar10()
+        elif self.config.dataset == "cifar100":
+            from src.utils.data_utils import load_cifar100
+            train_dataset, self.test_dataset = load_cifar100()
         else:
             raise ValueError(f"Unsupported dataset: {self.config.dataset}")
 
@@ -345,7 +348,8 @@ class TAVSESPPipeline:
                 f"train/val for local noise-detection signal"
             )
 
-        model = get_model(self.config.model_type, num_classes=10)
+        _nc = int(getattr(self.config, "label_noise_num_classes", 10))
+        model = get_model(self.config.model_type, num_classes=_nc)
         if hasattr(model, 'structure'):
             self.model_structure = model.structure
         else:
@@ -358,9 +362,11 @@ class TAVSESPPipeline:
         num_byzantine = int(self.config.num_clients * self.config.byzantine_fraction)
         num_honest = self.config.num_clients - num_byzantine
 
+        _nc = int(getattr(self.config, "label_noise_num_classes", 10))
         for i in range(num_honest):
             self.client_configs.append(TAVSClientConfig(
                 client_id=f"honest_{i:02d}", client_type="honest", model_type=self.config.model_type,
+                model_kwargs={"num_classes": _nc},
                 epochs=self.config.client_epochs, batch_size=self.config.client_batch_size, learning_rate=self.config.client_learning_rate
             ))
 
@@ -369,6 +375,7 @@ class TAVSESPPipeline:
             attack_intensity = self.config.attack_intensities[i % len(self.config.attack_intensities)]
             self.client_configs.append(TAVSClientConfig(
                 client_id=f"byzantine_{i:02d}", client_type=attack_type, model_type=self.config.model_type,
+                model_kwargs={"num_classes": _nc},
                 attack_intensity=attack_intensity, target_fraction=0.001 if attack_type == "layerwise" else 1.0,
                 epochs=self.config.client_epochs, batch_size=self.config.client_batch_size, learning_rate=self.config.client_learning_rate
             ))
@@ -483,7 +490,8 @@ class TAVSESPPipeline:
                 import torch
                 from src.core.models import get_model
                 from src.utils.data_utils import load_cifar10
-                model = get_model(self.config.model_type)
+                model = get_model(self.config.model_type,
+                                  num_classes=int(getattr(self.config, "label_noise_num_classes", 10)))
                 params_dict = zip(model.parameters(), parameters_ndarrays)
                 for param, new_param in params_dict:
                     new_param = np.array(new_param)
