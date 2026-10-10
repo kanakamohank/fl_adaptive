@@ -48,6 +48,9 @@ class _Args:
         # tags are preserved.
         self.local_epochs = None
         self.log_oracle_signals = False
+        # CIFAR-100 wiring: dataset defaults to cifar10, K to 10. Non-default
+        # dataset lands in its own tag.
+        self.dataset = "cifar10"
         for k, v in overrides.items():
             setattr(self, k, v)
 
@@ -130,6 +133,14 @@ def test_priority_configurations_get_distinct_tags():
             (_Args(label_noise_type="pairflip",
                    local_epochs=5, log_oracle_signals=True),
              "split-iid_noiseC40_R30_type-pairflip_ep5_oracle"),
+        # CIFAR-100 lands in its own path; also verify the dataset suffix
+        # appears alongside the usual N/C/noise encoding.
+        "cifar100_oracle":
+            (_Args(num_clients=50, clients_per_round=10,
+                   noisy_client_fraction=0.1, label_noise_rate=0.08,
+                   dataset="cifar100", label_noise_num_classes=100,
+                   local_epochs=5, log_oracle_signals=True),
+             "split-iid_N50_C10_cifar100_noiseC10_R08_K100_ep5_oracle"),
     }
     seen = set()
     for label, (args, expected) in cases.items():

@@ -44,6 +44,10 @@ def test_oracle_metrics_round_trip_real_flower_serde():
             [1.0, 1.1, float("nan"), 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9]),
         "per_class_pretrain_count": json.dumps(
             [10, 10, 0, 10, 10, 10, 10, 10, 10, 10]),
+        # One-off per-sample loss list for the mechanism visualisation.
+        # ~900 floats per client when active; must survive the same proto
+        # path as the shorter per-class lists.
+        "per_sample_pretrain_loss": json.dumps([0.1 * i for i in range(900)]),
     }
     r = flc.FitRes(
         status=flc.Status(code=flc.Code.OK, message="ok"),

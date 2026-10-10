@@ -235,7 +235,10 @@ class TAVSFlowerClient(NumPyClient):
             oracle_pretrain = None
             if getattr(self, "_log_oracle_signals", False):
                 num_classes = (self.config.model_kwargs or {}).get("num_classes", 10)
-                oracle_pretrain = self._oracle_signals_on_train(num_classes=num_classes)
+                dump_round = int(getattr(self, "_log_per_sample_losses_at_round", 0))
+                dump_now = bool(dump_round) and (int(self.round_number) == dump_round)
+                oracle_pretrain = self._oracle_signals_on_train(
+                    num_classes=num_classes, dump_per_sample=dump_now)
 
             # Execute training based on client type and assignment
             num_examples = self._execute_training(config)
@@ -433,6 +436,15 @@ class TAVSFlowerClient(NumPyClient):
         else:
             self._log_oracle_signals = getattr(self, "_log_oracle_signals", False)
 
+        if "log_per_sample_losses_at_round" in config:
+            try:
+                self._log_per_sample_losses_at_round = int(config["log_per_sample_losses_at_round"])
+            except (TypeError, ValueError):
+                self._log_per_sample_losses_at_round = 0
+        else:
+            self._log_per_sample_losses_at_round = getattr(
+                self, "_log_per_sample_losses_at_round", 0)
+
         # Store assignment history
         self.assignment_history.append({
             "round": self.round_number,
@@ -509,7 +521,8 @@ class TAVSFlowerClient(NumPyClient):
 
         return num_examples
 
-    def _oracle_signals_on_train(self, num_classes: int = 10):
+    def _oracle_signals_on_train(self, num_classes: int = 10,
+                                 dump_per_sample: bool = False):
         """Pre-training diagnostic signals for the oracle noise-detection
         experiment. Runs ONE eval pass over this client's train_loader with
         the fresh global weights (no backward, no grad). Measures what the
@@ -567,12 +580,18 @@ class TAVSFlowerClient(NumPyClient):
         n = len(all_losses)
         mean = sum(all_losses) / n
         var = sum((v - mean) ** 2 for v in all_losses) / n if n > 1 else 0.0
-        return {
+        result = {
             "per_class_pretrain_loss": per_class_loss,
             "per_class_pretrain_count": per_class_cnt,
             "pretrain_loss_mean": float(mean),
             "pretrain_loss_var": float(var),
         }
+        if dump_per_sample:
+            # One-off: full per-sample loss list for the mechanism
+            # visualisation. Caller is responsible for gating this to a
+            # single round (bounded total payload).
+            result["per_sample_pretrain_loss"] = [float(v) for v in all_losses]
+        return result
 
     def _small_loss_fraction_on_val(self):
         """Return the fraction of val samples whose label the current model
