@@ -14,3 +14,6 @@ test_results_phase5
 test_temp
 **/__pycache__/
 *.pyc
+# Generated analysis plots (regenerate on demand)
+plots/
+experiments/analysis/*/plots/
