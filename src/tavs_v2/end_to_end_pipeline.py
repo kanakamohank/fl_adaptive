@@ -281,17 +281,26 @@ class TAVSESPPipeline:
                         self.config.cifar10n_label_set,
                     )
 
+                # Build a pair-flip map for CIFAR-100 when needed. Without
+                # one, NoisyLabelSubset defaults to the CIFAR-10 10-class
+                # pattern, which fails validation on 100 classes. The
+                # within-superclass next-neighbor map (Patrini-style) is the
+                # defensible literature choice; the alternative `i -> (i+1)
+                # % 100` crosses semantic boundaries.
+                pair_map = None
+                if (self.config.label_noise_type == "pairflip"
+                        and self.config.label_noise_num_classes == 100):
+                    from src.utils.data_utils import build_cifar100_superclass_pair_map
+                    pair_map = build_cifar100_superclass_pair_map()
                 for cid in self.noisy_client_ids:
                     self.client_datasets[cid] = NoisyLabelSubset(
                         base=self.client_datasets[cid],
                         noise_fraction=self.config.label_noise_rate,
                         num_classes=self.config.label_noise_num_classes,
-                        # Per-client seed derived from run seed + client id, so
-                        # different noisy clients corrupt DIFFERENT samples,
-                        # and each client's corrupted set is stable across arms.
                         seed=self.config.seed * 10_000 + cid,
                         noise_type=self.config.label_noise_type,
                         cifar10n_labels=cifar10n_labels,
+                        pair_map=pair_map,
                     )
                 extra = (f" ({self.config.cifar10n_label_set})"
                          if self.config.label_noise_type == "cifar10n" else "")

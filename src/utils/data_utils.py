@@ -259,6 +259,51 @@ def create_dataloaders(client_datasets: List[Subset], batch_size: int = 32,
             for ds in client_datasets]
 
 
+# CIFAR-100's 20 superclasses × 5 fine classes each. Standard torchvision
+# label ordering (Krizhevsky 2009). Hardcoded here to make the pair map
+# reproducible without reaching into torchvision internals; the mapping is
+# stable across torchvision versions.
+CIFAR100_SUPERCLASS_TO_FINE = {
+    0:  [4, 30, 55, 72, 95],   # aquatic mammals
+    1:  [1, 32, 67, 73, 91],   # fish
+    2:  [54, 62, 70, 82, 92],  # flowers
+    3:  [9, 10, 16, 28, 61],   # food containers
+    4:  [0, 51, 53, 57, 83],   # fruit and vegetables
+    5:  [22, 39, 40, 86, 87],  # household electrical devices
+    6:  [5, 20, 25, 84, 94],   # household furniture
+    7:  [6, 7, 14, 18, 24],    # insects
+    8:  [3, 42, 43, 88, 97],   # large carnivores
+    9:  [12, 17, 37, 68, 76],  # large man-made outdoor things
+    10: [23, 33, 49, 60, 71],  # large natural outdoor scenes
+    11: [15, 19, 21, 31, 38],  # large omnivores and herbivores
+    12: [34, 63, 64, 66, 75],  # medium mammals
+    13: [26, 45, 77, 79, 99],  # non-insect invertebrates
+    14: [2, 11, 35, 46, 98],   # people
+    15: [27, 29, 44, 78, 93],  # reptiles
+    16: [36, 50, 65, 74, 80],  # small mammals
+    17: [47, 52, 56, 59, 96],  # trees
+    18: [8, 13, 48, 58, 90],   # vehicles 1
+    19: [41, 69, 81, 85, 89],  # vehicles 2
+}
+
+
+def build_cifar100_superclass_pair_map() -> Dict[int, int]:
+    """Within-superclass next-neighbor pair-flip map for CIFAR-100.
+
+    For each of the 20 superclasses, cycle its 5 fine classes:
+    fine[0] -> fine[1] -> fine[2] -> fine[3] -> fine[4] -> fine[0].
+    This is the Patrini-style within-superclass pairing used in the
+    noisy-label literature for CIFAR-100 (vs the trivial `i -> (i+1) %
+    100` which crosses semantic boundaries and reviewers reject). Returns
+    a full-coverage, no-self-loop permutation over range(100).
+    """
+    pair_map: Dict[int, int] = {}
+    for fines in CIFAR100_SUPERCLASS_TO_FINE.values():
+        for i, c in enumerate(fines):
+            pair_map[c] = fines[(i + 1) % len(fines)]
+    return pair_map
+
+
 class NoisyLabelSubset(Dataset):
     """
     Wrap a client's dataset so a fixed fraction of its labels are flipped to

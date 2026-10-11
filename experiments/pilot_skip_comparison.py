@@ -222,7 +222,10 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
         log_oracle_signals=bool(getattr(args, "log_oracle_signals", False)),
-        log_per_sample_losses_at_round=int(getattr(args, "log_per_sample_losses_at_round", 0)),
+        log_per_sample_losses_at_rounds=tuple(
+            int(t.strip()) for t in str(getattr(args, "log_per_sample_losses_at_rounds", "")).split(",")
+            if t.strip()
+        ),
     )
 
     # EMA-convergence preflight for non-BVD trust signals. BVD's inlier
@@ -583,14 +586,14 @@ def main():
                              "set to 100 when --dataset=cifar100. Also used by "
                              "the uniform-noise flipper so a flipped label lands "
                              "on one of the (K-1) wrong classes. Default: 10.")
-    parser.add_argument("--log-per-sample-losses-at-round", type=int, default=0,
-                        help="One-off diagnostic for the mechanism "
-                             "visualisation. When > 0, each verified client "
-                             "additionally logs its full per-sample pretrain "
-                             "loss list at THAT specific round, dumped into "
-                             "oracle_signal_history. Needed to plot the "
-                             "bimodal-vs-unimodal loss histogram directly. "
-                             "Default 0 = disabled.")
+    parser.add_argument("--log-per-sample-losses-at-rounds", type=str, default="",
+                        help="Comma-separated list of rounds at which to dump "
+                             "each verified client's full per-sample pretrain "
+                             "loss list into oracle_signal_history. e.g. "
+                             "'10' for one round, '5,10,15,20,30' for the "
+                             "mechanism sweep across training phases. Empty "
+                             "string disables. Payload is bounded (~15 kB "
+                             "per client per listed round).")
     parser.add_argument("--log-oracle-signals", action="store_true",
                         help="Opt-in diagnostic logging for the oracle "
                              "noise-detection experiment. Each client logs "

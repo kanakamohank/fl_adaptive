@@ -235,8 +235,8 @@ class TAVSFlowerClient(NumPyClient):
             oracle_pretrain = None
             if getattr(self, "_log_oracle_signals", False):
                 num_classes = (self.config.model_kwargs or {}).get("num_classes", 10)
-                dump_round = int(getattr(self, "_log_per_sample_losses_at_round", 0))
-                dump_now = bool(dump_round) and (int(self.round_number) == dump_round)
+                dump_rounds = getattr(self, "_log_per_sample_losses_at_rounds", set()) or set()
+                dump_now = int(self.round_number) in dump_rounds
                 oracle_pretrain = self._oracle_signals_on_train(
                     num_classes=num_classes, dump_per_sample=dump_now)
 
@@ -436,14 +436,24 @@ class TAVSFlowerClient(NumPyClient):
         else:
             self._log_oracle_signals = getattr(self, "_log_oracle_signals", False)
 
-        if "log_per_sample_losses_at_round" in config:
-            try:
-                self._log_per_sample_losses_at_round = int(config["log_per_sample_losses_at_round"])
-            except (TypeError, ValueError):
-                self._log_per_sample_losses_at_round = 0
+        if "log_per_sample_losses_at_rounds" in config:
+            raw = config["log_per_sample_losses_at_rounds"]
+            parsed = set()
+            if isinstance(raw, str) and raw:
+                for tok in raw.split(","):
+                    tok = tok.strip()
+                    if not tok:
+                        continue
+                    try:
+                        parsed.add(int(tok))
+                    except ValueError:
+                        pass
+            elif isinstance(raw, int) and raw > 0:
+                parsed = {int(raw)}
+            self._log_per_sample_losses_at_rounds = parsed
         else:
-            self._log_per_sample_losses_at_round = getattr(
-                self, "_log_per_sample_losses_at_round", 0)
+            self._log_per_sample_losses_at_rounds = getattr(
+                self, "_log_per_sample_losses_at_rounds", set())
 
         # Store assignment history
         self.assignment_history.append({
