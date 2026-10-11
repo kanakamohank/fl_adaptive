@@ -791,6 +791,60 @@ def test_oracle_signal_history_captures_client_metrics():
     return True
 
 
+def test_initialize_parameters_reads_num_classes_from_config():
+    """Regression: initialize_parameters previously hardcoded
+    `num_classes=10`, so on a CIFAR-100 run the server shipped a
+    10-class model to clients that then built 100-class local models --
+    silent shape mismatch, broken training. After the fix the strategy
+    reads num_classes from its config (populated by the pipeline from
+    label_noise_num_classes). Verify the built model's total parameter
+    count matches a 100-class cifar_cnn when the config says so.
+    """
+    print("\nTesting initialize_parameters num_classes dispatch...")
+    from src.core.models import get_model
+    ref10 = get_model("cifar_cnn", num_classes=10)
+    ref100 = get_model("cifar_cnn", num_classes=100)
+    n10 = sum(p.numel() for p in ref10.parameters())
+    n100 = sum(p.numel() for p in ref100.parameters())
+    assert n10 != n100, "sanity: 10- and 100-class models must differ in param count"
+
+    cfg = DummyConfig()
+    cfg.num_classes = 100
+    cfg.model_type = "cifar_cnn"
+    strategy = TavsEspStrategy(config=cfg)
+    params = strategy.initialize_parameters(client_manager=None)
+    # Decode MockParameters -> ndarrays and count total params.
+    total = 0
+    for t in params.tensors:
+        if isinstance(t, bytes):
+            arr = np.load(io.BytesIO(t), allow_pickle=False)
+        else:
+            arr = t
+        total += arr.size
+    assert total == n100, (
+        f"strategy built {total}-param model; expected {n100} for "
+        f"num_classes=100. initialize_parameters is NOT reading from config."
+    )
+
+    # And confirm the default (missing num_classes attr) still gives 10.
+    cfg2 = DummyConfig()
+    cfg2.model_type = "cifar_cnn"
+    # Ensure no num_classes attribute.
+    if hasattr(cfg2, "num_classes"):
+        delattr(cfg2, "num_classes")
+    strategy2 = TavsEspStrategy(config=cfg2)
+    params2 = strategy2.initialize_parameters(client_manager=None)
+    total2 = sum((np.load(io.BytesIO(t), allow_pickle=False) if isinstance(t, bytes) else t).size
+                 for t in params2.tensors)
+    assert total2 == n10, (
+        f"strategy without num_classes attr built {total2}-param model; "
+        f"expected {n10} for the 10-class default."
+    )
+    print(f"✓ initialize_parameters built 100-class ({n100} params) and "
+          f"defaulted to 10-class ({n10} params) correctly")
+    return True
+
+
 def test_oracle_signal_history_off_by_default():
     """With log_oracle_signals=False (default), the strategy does NOT
     allocate or populate _oracle_signal_history. aggregation path is
@@ -1043,7 +1097,8 @@ def main():
         rs14 = test_expected_trust_after_rounds_matches_closed_form()
         rs15 = test_oracle_signal_history_captures_client_metrics()
         rs16 = test_oracle_signal_history_off_by_default()
-        assert rs15 is True and rs16 is True
+        rs17 = test_initialize_parameters_reads_num_classes_from_config()
+        assert all(x is True for x in (rs15, rs16, rs17))
 
         if all([success1, success2, success3, success4, success5,
                 rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10,
