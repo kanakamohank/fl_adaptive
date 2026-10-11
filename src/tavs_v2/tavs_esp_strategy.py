@@ -180,11 +180,14 @@ class TavsEspConfig:
     # first_batch_grad_norm, and server-side cosine_vs_weighted/simple_mean.
     # Not used for scheduling; off by default so existing runs are unchanged.
     log_oracle_signals: bool = False
-    # One-off: dump per-sample pretrain losses at this specific round for
+    # One-off: dump per-sample pretrain losses at these specific rounds for
     # EVERY verified client. Used only to produce the mechanism
-    # visualisation (clean = unimodal loss hist; noisy = bimodal). Default 0
-    # disables. Bounded: 50 clients × ~900 samples × 1 round ≈ 45k floats.
-    log_per_sample_losses_at_round: int = 0
+    # visualisation (clean = unimodal loss hist; noisy = bimodal/shifted).
+    # Empty tuple disables; e.g. (10,) replicates the earlier single-round
+    # dump, and (5, 10, 15, 20, 30) collects at multiple phases across
+    # training. Bounded: ~5 rounds × 10 clients × 900 samples ≈ 45k floats
+    # per seed per round.
+    log_per_sample_losses_at_rounds: Tuple[int, ...] = ()
 
     # Re-draw the per-round cohort with our own seeded RNG instead of relying on
     # Flower's module-level one, which the run seed does not reach. Without this
@@ -690,7 +693,7 @@ class TavsEspStrategy(Strategy):
                 "tavs_assignment": "verified" if told_verified else "promoted",
                 "trust_score": float(self.scheduler.get_effective_trust(cid, server_round)),
                 "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
-                "log_per_sample_losses_at_round": int(getattr(self.config, "log_per_sample_losses_at_round", 0)),
+                "log_per_sample_losses_at_rounds": ",".join(str(r) for r in getattr(self.config, "log_per_sample_losses_at_rounds", ()) or ()),
             }
             fit_configurations.append((client_proxy, FitIns(parameters, config_dict)))
 
@@ -1198,7 +1201,7 @@ class FullVerificationStrategy(TavsEspStrategy):
             "server_round": server_round,
             "is_verified": True,
             "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
-            "log_per_sample_losses_at_round": int(getattr(self.config, "log_per_sample_losses_at_round", 0)),
+            "log_per_sample_losses_at_rounds": ",".join(str(r) for r in getattr(self.config, "log_per_sample_losses_at_rounds", ()) or ()),
         }
         return [(proxy, FitIns(parameters, config_dict.copy())) for proxy in sampled]
 
@@ -1292,7 +1295,7 @@ class RandomSkipStrategy(TavsEspStrategy):
                 # advertises no trust judgement.
                 "trust_score": 0.5,
                 "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
-                "log_per_sample_losses_at_round": int(getattr(self.config, "log_per_sample_losses_at_round", 0)),
+                "log_per_sample_losses_at_rounds": ",".join(str(r) for r in getattr(self.config, "log_per_sample_losses_at_rounds", ()) or ()),
             }
             fit_configurations.append((proxy, FitIns(parameters, config_dict)))
         return fit_configurations
