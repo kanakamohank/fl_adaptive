@@ -373,10 +373,16 @@ class TavsEspStrategy(Strategy):
 
     def initialize_parameters(self, client_manager):
         from src.core.models import get_model
-        
+
         # Dynamically instantiate the correct model type (safe for both Phase 4 and Phase 5)
         model_type = getattr(self.config, "model_type", "cifar_cnn")
-        model = get_model(model_type, num_classes=10)
+        # num_classes was previously hardcoded 10, which forced the server to
+        # ship a 10-class model to all clients regardless of dataset. On the
+        # CIFAR-100 run this produced a shape mismatch that was silently
+        # tolerated on some paths but broke others; align by reading the
+        # pipeline-side `num_classes` the pilot pushes into TavsEspConfig.
+        num_classes = int(getattr(self.config, "num_classes", 10))
+        model = get_model(model_type, num_classes=num_classes)
         
         # ---> THE FIX: Force copy=True and float32 for clean Ray serialization
         return ndarrays_to_parameters(

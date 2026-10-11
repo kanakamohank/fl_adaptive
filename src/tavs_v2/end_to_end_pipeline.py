@@ -448,6 +448,11 @@ class TAVSESPPipeline:
         strategy_config.min_fit_clients = min(self.config.clients_per_round, self.config.num_clients)
         strategy_config.min_available_clients = self.config.clients_per_round
         strategy_config.evaluate_fn = self._create_evaluate_function()
+        # Push dataset num_classes into the strategy so initialize_parameters
+        # builds the right-sized model (10 for CIFAR-10, 100 for CIFAR-100).
+        # Previously hardcoded to 10 on the strategy, which forced the server
+        # to ship 10-class weights even on CIFAR-100 runs.
+        strategy_config.num_classes = int(getattr(self.config, "label_noise_num_classes", 10))
         # Cohort sampling must vary with the run seed but stay fixed for a given
         # (seed, round), which is what makes the two arms genuinely paired.
         strategy_config.sampling_seed = self.config.seed
@@ -489,7 +494,6 @@ class TAVSESPPipeline:
             try:
                 import torch
                 from src.core.models import get_model
-                from src.utils.data_utils import load_cifar10
                 model = get_model(self.config.model_type,
                                   num_classes=int(getattr(self.config, "label_noise_num_classes", 10)))
                 params_dict = zip(model.parameters(), parameters_ndarrays)
@@ -500,7 +504,19 @@ class TAVSESPPipeline:
                         new_param = np.nan_to_num(new_param, nan=0.0, posinf=1e6, neginf=-1e6)
                     param.data = torch.tensor(new_param, dtype=param.dtype)
 
-                _, test_data = load_cifar10()
+                # BUG FIX: previously hardcoded load_cifar10() here regardless of
+                # config.dataset, so a CIFAR-100 run reported 100-class model
+                # accuracy against CIFAR-10 labels -- meaningless. The CIFAR-100
+                # oracle run on main (commit 7c55d07) shows this: reported server
+                # accuracy stayed at 1.3% while pretrain_loss on actual CIFAR-100
+                # train data dropped 4.15 -> 2.48. Training worked; eval was wrong.
+                if self.config.dataset == "cifar10":
+                    from src.utils.data_utils import load_cifar10 as _load_test
+                elif self.config.dataset == "cifar100":
+                    from src.utils.data_utils import load_cifar100 as _load_test
+                else:
+                    raise ValueError(f"evaluate_fn: unsupported dataset {self.config.dataset}")
+                _, test_data = _load_test()
                 test_subset = torch.utils.data.Subset(test_data, range(min(10000, len(test_data))))
                 test_loader = torch.utils.data.DataLoader(test_subset, batch_size=64, shuffle=False)
 
