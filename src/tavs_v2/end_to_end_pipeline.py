@@ -469,6 +469,21 @@ class TAVSESPPipeline:
         strategy_config.min_evaluate_clients = 0
         strategy_config.fraction_evaluate = 0.0
 
+        # Clean-oracle cosine: push the config-ids of KNOWN-CLEAN clients
+        # (anyone not in the noisy set) into the strategy, so its aggregate_fit
+        # oracle block can log per-client cosine against the clean-only median
+        # update. Diagnostic only -- NEVER consulted for scheduling. The
+        # cid<->config_id bridge inside the strategy resolves cids to these
+        # ids at log time. Empty set means no noise was injected and the block
+        # becomes a no-op by design.
+        if self.client_configs is not None:
+            noisy_pool = set(getattr(self, "noisy_client_ids", []) or [])
+            clean_ids = frozenset(
+                cfg.client_id for i, cfg in enumerate(self.client_configs)
+                if i not in noisy_pool
+            )
+            strategy_config.oracle_clean_client_config_ids = clean_ids
+
         strategy_class = self.config.strategy_class or TavsEspStrategy
         logger.info(f"Server strategy: {strategy_class.__name__}")
         strategy = strategy_class(config=strategy_config, model_structure=self.model_structure)

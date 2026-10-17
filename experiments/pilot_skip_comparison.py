@@ -140,6 +140,13 @@ def _config_tag(args) -> str:
             lo = int(round(float(parts_r[0]) * 100))
             hi = int(round(float(parts_r[1]) * 100))
             parts.append(f"rescale-{lo:02d}-{hi:02d}")
+    pv_rescale = getattr(args, "pretrain_loss_var_rescale", None)
+    if pv_rescale and trust_signal == "pretrain_loss_var":
+        parts_r = [p.strip() for p in str(pv_rescale).split(",") if p.strip()]
+        if len(parts_r) == 2:
+            lo = int(round(float(parts_r[0]) * 10))
+            hi = int(round(float(parts_r[1]) * 10))
+            parts.append(f"pv-rescale-{lo:02d}-{hi:02d}")
     # Encode non-default local_epochs so oracle runs do not clobber pilot
     # runs at the same noise config but different epoch counts.
     _le = getattr(args, "local_epochs", None)
@@ -210,6 +217,19 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
             raise ValueError(f"--small-loss-rescale must be 'lo,hi'; got {rescale!r}")
         rescale_lo = float(parts_r[0])
         rescale_hi = float(parts_r[1])
+    # pretrain_loss_var defaults to (0.5, 3.0) -- see TavsEspConfig docstring
+    # on why pass-through would clamp everything to zero trust. Override via
+    # --pretrain-loss-var-rescale.
+    pv_rescale = getattr(args, "pretrain_loss_var_rescale", None)
+    pv_lo, pv_hi = 0.5, 3.0
+    if pv_rescale:
+        parts_r = [p.strip() for p in pv_rescale.split(",")]
+        if len(parts_r) != 2:
+            raise ValueError(
+                f"--pretrain-loss-var-rescale must be 'lo,hi'; got {pv_rescale!r}"
+            )
+        pv_lo = float(parts_r[0])
+        pv_hi = float(parts_r[1])
     tavs_config = TavsEspConfig(
         theta_low=0.3, theta_high=0.7, alpha_trust=0.9, gamma_budget=0.35,
         tau_ramp=5.0,
@@ -221,6 +241,8 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         trust_signal=getattr(args, "trust_signal", "bvd"),
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
+        pretrain_loss_var_rescale_lo=pv_lo,
+        pretrain_loss_var_rescale_hi=pv_hi,
         log_oracle_signals=bool(getattr(args, "log_oracle_signals", False)),
         log_per_sample_losses_at_rounds=tuple(
             int(t.strip()) for t in str(getattr(args, "log_per_sample_losses_at_rounds", "")).split(",")
@@ -238,9 +260,22 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
     if tavs_config.trust_signal != "bvd":
         from src.tavs_v2 import TavsEspStrategy as _S
         _probe = _S(config=tavs_config)
-        raw_mid = (rescale_lo + rescale_hi) / 2.0
-        rescaled_mid = ((raw_mid - rescale_lo) / (rescale_hi - rescale_lo)
-                        if rescale_hi > rescale_lo else 0.5)
+        # Pick the right rescale window: SLF uses small-loss window,
+        # pretrain_loss_var uses its own (inverted) window. For an inverted
+        # signal the "midpoint" is the raw midpoint, and the rescaled
+        # trust at that midpoint is 1 - 0.5 = 0.5, same as SLF's midpoint
+        # by symmetry -- so the arithmetic below needs only the right lo/hi.
+        if tavs_config.trust_signal == "pretrain_loss_var":
+            win_lo, win_hi = pv_lo, pv_hi
+            invert = True
+        else:
+            win_lo, win_hi = rescale_lo, rescale_hi
+            invert = False
+        raw_mid = (win_lo + win_hi) / 2.0
+        rescaled_mid = ((raw_mid - win_lo) / (win_hi - win_lo)
+                        if win_hi > win_lo else 0.5)
+        if invert:
+            rescaled_mid = 1.0 - rescaled_mid
         projected = _probe.scheduler.expected_trust_from_participation(
             expected_raw=rescaled_mid,
             total_rounds=args.rounds,
@@ -250,7 +285,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         )
         margin = 0.02
         print(f"[preflight] trust_signal={tavs_config.trust_signal} "
-              f"rescale=[{rescale_lo:.2f},{rescale_hi:.2f}] "
+              f"rescale=[{win_lo:.2f},{win_hi:.2f}]{'(inverted)' if invert else ''} "
               f"midpoint_rescaled={rescaled_mid:.2f} "
               f"projected_trust_after_pilot={projected:.3f} "
               f"theta_low={tavs_config.theta_low:.2f}")
@@ -555,7 +590,7 @@ def main():
                              "majority), random1/2/3 ~17-18%% (single worker), worst "
                              "~40%%. Ignored unless --label-noise-type=cifar10n.")
     parser.add_argument("--trust-signal", default="bvd",
-                        choices=("bvd", "small_loss_fraction"),
+                        choices=("bvd", "small_loss_fraction", "pretrain_loss_var"),
                         help="Which signal drives the trust EMA. 'bvd' (default) "
                              "uses the BVD outlier Z-score. 'small_loss_fraction' "
                              "swaps in a per-client scalar: the fraction of a "
@@ -564,7 +599,16 @@ def main():
                              "client's own labels. Co-teaching-style "
                              "(Han et al. 2018), adapted for FL as a drop-in "
                              "replacement for BVD when BVD does not separate "
-                             "noisy from clean clients.")
+                             "noisy from clean clients. "
+                             "'pretrain_loss_var' uses the per-sample loss "
+                             "variance from ONE no-grad forward pass on the "
+                             "incoming global model (winner of the n=5-seed "
+                             "oracle sweep at AUROC >=0.98 for effective flip "
+                             "rates >=3%%). Higher variance => lower trust; "
+                             "see --pretrain-loss-var-rescale. BVD still runs "
+                             "and its diagnostics stay in scheduling_history "
+                             "regardless, so the two can be compared on one "
+                             "run.")
     parser.add_argument("--small-loss-rescale", default=None,
                         help="Optional 'lo,hi' linear rescale of the raw "
                              "small_loss_fraction value before it enters the "
@@ -576,6 +620,13 @@ def main():
                              "floor clamps everyone to Verified and collapses "
                              "the skip rate. Ignored unless --trust-signal="
                              "small_loss_fraction. Default: no rescale.")
+    parser.add_argument("--pretrain-loss-var-rescale", default=None,
+                        help="Optional 'lo,hi' linear rescale of raw "
+                             "pretrain_loss_var before it enters the trust "
+                             "EMA. Mapping is INVERTED: raw in [lo, hi] -> "
+                             "trust in [1, 0]. Default when --trust-signal="
+                             "pretrain_loss_var is '0.5,3.0' (from the oracle "
+                             "sweep on CIFAR). Ignored for other signals.")
     parser.add_argument("--dataset", default="cifar10",
                         choices=("cifar10", "cifar100"),
                         help="Which dataset to run. cifar10 (default, 10 classes) "
