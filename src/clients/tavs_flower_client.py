@@ -229,14 +229,26 @@ class TAVSFlowerClient(NumPyClient):
             # the signal.
             small_loss_fraction = self._small_loss_fraction_on_val()
 
-            # Pre-training oracle diagnostics (opt-in; off by default).
-            # Must happen BEFORE training so noisy clients haven't memorised
-            # their wrong labels yet. See reviewer note on signal collapse.
+            # Pre-training oracle diagnostics. Must happen BEFORE training so
+            # noisy clients haven't memorised their wrong labels yet. See
+            # reviewer note on signal collapse.
+            #
+            # Two gates fire this pass:
+            #   * _log_oracle_signals  -- diagnostic logging (opt-in flag).
+            #   * _trust_signal == "pretrain_loss_var" -- the signal the
+            #     server will aggregate on. Even if the operator did not
+            #     enable logging, we still MUST compute the variance so the
+            #     fit metrics carry it to aggregate_fit's override branch.
             oracle_pretrain = None
-            if getattr(self, "_log_oracle_signals", False):
+            needs_pretrain = (
+                getattr(self, "_log_oracle_signals", False)
+                or getattr(self, "_trust_signal", "bvd") == "pretrain_loss_var"
+            )
+            if needs_pretrain:
                 num_classes = (self.config.model_kwargs or {}).get("num_classes", 10)
                 dump_rounds = getattr(self, "_log_per_sample_losses_at_rounds", set()) or set()
-                dump_now = int(self.round_number) in dump_rounds
+                dump_now = (int(self.round_number) in dump_rounds
+                            and getattr(self, "_log_oracle_signals", False))
                 oracle_pretrain = self._oracle_signals_on_train(
                     num_classes=num_classes, dump_per_sample=dump_now)
 
@@ -250,6 +262,21 @@ class TAVSFlowerClient(NumPyClient):
             metrics = self._prepare_fit_metrics(num_examples)
             if small_loss_fraction is not None:
                 metrics["small_loss_fraction"] = float(small_loss_fraction)
+
+            # Lightweight path: if trust_signal is pretrain_loss_var but
+            # oracle logging is OFF, still ship the scalar the server needs
+            # so aggregate_fit's override branch has data to consume. No
+            # extra compute: oracle_pretrain was already produced above
+            # under the `needs_pretrain` gate.
+            if (not getattr(self, "_log_oracle_signals", False)
+                    and getattr(self, "_trust_signal", "bvd") == "pretrain_loss_var"
+                    and oracle_pretrain is not None):
+                v = oracle_pretrain.get("pretrain_loss_var")
+                if v is not None:
+                    try:
+                        metrics["pretrain_loss_var"] = float(v)
+                    except (TypeError, ValueError):
+                        pass
 
             if getattr(self, "_log_oracle_signals", False):
                 # Update-norm from incoming vs outgoing params (not grad-norm;
@@ -454,6 +481,17 @@ class TAVSFlowerClient(NumPyClient):
         else:
             self._log_per_sample_losses_at_rounds = getattr(
                 self, "_log_per_sample_losses_at_rounds", set())
+
+        # Which signal the server will consume as trust-EMA input. The client
+        # needs this because "pretrain_loss_var" requires one extra no-grad
+        # forward pass on fresh global weights -- the SAME pass that
+        # _oracle_signals_on_train already does. Rather than running two
+        # passes, make the oracle path also fire when the server declared
+        # this signal, independent of the diagnostic log_oracle_signals flag.
+        if "trust_signal" in config:
+            self._trust_signal = str(config["trust_signal"])
+        else:
+            self._trust_signal = getattr(self, "_trust_signal", "bvd")
 
         # Store assignment history
         self.assignment_history.append({

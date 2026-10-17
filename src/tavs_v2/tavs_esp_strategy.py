@@ -155,6 +155,17 @@ class TavsEspConfig:
     #                         per round; keeps the T1/T2/T3 structure unchanged.
     #                         Honest-but-noisy threat model only: a malicious
     #                         client could spoof the number.
+    #   "pretrain_loss_var"   -- per-sample loss variance from ONE no-grad
+    #                         forward pass on the fresh global weights before
+    #                         any local step. Winner of the n=5-seed oracle
+    #                         sweep (AUROC 0.98+ at effective flip rates
+    #                         >=3%, same math on CIFAR-10 and CIFAR-100).
+    #                         HIGHER variance => NOISIER client => LOWER
+    #                         trust, so the raw signal is inverted before the
+    #                         EMA. BVD's max_z / behavior_score keep being
+    #                         computed and logged in scheduling_history even
+    #                         under this signal, so the two can be compared
+    #                         side by side without a second run.
     trust_signal: str = "bvd"
     # Optional linear rescaling of the raw small_loss_fraction (val-accuracy)
     # value BEFORE it enters the trust EMA. Needed because raw val-accuracy
@@ -171,6 +182,25 @@ class TavsEspConfig:
     # or ceiling. Default (0.0, 1.0) is a no-op pass-through.
     small_loss_rescale_lo: float = 0.0
     small_loss_rescale_hi: float = 1.0
+    # Linear rescale window for the pretrain_loss_var signal before it enters
+    # the trust EMA. Maps raw variance in [lo, hi] -> trust in [1, 0] (note:
+    # inverted; higher variance = lower trust). Values outside [lo, hi] clip
+    # at the ends. Provisional CIFAR default (0.5, 3.0) based on the oracle
+    # sweep: clean clients land ~0.6-1.5, noisy ~1.8-3.5 at effective flip
+    # rates >=10%. (0.0, 1.0) is a no-op pass-through that would clamp every
+    # realistic variance to zero trust, so the pilot's default is the useful
+    # window, not pass-through.
+    pretrain_loss_var_rescale_lo: float = 0.5
+    pretrain_loss_var_rescale_hi: float = 3.0
+    # Oracle-only: config-ids ("honest_XX") of clients the pipeline KNOWS to
+    # be clean (did not inject label noise). Pushed by the pipeline before
+    # the simulation starts; empty means no oracle info is available and the
+    # clean-oracle cosine block is a no-op. Used ONLY for diagnostic logging
+    # in aggregate_fit's oracle block (`cosine_vs_clean_oracle_mean`) -- MUST
+    # NOT affect scheduling or aggregation. The field is a frozenset to make
+    # it visually and syntactically obvious that scheduling code touching it
+    # would be a type error.
+    oracle_clean_client_config_ids: frozenset = frozenset()
     # Opt-in diagnostic logging for the oracle noise-detection experiment.
     # When True, clients add per-(round, cid) signals to fit metrics and the
     # strategy dumps them into pipeline_results['oracle_signal_history'].
@@ -694,6 +724,7 @@ class TavsEspStrategy(Strategy):
                 "trust_score": float(self.scheduler.get_effective_trust(cid, server_round)),
                 "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
                 "log_per_sample_losses_at_rounds": ",".join(str(r) for r in getattr(self.config, "log_per_sample_losses_at_rounds", ()) or ()),
+                "trust_signal": str(getattr(self.config, "trust_signal", "bvd")),
             }
             fit_configurations.append((client_proxy, FitIns(parameters, config_dict)))
 
@@ -806,6 +837,12 @@ class TavsEspStrategy(Strategy):
         # report one. Clients that reported a score but weren't verified in
         # this round are ignored -- trust only updates on verification.
         trust_signal = getattr(self.config, "trust_signal", "bvd")
+        # Snapshot BVD's own output BEFORE any trust_signal branch overwrites
+        # `behavior_scores`. Oracle logging later needs the pristine BVD score
+        # per client -- without this snapshot the "compare both signals on one
+        # run" promise is broken because the field logged as bvd_behavior_score
+        # is actually the overridden signal.
+        bvd_behavior_scores_snapshot = dict(behavior_scores)
         if trust_signal == "small_loss_fraction":
             lo = float(getattr(self.config, "small_loss_rescale_lo", 0.0))
             hi = float(getattr(self.config, "small_loss_rescale_hi", 1.0))
@@ -837,6 +874,39 @@ class TavsEspStrategy(Strategy):
                         f"overrode {overridden}/{len(V_ids)} verified clients' "
                         f"behavior_score from BVD to client-reported val fit "
                         f"(rescale: [{lo:.2f}, {hi:.2f}] -> [0, 1])")
+        elif trust_signal == "pretrain_loss_var":
+            # pretrain_loss_var: variance of per-sample losses on the INCOMING
+            # global model, before any local step. Higher variance => noisier
+            # client, so the raw value is INVERTED after rescaling.
+            # BVD still ran (max_z, behavior_score, inlier/outlier sets kept
+            # for cosine + magnitude gates), but the trust EMA below is driven
+            # by the inverted-pretrain-var signal instead of BVD's Z-score.
+            lo = float(getattr(self.config, "pretrain_loss_var_rescale_lo", 0.5))
+            hi = float(getattr(self.config, "pretrain_loss_var_rescale_hi", 3.0))
+            if hi <= lo:
+                lo, hi = 0.5, 3.0
+            overridden = 0
+            for proxy, fit_res in results:
+                cid = proxy.cid
+                if cid not in V_ids:
+                    continue
+                reported = (fit_res.metrics or {}).get("pretrain_loss_var")
+                if reported is None:
+                    continue
+                try:
+                    raw = float(reported)
+                except (TypeError, ValueError):
+                    continue
+                # Rescale raw variance into [0, 1], then INVERT so high
+                # variance maps to low trust. Clip at both ends.
+                scaled = (raw - lo) / (hi - lo)
+                scaled = max(0.0, min(1.0, scaled))
+                behavior_scores[cid] = 1.0 - scaled
+                overridden += 1
+            logger.info(f"Round {server_round} trust_signal='pretrain_loss_var': "
+                        f"overrode {overridden}/{len(V_ids)} verified clients' "
+                        f"behavior_score from BVD to inverted pretrain variance "
+                        f"(rescale: [{lo:.2f}, {hi:.2f}] -> trust [1, 0])")
 
         if getattr(self.config, "soft_outlier_weighting", True):
             # Everyone verified contributes; behaviour_score sets how much.
@@ -1034,8 +1104,29 @@ class TavsEspStrategy(Strategy):
                         if na == 0.0 or nb == 0.0:
                             return float("nan")
                         return float(np.dot(a, b) / (na * nb))
+                    # Clean-oracle cosine: median update of KNOWN-CLEAN
+                    # clients, if the pipeline told us who they are. The BVD
+                    # contamination hypothesis says BVD's LOO-median center
+                    # drifts toward the noisy cluster at high noisy fractions;
+                    # if that is right, each client's cosine against the
+                    # clean-only median should separate clean/noisy more
+                    # cleanly than cosine against the weighted mean does.
+                    # Diagnostic only -- scheduling never touches this.
+                    clean_cfg_ids = frozenset(
+                        getattr(self.config, "oracle_clean_client_config_ids",
+                                frozenset()) or frozenset()
+                    )
+                    cid_map = getattr(self, "cid_to_client_config_id", {}) or {}
+                    clean_median = None
+                    if clean_cfg_ids:
+                        clean_rows = [flat_updates[cid] for cid in flat_updates
+                                      if cid_map.get(cid, cid) in clean_cfg_ids]
+                        if clean_rows:
+                            clean_median = np.median(
+                                np.stack(clean_rows, axis=0), axis=0)
                 else:
                     stacked = None
+                    clean_median = None
                 # BVD readouts: `behavior_scores` is BVD's output used by the
                 # trust EMA; `_last_per_client_stats` has the raw max_z and
                 # the sigma_sq at the argmax block. Logged so a post-hoc
@@ -1049,9 +1140,13 @@ class TavsEspStrategy(Strategy):
                         "num_examples": int(res.num_examples),
                         "is_verified": cid in V_ids,
                     }
-                    if cid in behavior_scores:
+                    if cid in bvd_behavior_scores_snapshot:
                         try:
-                            entry["bvd_behavior_score"] = float(behavior_scores[cid])
+                            # Log BVD's PRE-OVERRIDE score so pretrain_loss_var
+                            # runs still carry the side-by-side BVD readout
+                            # (see snapshot comment above).
+                            entry["bvd_behavior_score"] = float(
+                                bvd_behavior_scores_snapshot[cid])
                         except (TypeError, ValueError):
                             pass
                     if cid in bvd_stats:
@@ -1092,6 +1187,9 @@ class TavsEspStrategy(Strategy):
                         v = flat_updates[cid]
                         entry["cosine_vs_weighted_mean"] = _cos(v, weighted_mean)
                         entry["cosine_vs_simple_mean"] = _cos(v, simple_mean)
+                        if clean_median is not None:
+                            entry["cosine_vs_clean_oracle_mean"] = _cos(
+                                v, clean_median)
                     round_entry[cid] = entry
                 self._oracle_signal_history[int(server_round)] = round_entry
             except Exception as _e:
@@ -1202,6 +1300,7 @@ class FullVerificationStrategy(TavsEspStrategy):
             "is_verified": True,
             "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
             "log_per_sample_losses_at_rounds": ",".join(str(r) for r in getattr(self.config, "log_per_sample_losses_at_rounds", ()) or ()),
+            "trust_signal": str(getattr(self.config, "trust_signal", "bvd")),
         }
         return [(proxy, FitIns(parameters, config_dict.copy())) for proxy in sampled]
 
@@ -1296,6 +1395,7 @@ class RandomSkipStrategy(TavsEspStrategy):
                 "trust_score": 0.5,
                 "log_oracle_signals": bool(getattr(self.config, "log_oracle_signals", False)),
                 "log_per_sample_losses_at_rounds": ",".join(str(r) for r in getattr(self.config, "log_per_sample_losses_at_rounds", ()) or ()),
+                "trust_signal": str(getattr(self.config, "trust_signal", "bvd")),
             }
             fit_configurations.append((proxy, FitIns(parameters, config_dict)))
         return fit_configurations

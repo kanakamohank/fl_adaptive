@@ -985,6 +985,284 @@ def test_small_loss_fraction_override_replaces_bvd_scores():
     return True
 
 
+def test_pretrain_loss_var_override_replaces_bvd_scores():
+    """When trust_signal='pretrain_loss_var', verified clients that reported
+    a pretrain_loss_var in their fit metrics must have their behavior_score
+    replaced by the INVERTED, rescaled variance in the trust-EMA update.
+    Clients that did not report fall back to BVD.
+
+    Signal direction: higher variance => noisier => LOWER trust. The default
+    rescale is (0.5, 3.0) so raw=0.5 should give trust-contribution 1.0 and
+    raw=3.0 should give 0.0, with intermediates in between.
+    """
+    print("\nTesting pretrain_loss_var overrides BVD-driven behavior_score "
+          "with inverted rescale...")
+
+    def _one_run(trust_signal: str, pv_lo, pv_hi, reported: dict):
+        cfg = DummyConfig()
+        cfg.trust_signal = trust_signal
+        cfg.pretrain_loss_var_rescale_lo = pv_lo
+        cfg.pretrain_loss_var_rescale_hi = pv_hi
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+        for i, p in enumerate(proxies):
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25
+            strategy.scheduler.clean_streaks[p.cid] = 0
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        strategy._round_assignments[1] = {
+            "verified": {p.cid for p in proxies},
+            "promoted": set(),
+            "decoy": set(),
+            "sampled": {p.cid for p in proxies},
+        }
+        rng = np.random.RandomState(0)
+        results = []
+        for i, p in enumerate(proxies):
+            m = {"is_verified": True, "client_id": f"honest_{i:02d}"}
+            if p.cid in reported:
+                m["pretrain_loss_var"] = reported[p.cid]
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+                metrics=m,
+            )))
+        strategy.aggregate_fit(1, results, [])
+        # Invert the EMA step to recover the effective behaviour score used
+        # for the trust update: trust_after = 0.9 * 0.25 + 0.1 * behaviour
+        return {p.cid: (strategy.scheduler.trust_scores[p.cid] - 0.225) / 0.1
+                for p in proxies}
+
+    # Four clients report; c4 does not. Rescale window (0.5, 3.0).
+    #   raw=0.5  -> rescaled 0.0 -> trust contribution 1.0
+    #   raw=1.75 -> rescaled 0.5 -> trust contribution 0.5
+    #   raw=3.0  -> rescaled 1.0 -> trust contribution 0.0
+    #   raw=5.0  -> clipped to 1.0 -> trust contribution 0.0
+    reported = {"c0": 0.5, "c1": 1.75, "c2": 3.0, "c3": 5.0}
+    scores = _one_run("pretrain_loss_var", 0.5, 3.0, reported)
+    assert abs(scores["c0"] - 1.0) < 1e-5, f"c0 raw=0.5 -> 1.0; got {scores['c0']}"
+    assert abs(scores["c1"] - 0.5) < 1e-5, f"c1 raw=1.75 -> 0.5; got {scores['c1']}"
+    assert abs(scores["c2"] - 0.0) < 1e-5, f"c2 raw=3.0 -> 0.0; got {scores['c2']}"
+    assert abs(scores["c3"] - 0.0) < 1e-5, f"c3 clips to 0.0; got {scores['c3']}"
+
+    # Non-reporting client falls back to BVD -- identical result between
+    # the pretrain_loss_var run and a parallel bvd run.
+    bvd_scores = _one_run("bvd", 0.5, 3.0, reported)
+    # EMA-recovered score for c4 must match bit-for-bit.
+    assert abs(scores["c4"] - bvd_scores["c4"]) < 1e-9, (
+        f"non-reporting client c4 drifted: {scores['c4']} vs {bvd_scores['c4']}"
+    )
+
+    # Degenerate hi<=lo falls back to (0.5, 3.0), not division-by-zero.
+    scores2 = _one_run("pretrain_loss_var", 3.0, 0.5, {"c0": 1.75, **{
+        "c1": 1.75, "c2": 1.75, "c3": 1.75
+    }})
+    assert abs(scores2["c0"] - 0.5) < 1e-5, (
+        f"degenerate hi<=lo should fall back to (0.5, 3.0); got {scores2['c0']}"
+    )
+    print("✓ pretrain_loss_var inverts raw variance into [1, 0]; "
+          "non-reporters fall back to BVD; degenerate rescale defaults safely")
+    return True
+
+
+def test_pretrain_loss_var_keeps_bvd_logged_in_parallel():
+    """Under trust_signal='pretrain_loss_var' BVD must STILL run and log
+    its max_z + behavior_score into oracle_signal_history (and into the
+    strategy's scheduling_history detector diagnostics) so the two signals
+    can be compared on one run. If BVD is silently skipped — OR if the
+    override overwrites the stored BVD field with the pretrain score —
+    the single-run comparison promise is broken.
+    """
+    print("\nTesting BVD still logged in parallel with pretrain_loss_var...")
+
+    def _one_run(trust_signal):
+        cfg = DummyConfig()
+        cfg.trust_signal = trust_signal
+        cfg.log_oracle_signals = True
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+        for p in proxies:
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25
+            strategy.scheduler.clean_streaks[p.cid] = 0
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        strategy._round_assignments[1] = {
+            "verified": {p.cid for p in proxies},
+            "promoted": set(),
+            "decoy": set(),
+            "sampled": {p.cid for p in proxies},
+        }
+        rng = np.random.RandomState(123)
+        results = []
+        for i, p in enumerate(proxies):
+            m = {"is_verified": True, "client_id": p.cid,
+                 "pretrain_loss_var": 0.6 + 0.3 * i}
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+                metrics=m,
+            )))
+        strategy.aggregate_fit(1, results, [])
+        return strategy._oracle_signal_history[1]
+
+    pv = _one_run("pretrain_loss_var")
+    bvd = _one_run("bvd")
+
+    for cid in pv:
+        e = pv[cid]
+        for k in ("bvd_behavior_score", "bvd_max_z", "bvd_raw_dist",
+                  "bvd_sigma_sq", "pretrain_loss_var"):
+            assert k in e, (
+                f"client {cid}: missing {k} under pretrain_loss_var trust "
+                f"-- BVD was silently skipped. keys={list(e.keys())}"
+            )
+        # pretrain_loss_var round-trips as the reported value.
+        assert abs(e["pretrain_loss_var"] - (0.6 + 0.3 * int(cid[1:]))) < 1e-6
+        # bvd_behavior_score MUST match the parallel bvd-trust run bit for
+        # bit. If the override had overwritten the logged field with the
+        # inverted pretrain score (1.0 - rescaled), this would fire -- that
+        # was the bug the adversarial reviewer caught.
+        assert abs(e["bvd_behavior_score"] - bvd[cid]["bvd_behavior_score"]) < 1e-9, (
+            f"{cid}: logged bvd_behavior_score under pretrain_loss_var "
+            f"({e['bvd_behavior_score']:.6f}) differs from the parallel BVD "
+            f"run ({bvd[cid]['bvd_behavior_score']:.6f}); override is "
+            f"contaminating the logged BVD readout"
+        )
+        # And it must NOT equal the inverted pretrain contribution -- that
+        # would be the bug's symptom. Under rescale (0.5, 3.0):
+        #   raw=0.6+0.3*i for i=0..4 -> 0.6, 0.9, 1.2, 1.5, 1.8
+        #   rescaled = (raw-0.5)/2.5 -> 0.04..0.52; trust = 1 - rescaled.
+        raw = 0.6 + 0.3 * int(cid[1:])
+        pretrain_contrib = 1.0 - max(0.0, min(1.0, (raw - 0.5) / 2.5))
+        if abs(pretrain_contrib - e["bvd_behavior_score"]) < 1e-9 and \
+                abs(bvd[cid]["bvd_behavior_score"] - pretrain_contrib) > 1e-6:
+            raise AssertionError(
+                f"{cid}: bvd_behavior_score matches the pretrain contrib "
+                f"({pretrain_contrib:.6f}) -- the oracle log leaked the "
+                f"overridden score instead of BVD's pre-override output."
+            )
+    print("✓ BVD readouts (max_z, behavior_score, raw_dist, sigma_sq) still "
+          "logged under pretrain_loss_var; bvd_behavior_score bit-equal to a "
+          "parallel bvd-trust run")
+    return True
+
+
+def test_oracle_clean_cosine_logged_when_clean_cids_provided():
+    """When TavsEspConfig.oracle_clean_client_config_ids is non-empty AND
+    oracle logging is on, aggregate_fit logs each verified client's cosine
+    against the median of the known-clean clients' updates
+    (`cosine_vs_clean_oracle_mean`). When the set is empty, that key must
+    NOT appear (null diagnostic should not pretend to be a result).
+    """
+    print("\nTesting clean-oracle cosine field appears only when "
+          "clean cids are provided...")
+
+    def _one_run(clean_cfg_ids):
+        cfg = DummyConfig()
+        cfg.log_oracle_signals = True
+        cfg.oracle_clean_client_config_ids = frozenset(clean_cfg_ids)
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+        for p in proxies:
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25
+            strategy.scheduler.clean_streaks[p.cid] = 0
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        strategy._round_assignments[1] = {
+            "verified": {p.cid for p in proxies},
+            "promoted": set(),
+            "decoy": set(),
+            "sampled": {p.cid for p in proxies},
+        }
+        rng = np.random.RandomState(7)
+        results = []
+        for i, p in enumerate(proxies):
+            # client_id = "honest_0X" so the config-id resolver inside
+            # aggregate_fit's oracle block can match the clean set.
+            m = {"is_verified": True, "client_id": f"honest_{i:02d}"}
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+                metrics=m,
+            )))
+        strategy.aggregate_fit(1, results, [])
+        return strategy._oracle_signal_history[1]
+
+    # Provide 3 "clean" config-ids.
+    hist_on = _one_run({"honest_00", "honest_01", "honest_02"})
+    for cid, e in hist_on.items():
+        assert "cosine_vs_clean_oracle_mean" in e, (
+            f"client {cid}: missing cosine_vs_clean_oracle_mean under "
+            f"non-empty clean set; keys={list(e.keys())}"
+        )
+        assert -1.001 <= e["cosine_vs_clean_oracle_mean"] <= 1.001
+
+    # Empty clean set -> field must NOT be present.
+    hist_off = _one_run(set())
+    for cid, e in hist_off.items():
+        assert "cosine_vs_clean_oracle_mean" not in e, (
+            f"client {cid}: empty clean set must not produce a "
+            f"cosine_vs_clean_oracle_mean entry; got {e.get('cosine_vs_clean_oracle_mean')}"
+        )
+    # The regular cosines are still there.
+    for cid, e in hist_off.items():
+        assert "cosine_vs_weighted_mean" in e
+        assert "cosine_vs_simple_mean" in e
+    print("✓ cosine_vs_clean_oracle_mean appears iff clean cids provided; "
+          "regular cosines unaffected")
+    return True
+
+
+def test_pretrain_loss_var_does_not_affect_scheduling_config():
+    """configure_fit must advertise `trust_signal` in the FitIns config so
+    the client knows to compute pretrain_loss_var. This test locks that
+    contract across all three strategies (TAVS / full-verify / random-skip).
+    """
+    print("\nTesting trust_signal is advertised in configure_fit...")
+    import flwr as fl
+    from src.tavs_v2.tavs_esp_strategy import (
+        FullVerificationStrategy, RandomSkipStrategy,
+    )
+
+    class _CM:
+        def __init__(self, n):
+            self.proxies = [MockClientProxy(f"c{i}") for i in range(n)]
+        def all(self):
+            return {p.cid: p for p in self.proxies}
+        def num_available(self):
+            return len(self.proxies)
+        def sample(self, num_clients, min_num_clients):
+            return self.proxies[:num_clients]
+        def wait_for(self, *a, **k):
+            return
+
+    def _collect(strategy):
+        params = MockParameters([np.zeros(150000, dtype=np.float32)])
+        fit_cfg = strategy.configure_fit(1, params, _CM(4))
+        advertised = set()
+        for _proxy, fit_ins in fit_cfg:
+            advertised.add(fit_ins.config.get("trust_signal"))
+        return advertised
+
+    for signal in ("bvd", "pretrain_loss_var", "small_loss_fraction"):
+        cfg = DummyConfig()
+        cfg.trust_signal = signal
+        for cls_kwargs in (
+            (TavsEspStrategy, {}),
+            (FullVerificationStrategy, {}),
+            (RandomSkipStrategy, {"skip_rate": 0.5, "skip_seed": 0}),
+        ):
+            cls, kwargs = cls_kwargs
+            strat = cls(config=cfg, **kwargs)
+            got = _collect(strat)
+            assert got == {signal}, (
+                f"{cls.__name__} did not advertise trust_signal={signal!r}; "
+                f"saw {got}"
+            )
+    print("✓ TAVS/full-verify/random-skip all advertise trust_signal in FitIns")
+    return True
+
+
 def test_cid_to_client_config_id_populated_and_stable():
     """`aggregate_fit` records proxy.cid -> "honest_XX" from FitRes metrics.
 
@@ -1098,7 +1376,11 @@ def main():
         rs15 = test_oracle_signal_history_captures_client_metrics()
         rs16 = test_oracle_signal_history_off_by_default()
         rs17 = test_initialize_parameters_reads_num_classes_from_config()
-        assert all(x is True for x in (rs15, rs16, rs17))
+        rs18 = test_pretrain_loss_var_override_replaces_bvd_scores()
+        rs19 = test_pretrain_loss_var_keeps_bvd_logged_in_parallel()
+        rs20 = test_oracle_clean_cosine_logged_when_clean_cids_provided()
+        rs21 = test_pretrain_loss_var_does_not_affect_scheduling_config()
+        assert all(x is True for x in (rs15, rs16, rs17, rs18, rs19, rs20, rs21))
 
         if all([success1, success2, success3, success4, success5,
                 rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10,
