@@ -154,6 +154,14 @@ def _config_tag(args) -> str:
         parts.append(f"ep{int(_le)}")
     if getattr(args, "log_oracle_signals", False):
         parts.append("oracle")
+    # Non-default alpha / initial_trust / aggregation-mode go in the tag so
+    # a sweep over these knobs does not collide on disk.
+    if abs(float(getattr(args, "alpha_trust", 0.9)) - 0.9) > 1e-9:
+        parts.append(f"alpha{int(round(float(args.alpha_trust)*100)):02d}")
+    if abs(float(getattr(args, "initial_trust", 0.25)) - 0.25) > 1e-9:
+        parts.append(f"it{int(round(float(args.initial_trust)*100)):02d}")
+    if bool(getattr(args, "trust_weighted_aggregation", False)):
+        parts.append("twagg")
     return "_".join(parts)
 
 
@@ -235,6 +243,17 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
     # test the EMA-convergence hypothesis without a code edit per run.
     _alpha_trust = float(getattr(args, "alpha_trust", 0.9))
     _initial_trust = float(getattr(args, "initial_trust", 0.25))
+    # Trust-weighted aggregation. Historical default: True (num_examples only;
+    # trust not used). The 5-seed test 2 run (r40, ep5, IID, CIFAR-10N
+    # random1, pretrain_loss_var trust) found that under this default all
+    # three arms land at 0.770 ± 0.004 regardless of trust separation --
+    # TAVS routes noisy to verified correctly (rank 17.2/20) but the routing
+    # has no aggregation consequence. Flipping to False routes trust into
+    # the verified-bucket weight (behavior_score × num_examples).
+    # CLI exposes the positive polarity (`--trust-weighted-aggregation`) because
+    # the double-negative "disable" flag reads badly. Config field keeps the
+    # historical name so the dataclass default (True = off) stays stable.
+    _disable_trust_wagg = not bool(getattr(args, "trust_weighted_aggregation", False))
     tavs_config = TavsEspConfig(
         theta_low=0.3, theta_high=0.7, alpha_trust=_alpha_trust, gamma_budget=0.35,
         initial_trust=_initial_trust,
@@ -244,6 +263,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         clip_promoted_updates=True, promoted_clip_factor=2.0,
         cosine_filter_promoted=False,
         enable_outlier_detection=True,
+        disable_trust_weighted_aggregation=_disable_trust_wagg,
         trust_signal=getattr(args, "trust_signal", "bvd"),
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
@@ -661,6 +681,17 @@ def main():
                              "per round. All dumped into "
                              "pipeline_results['oracle_signal_history']. "
                              "Zero cost when off. Does not change scheduling.")
+    parser.add_argument("--trust-weighted-aggregation", action="store_true",
+                        dest="trust_weighted_aggregation",
+                        help="Enable trust-weighted aggregation (sets "
+                             "disable_trust_weighted_aggregation=False). "
+                             "By default verified clients contribute "
+                             "num_examples only; with this flag they contribute "
+                             "behavior_score × num_examples, which under "
+                             "trust_signal=pretrain_loss_var downweights noisy "
+                             "clients in the verified bucket proportional to "
+                             "their inverted pretrain variance. Needed to translate "
+                             "trust routing into aggregation weight.")
     parser.add_argument("--alpha-trust", type=float, default=0.9,
                         help="Trust-EMA damping factor. Default 0.9 (historical). "
                              "Lower (e.g. 0.7) accelerates EMA convergence when the "
