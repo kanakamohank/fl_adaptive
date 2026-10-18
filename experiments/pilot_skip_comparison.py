@@ -230,8 +230,14 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
             )
         pv_lo = float(parts_r[0])
         pv_hi = float(parts_r[1])
+    # alpha_trust and initial_trust default to the historical pilot values
+    # (0.9, 0.25) but are overridable from the CLI so a tuning sweep can
+    # test the EMA-convergence hypothesis without a code edit per run.
+    _alpha_trust = float(getattr(args, "alpha_trust", 0.9))
+    _initial_trust = float(getattr(args, "initial_trust", 0.25))
     tavs_config = TavsEspConfig(
-        theta_low=0.3, theta_high=0.7, alpha_trust=0.9, gamma_budget=0.35,
+        theta_low=0.3, theta_high=0.7, alpha_trust=_alpha_trust, gamma_budget=0.35,
+        initial_trust=_initial_trust,
         tau_ramp=5.0,
         k_trust=3, target_k=150,
         detection_threshold=5.0,
@@ -655,6 +661,17 @@ def main():
                              "per round. All dumped into "
                              "pipeline_results['oracle_signal_history']. "
                              "Zero cost when off. Does not change scheduling.")
+    parser.add_argument("--alpha-trust", type=float, default=0.9,
+                        help="Trust-EMA damping factor. Default 0.9 (historical). "
+                             "Lower (e.g. 0.7) accelerates EMA convergence when the "
+                             "cohort visits each client only ~4 times at 20r/10-of-50 "
+                             "sampling, at the cost of a noisier trust trajectory.")
+    parser.add_argument("--initial-trust", type=float, default=0.25,
+                        help="Starting trust for every client. Default 0.25 "
+                             "(below theta_low=0.3, so every fresh client is "
+                             "verified via the Tier-1 floor). Raising it to e.g. "
+                             "0.35 lets the EMA start inside the Tier-2 band and "
+                             "trust the per-round signal from round 1 onwards.")
     parser.add_argument("--local-epochs", type=int, default=None,
                         help="Override local_epochs for the oracle experiment. "
                              "Default pulls from PipelineConfig (currently 2).")
