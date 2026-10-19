@@ -8,26 +8,68 @@ three arms land at 0.770 ± 0.004 and a comparison chart would mislead.
 
 Outputs land next to the results directory so they travel with the data.
 """
+import argparse
 import json
+import re
 import statistics
 from pathlib import Path
 
 import matplotlib.pyplot as plt
 import numpy as np
 
-ROOT = Path(
-    "results/tavs_integration_v1_iid_test2/r40/"
-    "split-iid_N50_C10_noiseC40_R17_type-cifar10n-random1_"
-    "trust-pretrain-loss-var_pv-rescale-06-15_ep5_oracle"
-)
+
+def _discover_arms(root: Path):
+    """Walk a run's output dir and resolve the (arm, skipXX) sub-dirs.
+
+    Each arm's seed-1 result lives under <skipXX>/<arm>_seed1/. The skipXX
+    for random_skip is matched to tavs's observed rate, so it varies per
+    run — we can't hard-code it. full_verify and tavs_skip are always
+    under skip00 by convention.
+    """
+    arms = {
+        "full_verify": (None, "#d95f02", "Full verify"),
+        "tavs_skip":   (None, "#1b9e77", "TAVS skip"),
+        "random_skip": (None, "#7570b3", "Random skip"),
+    }
+    for sub in sorted(root.glob("skip*")):
+        if not sub.is_dir():
+            continue
+        for arm_name in list(arms):
+            if any(sub.glob(f"{arm_name}_seed*/pipeline_results.json")):
+                _, color, label = arms[arm_name]
+                arms[arm_name] = (f"{sub.name}/{arm_name}_seed", color, label)
+    missing = [k for k, v in arms.items() if v[0] is None]
+    if missing:
+        raise FileNotFoundError(
+            f"Could not locate arms {missing} under {root}; "
+            f"available sub-dirs: {sorted(p.name for p in root.glob('skip*'))}"
+        )
+    return arms
+
+
+parser = argparse.ArgumentParser(description=__doc__)
+parser.add_argument("root", nargs="?", type=Path,
+                    default=Path(
+                        "results/tavs_integration_v1_iid_test2/r40/"
+                        "split-iid_N50_C10_noiseC40_R17_type-cifar10n-random1_"
+                        "trust-pretrain-loss-var_pv-rescale-06-15_ep5_oracle"
+                    ),
+                    help="Run directory containing the three arm sub-dirs. "
+                         "Default: the test-2 run.")
+parser.add_argument("--seeds", type=int, nargs="+", default=[1, 2, 3, 4, 5],
+                    help="Seeds to load.")
+args = parser.parse_args()
+
+ROOT = args.root
+if not ROOT.exists():
+    raise SystemExit(f"ROOT does not exist: {ROOT}")
 OUT = ROOT / "plots"
 OUT.mkdir(parents=True, exist_ok=True)
-
-ARMS = {
-    "full_verify": ("skip00/full_verify_seed", "#d95f02", "Full verify"),
-    "tavs_skip":   ("skip00/tavs_skip_seed",   "#1b9e77", "TAVS skip"),
-    "random_skip": ("skip41/random_skip_seed", "#7570b3", "Random skip"),
-}
+ARMS = _discover_arms(ROOT)
+SEEDS = args.seeds
+print(f"root = {ROOT}")
+print(f"arms = { {k: v[0] for k, v in ARMS.items()} }")
+print(f"seeds = {SEEDS}")
 
 
 def _load(arm_key, seed):
@@ -40,7 +82,7 @@ def _load(arm_key, seed):
 # Plot 1: per-round pretrain_loss_var distribution, clean vs noisy
 # ---------------------------------------------------------------------------
 clean_by_round, noisy_by_round = {}, {}
-for seed in range(1, 6):
+for seed in SEEDS:
     d = _load("tavs_skip", seed)
     if d is None:
         continue
@@ -87,7 +129,7 @@ print(f"wrote {OUT / '01_signal_pretrain_loss_var_over_rounds.png'}")
 # ---------------------------------------------------------------------------
 rank_data = {k: [] for k in ARMS}
 for arm_key in ARMS:
-    for seed in range(1, 6):
+    for seed in SEEDS:
         d = _load(arm_key, seed)
         if d is None:
             continue
@@ -101,7 +143,7 @@ for arm_key in ARMS:
         rank_data[arm_key].append(len(bottom20 & noisy_ids))
 
 fig, ax = plt.subplots(figsize=(9, 5.2))
-x = np.arange(1, 6)
+x = np.arange(1, len(SEEDS) + 1)
 width = 0.26
 for i, (arm_key, (_, color, label)) in enumerate(ARMS.items()):
     offset = (i - 1) * width
@@ -129,7 +171,7 @@ print(f"wrote {OUT / '02_rank_of_noisy_by_arm.png'}")
 # ---------------------------------------------------------------------------
 traj = {k: [] for k in ARMS}
 for arm_key in ARMS:
-    for seed in range(1, 6):
+    for seed in SEEDS:
         d = _load(arm_key, seed)
         if d is not None:
             traj[arm_key].append(d["server_accuracies"])
@@ -195,7 +237,7 @@ def _per_seed_aurocs(d):
 
 
 bvd_vals, pv_vals = [], []
-for seed in range(1, 6):
+for seed in SEEDS:
     d = _load("tavs_skip", seed)
     if d is None:
         continue
