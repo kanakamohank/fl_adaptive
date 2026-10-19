@@ -47,6 +47,29 @@ def _discover_arms(root: Path):
     return arms
 
 
+def _describe_run(root: Path) -> str:
+    """Derive a short run tag ('CIFAR-10N worst, IID, 40r × 5ep, N=50/10') from
+    the first available experiment_summary.json so plot titles do not lie
+    when the script is pointed at a run other than the hardcoded one."""
+    try:
+        summary = next(root.rglob("experiment_summary.json"))
+    except StopIteration:
+        return str(root.name)
+    s = json.loads(summary.read_text())
+    cfg = s.get("experiment_config", {})
+    ds = cfg.get("dataset", "cifar10")
+    nt = cfg.get("label_noise_type", "none")
+    extra = (f" {cfg.get('cifar10n_label_set', '')}" if nt == "cifar10n" else "")
+    split = cfg.get("data_split", "iid")
+    alpha = f" α={cfg.get('data_alpha')}" if split == "dirichlet" else ""
+    rounds = cfg.get("num_rounds")
+    ep = cfg.get("client_epochs")
+    N = cfg.get("num_clients")
+    C = cfg.get("clients_per_round")
+    return (f"{ds.upper()} {nt}{extra}, {split}{alpha}, "
+            f"N={N}/{C}, {rounds} rounds × {ep} local epochs")
+
+
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument("root", nargs="?", type=Path,
                     default=Path(
@@ -67,7 +90,10 @@ OUT = ROOT / "plots"
 OUT.mkdir(parents=True, exist_ok=True)
 ARMS = _discover_arms(ROOT)
 SEEDS = args.seeds
+RUN_TAG = _describe_run(ROOT)
+SEED_TAG = f"{len(SEEDS)} seed" + ("s" if len(SEEDS) > 1 else "")
 print(f"root = {ROOT}")
+print(f"run_tag = {RUN_TAG}")
 print(f"arms = { {k: v[0] for k, v in ARMS.items()} }")
 print(f"seeds = {SEEDS}")
 
@@ -106,16 +132,16 @@ noisy_mean = [statistics.mean(noisy_by_round[r]) for r in rounds]
 noisy_std = [statistics.stdev(noisy_by_round[r]) if len(noisy_by_round[r]) > 1 else 0 for r in rounds]
 
 fig, ax = plt.subplots(figsize=(9, 5.2))
-ax.plot(rounds, clean_mean, color="#1b9e77", lw=2.0, label="Clean clients (mean across 5 seeds)")
+ax.plot(rounds, clean_mean, color="#1b9e77", lw=2.0, label=f"Clean clients (mean across {SEED_TAG})")
 ax.fill_between(rounds, [m - s for m, s in zip(clean_mean, clean_std)],
                 [m + s for m, s in zip(clean_mean, clean_std)], color="#1b9e77", alpha=0.18)
-ax.plot(rounds, noisy_mean, color="#d95f02", lw=2.0, label="Noisy clients (mean across 5 seeds)")
+ax.plot(rounds, noisy_mean, color="#d95f02", lw=2.0, label=f"Noisy clients (mean across {SEED_TAG})")
 ax.fill_between(rounds, [m - s for m, s in zip(noisy_mean, noisy_std)],
                 [m + s for m, s in zip(noisy_mean, noisy_std)], color="#d95f02", alpha=0.18)
 ax.set_xlabel("Round")
 ax.set_ylabel("Pretrain loss variance (per client, verified rounds only)")
 ax.set_title("The signal: noisy clients show higher pretrain loss variance\n"
-             "CIFAR-10N random1, IID, N=50/10, 40 rounds × 5 local epochs, 5 seeds")
+             f"{RUN_TAG}, {SEED_TAG}")
 ax.legend(loc="upper left", frameon=False)
 ax.grid(True, alpha=0.3)
 fig.tight_layout()
