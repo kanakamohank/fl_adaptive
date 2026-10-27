@@ -1169,6 +1169,7 @@ class TavsEspStrategy(Strategy):
                             except (TypeError, ValueError):
                                 pass
                     for key in ("per_class_pretrain_loss",
+                                "per_class_pretrain_var",
                                 "per_class_pretrain_count",
                                 "per_sample_pretrain_loss"):
                         if key in m:

@@ -579,10 +579,25 @@ class TAVSFlowerClient(NumPyClient):
 
         Returns a dict with:
           per_class_pretrain_loss: list[num_classes]  (NaN if class absent)
+          per_class_pretrain_var:  list[num_classes]  (NaN if class has <2
+                                   samples -- a one-sample class has no
+                                   meaningful spread)
           per_class_pretrain_count: list[num_classes]
           pretrain_loss_mean: float
           pretrain_loss_var: float   (variance across samples)
         Or None if train_loader is unavailable / empty.
+
+        Why per-class variance exists alongside the pooled one: measured on
+        our own runs, the pooled variance INVERTS under a Dirichlet(0.3)
+        partition (AUROC 0.436, worse than chance) because a clean client
+        holding rare/hard classes produces a wide loss spread that mimics a
+        noisy client. FedNoRo (IJCAI 2023, Sec. 1) diagnoses that failure and
+        fixes it by decomposing the indicator per class, since intra-class
+        samples stay closer to IID even when inter-class ones do not. Their
+        statistic is the per-class MEAN; this logs the per-class VARIANCE so
+        their decomposition can be tested with our statistic -- a combination
+        neither FedNoRo nor FedCorr evaluates. Diagnostic only; nothing
+        schedules on it.
         """
         if self.train_loader is None:
             return None
@@ -597,6 +612,12 @@ class TAVSFlowerClient(NumPyClient):
         model.eval()
         loss_fn = _torch.nn.CrossEntropyLoss(reduction="none")
         per_class_sum = [0.0] * num_classes
+        # Sum of squared losses per class, for the per-class variance via
+        # E[x^2] - E[x]^2. Cross-entropy losses here sit in roughly [0, 20],
+        # so the cancellation this form is normally criticised for stays far
+        # inside float64 precision; collecting per-class lists instead would
+        # scale with dataset size for no accuracy gain at this magnitude.
+        per_class_sq_sum = [0.0] * num_classes
         per_class_cnt = [0] * num_classes
         all_losses = []
         with _torch.no_grad():
@@ -614,22 +635,43 @@ class TAVSFlowerClient(NumPyClient):
                 for i in range(y.shape[0]):
                     c = int(y[i].item())
                     if 0 <= c < num_classes:
-                        per_class_sum[c] += float(per_sample[i].item())
+                        lv = float(per_sample[i].item())
+                        per_class_sum[c] += lv
+                        per_class_sq_sum[c] += lv * lv
                         per_class_cnt[c] += 1
                 all_losses.extend(float(v) for v in per_sample.detach().cpu().tolist())
         if not all_losses:
             return None
         per_class_loss = []
+        per_class_var = []
         for c in range(num_classes):
-            per_class_loss.append(
-                (per_class_sum[c] / per_class_cnt[c]) if per_class_cnt[c] > 0
-                else float("nan")
-            )
+            cnt = per_class_cnt[c]
+            if cnt > 0:
+                mu = per_class_sum[c] / cnt
+                per_class_loss.append(mu)
+            else:
+                mu = None
+                per_class_loss.append(float("nan"))
+            if cnt > 1:
+                # Population variance, matching the pooled pretrain_loss_var
+                # below (divides by n, not n-1). Clamp at 0: float round-off
+                # can make E[x^2]-E[x]^2 very slightly negative when a class's
+                # losses are near-identical.
+                v = (per_class_sq_sum[c] / cnt) - (mu * mu)
+                per_class_var.append(v if v > 0.0 else 0.0)
+            else:
+                # A class with 0 or 1 samples has no spread to measure. NaN
+                # rather than 0.0 so downstream code can tell "no data" from
+                # "genuinely zero variance" -- scoring them as 0.0 would make
+                # a client holding one sample of a class look maximally clean
+                # in that class.
+                per_class_var.append(float("nan"))
         n = len(all_losses)
         mean = sum(all_losses) / n
         var = sum((v - mean) ** 2 for v in all_losses) / n if n > 1 else 0.0
         result = {
             "per_class_pretrain_loss": per_class_loss,
+            "per_class_pretrain_var": per_class_var,
             "per_class_pretrain_count": per_class_cnt,
             "pretrain_loss_mean": float(mean),
             "pretrain_loss_var": float(var),

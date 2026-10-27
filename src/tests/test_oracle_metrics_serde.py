@@ -42,6 +42,10 @@ def test_oracle_metrics_round_trip_real_flower_serde():
         # at serde time and dumps the fit result.
         "per_class_pretrain_loss": json.dumps(
             [1.0, 1.1, float("nan"), 1.3, 1.4, 1.5, 1.6, 1.7, 1.8, 1.9]),
+        # Per-class variance carries NaN for classes with <2 samples, so it
+        # exercises the same NaN-through-JSON path as the loss vector.
+        "per_class_pretrain_var": json.dumps(
+            [0.2, 0.3, float("nan"), 0.5, 0.1, 0.4, 0.6, 0.2, 0.3, 0.7]),
         "per_class_pretrain_count": json.dumps(
             [10, 10, 0, 10, 10, 10, 10, 10, 10, 10]),
         # One-off per-sample loss list for the mechanism visualisation.

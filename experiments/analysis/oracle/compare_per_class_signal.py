@@ -116,9 +116,11 @@ def analyse_seed(path):
     if not osh or not noisy:
         return None
 
-    acc = {k: [0.0, 0] for k in ("pooled_var", "pooled_mean", "fednoro")}
+    acc = {k: [0.0, 0] for k in
+           ("pooled_var", "pooled_mean", "fednoro", "perclass_var")}
     for r_key, entries in osh.items():
-        cohort_pc = []
+        cohort_pc = []      # per-class MEAN loss  (FedNoRo's statistic)
+        cohort_pcv = []     # per-class VARIANCE   (their decomposition, ours)
         rows = []
         for cid, e in entries.items():
             is_noisy = cid_map.get(cid, cid) in noisy
@@ -126,7 +128,14 @@ def analyse_seed(path):
             pc = e.get("per_class_pretrain_loss")
             if pc:
                 cohort_pc.append((cid, pc))
+            pcv = e.get("per_class_pretrain_var")
+            if pcv:
+                cohort_pcv.append((cid, pcv))
         fn = fednoro_scores(cohort_pc)
+        # Same FedNoRo processing applied to the variance vector. The
+        # fill-missing rule still holds: an absent class contributes no noisy
+        # samples, so the cohort minimum is the right stand-in.
+        fnv = fednoro_scores(cohort_pcv)
 
         round_scores = {k: [] for k in acc}
         for cid, e, is_noisy in rows:
@@ -138,6 +147,8 @@ def analyse_seed(path):
                 round_scores["pooled_mean"].append((float(m), is_noisy))
             if cid in fn:
                 round_scores["fednoro"].append((fn[cid], is_noisy))
+            if cid in fnv:
+                round_scores["perclass_var"].append((fnv[cid], is_noisy))
 
         for k, scored in round_scores.items():
             w, t = pairwise_counts(scored)
@@ -153,7 +164,8 @@ def analyse_run(root: Path, label: str):
     seeds = sorted(root.rglob("tavs_skip_seed*/pipeline_results.json"))
     if not seeds:
         return None
-    per_signal = {"pooled_var": [], "pooled_mean": [], "fednoro": []}
+    per_signal = {"pooled_var": [], "pooled_mean": [],
+                  "fednoro": [], "perclass_var": []}
     for p in seeds:
         res = analyse_seed(p)
         if res is None:
@@ -165,8 +177,11 @@ def analyse_run(root: Path, label: str):
         return None
     out = {"label": label, "n_seeds": len(per_signal["pooled_var"])}
     for k, vals in per_signal.items():
-        out[k] = (statistics.mean(vals),
-                  statistics.stdev(vals) if len(vals) > 1 else 0.0)
+        # Absent for runs recorded before per_class_pretrain_var was logged;
+        # report that as blank rather than inventing a number.
+        out[k] = ((statistics.mean(vals),
+                   statistics.stdev(vals) if len(vals) > 1 else 0.0)
+                  if vals else None)
     return out
 
 
@@ -188,8 +203,10 @@ def main():
             (base / "tavs_integration_v2_iid_worst_twagg", "IID, r40 ep5, WORST"),
         ]
 
-    print("Pairwise AUROC (noisy ranked above clean). 0.50 = chance.\n")
-    header = f"{'run':<44} {'seeds':>5}  {'pooled_var':>16} {'pooled_mean':>16} {'fednoro':>16}"
+    print("Pairwise AUROC (noisy ranked above clean). 0.50 = chance.")
+    print("perclass_var is blank for runs logged before that field existed.\n")
+    header = (f"{'run':<44} {'seeds':>5}  {'pooled_var':>15} {'pooled_mean':>15} "
+              f"{'fednoro':>15} {'perclass_var':>15}")
     print(header)
     print("-" * len(header))
     for root, label in runs:
@@ -201,10 +218,14 @@ def main():
             print(f"{label:<44} {'--':>5}  (no oracle history)")
             continue
         def fmt(k):
-            m, s = res[k]
+            vals = res.get(k)
+            if not vals:
+                return "--"
+            m, s = vals
             return f"{m:.3f} ± {s:.3f}"
         print(f"{label:<44} {res['n_seeds']:>5}  "
-              f"{fmt('pooled_var'):>16} {fmt('pooled_mean'):>16} {fmt('fednoro'):>16}")
+              f"{fmt('pooled_var'):>15} {fmt('pooled_mean'):>15} "
+              f"{fmt('fednoro'):>15} {fmt('perclass_var'):>15}")
 
 
 if __name__ == "__main__":
