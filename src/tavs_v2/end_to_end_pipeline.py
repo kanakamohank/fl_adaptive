@@ -351,9 +351,18 @@ class TAVSESPPipeline:
                 from torch.utils.data import Subset as _Subset
                 self.client_val_datasets[cid] = _Subset(ds, val_idx)
                 self.client_datasets[cid] = _Subset(ds, train_idx)
+            # Name the reason that actually fired. The old message always
+            # said trust_signal='small_loss_fraction', which is wrong (and
+            # alarming) on an oracle run driven by a different signal: the
+            # split is made because log_oracle_signals needs the val set to
+            # log small_loss_fraction as a comparison readout, not because
+            # that signal is in charge.
+            reason = ("trust_signal='small_loss_fraction'"
+                      if trust_signal == "small_loss_fraction"
+                      else f"log_oracle_signals=True (trust_signal='{trust_signal}')")
             logger.info(
-                f"trust_signal='small_loss_fraction': split each client's "
-                f"dataset {int((1 - val_frac) * 100)}/{int(val_frac * 100)} "
+                f"{reason}: split each client's dataset "
+                f"{int((1 - val_frac) * 100)}/{int(val_frac * 100)} "
                 f"train/val for local noise-detection signal"
             )
 

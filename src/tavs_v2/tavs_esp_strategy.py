@@ -506,12 +506,15 @@ class TavsEspStrategy(Strategy):
                     "partition-map bootstrap: wait_for(%s, timeout=30) raised %s: %s",
                     expected, type(e).__name__, e,
                 )
+                self._partition_map_failure = (
+                    f"wait_for({expected}) raised {type(e).__name__}: {e}")
                 self._partition_map_status = "failed"
                 return
 
         proxies = client_manager.all()
         if not proxies:
             logger.error("partition-map bootstrap: client_manager.all() returned empty")
+            self._partition_map_failure = "client_manager.all() returned empty"
             self._partition_map_status = "failed"
             return
 
@@ -535,11 +538,14 @@ class TavsEspStrategy(Strategy):
                     "partition-map bootstrap: get_properties on cid=%s raised %s: %s",
                     cid, type(e).__name__, e,
                 )
+                self._partition_map_failure = (
+                    f"get_properties on cid={cid} raised {type(e).__name__}: {e}")
                 self._partition_map_status = "failed"
                 return
             pid = res.properties.get("partition-id") if getattr(res, "properties", None) else None
             if pid is None:
                 logger.error("partition-map bootstrap: cid=%s reported no partition-id", cid)
+                self._partition_map_failure = f"cid={cid} reported no partition-id"
                 self._partition_map_status = "failed"
                 return
             pid_int = int(pid)
@@ -550,12 +556,16 @@ class TavsEspStrategy(Strategy):
                     "partition-map bootstrap: duplicate partition-id %s (cids %s and %s)",
                     pid_int, pid_to_cid[pid_int], cid,
                 )
+                self._partition_map_failure = (
+                    f"duplicate partition-id {pid_int} "
+                    f"(cids {pid_to_cid[pid_int]} and {cid})")
                 self._partition_map_status = "failed"
                 return
             pid_to_cid[pid_int] = cid
             cid_to_pid[cid] = pid_int
 
         if not pid_to_cid:
+            self._partition_map_failure = "no proxy reported a partition-id"
             self._partition_map_status = "failed"
             return
 
@@ -635,11 +645,17 @@ class TavsEspStrategy(Strategy):
             if status == "failed":
                 # Loud on purpose. Do NOT let the divergent legacy path run
                 # under deterministic sampling.
+                # Carry the ORIGINATING failure into the message. Without
+                # it this reads as a TAVS bug when the real cause is usually
+                # environmental -- e.g. Ray refusing to create objects
+                # because the local disk is over its 95% threshold, which
+                # fails get_properties and only then trips this guard.
                 raise RuntimeError(
                     "Partition-map bootstrap failed; refusing to fall back to "
                     "the legacy sorted-cid path in deterministic_sampling mode "
                     "because that path does not align cohorts across arms. "
-                    "See tavs_esp_strategy.py::_ensure_partition_map error log."
+                    f"Underlying cause: "
+                    f"{getattr(self, '_partition_map_failure', 'unknown')}"
                 )
             # status == "not_applicable" (mock manager): fall through to the
             # legacy path below.
