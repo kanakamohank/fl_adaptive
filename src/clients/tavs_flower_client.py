@@ -242,7 +242,8 @@ class TAVSFlowerClient(NumPyClient):
             oracle_pretrain = None
             needs_pretrain = (
                 getattr(self, "_log_oracle_signals", False)
-                or getattr(self, "_trust_signal", "bvd") == "pretrain_loss_var"
+                or getattr(self, "_trust_signal", "bvd") in (
+                    "pretrain_loss_var", "per_class_loss_var")
             )
             if needs_pretrain:
                 num_classes = (self.config.model_kwargs or {}).get("num_classes", 10)
@@ -268,15 +269,30 @@ class TAVSFlowerClient(NumPyClient):
             # so aggregate_fit's override branch has data to consume. No
             # extra compute: oracle_pretrain was already produced above
             # under the `needs_pretrain` gate.
+            _ts = getattr(self, "_trust_signal", "bvd")
             if (not getattr(self, "_log_oracle_signals", False)
-                    and getattr(self, "_trust_signal", "bvd") == "pretrain_loss_var"
+                    and _ts in ("pretrain_loss_var", "per_class_loss_var")
                     and oracle_pretrain is not None):
-                v = oracle_pretrain.get("pretrain_loss_var")
-                if v is not None:
-                    try:
-                        metrics["pretrain_loss_var"] = float(v)
-                    except (TypeError, ValueError):
-                        pass
+                if _ts == "pretrain_loss_var":
+                    v = oracle_pretrain.get("pretrain_loss_var")
+                    if v is not None:
+                        try:
+                            metrics["pretrain_loss_var"] = float(v)
+                        except (TypeError, ValueError):
+                            pass
+                else:
+                    # Per-class vector: JSON-encode it. Flower's proto accepts
+                    # only bool/bytes/float/int/str, and a raw list raises at
+                    # serde time AFTER fit() returns -- the client-side
+                    # try/except never sees it, Flower reports a failure, and
+                    # the whole fit result is dropped.
+                    pcv = oracle_pretrain.get("per_class_pretrain_var")
+                    if pcv is not None:
+                        import json as _json
+                        try:
+                            metrics["per_class_pretrain_var"] = _json.dumps(list(pcv))
+                        except (TypeError, ValueError):
+                            pass
 
             if getattr(self, "_log_oracle_signals", False):
                 # Update-norm from incoming vs outgoing params (not grad-norm;

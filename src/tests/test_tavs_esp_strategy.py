@@ -1147,6 +1147,134 @@ def test_pretrain_loss_var_keeps_bvd_logged_in_parallel():
     return True
 
 
+def test_per_class_loss_var_drives_trust_and_keeps_bvd():
+    """trust_signal='per_class_loss_var' must (a) override behaviour scores
+    from the cohort-normalised per-class vector, (b) leave BVD computed and
+    logged in parallel, and (c) need no rescale window.
+
+    Clients c0..c4 report per-class variance vectors with a deliberate
+    ordering: c0 lowest everywhere, c4 highest. After normalisation c0 scores
+    0 (most trusted) and c4 scores 1 (least), so the recovered behaviour
+    scores must be strictly decreasing across the five.
+    """
+    print("\nTesting per_class_loss_var drives trust and keeps BVD...")
+    import json as _json
+
+    cfg = DummyConfig()
+    cfg.trust_signal = "per_class_loss_var"
+    cfg.log_oracle_signals = True
+    strategy = TavsEspStrategy(config=cfg)
+    proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+    for p in proxies:
+        strategy.scheduler.join_rounds[p.cid] = -100
+        strategy.scheduler.trust_scores[p.cid] = 0.25
+        strategy.scheduler.clean_streaks[p.cid] = 0
+        strategy.scheduler.last_verified_round[p.cid] = 0
+        strategy.scheduler.appearances_since_verified[p.cid] = 0
+    strategy._round_assignments[1] = {
+        "verified": {p.cid for p in proxies}, "promoted": set(),
+        "decoy": set(), "sampled": {p.cid for p in proxies},
+    }
+    rng = np.random.RandomState(5)
+    results = []
+    for i, p in enumerate(proxies):
+        # Monotonic across clients in every class. Deliberately NO NaN here:
+        # a class that NO client reports has zero span and contributes
+        # nothing to the norm, which caps the worst client below 1.0 and
+        # makes the bounds assertion below a statement about the fixture
+        # rather than about the scoring. NaN handling has its own dedicated
+        # tests in test_per_class_trust_signal.py. Measured on the real
+        # non-IID runs, 100% of classes discriminate (min 90% over 200
+        # rounds), so the all-NaN class is not a case worth encoding here.
+        vec = [float(i)] * 10
+        results.append((p, MockFitRes(
+            parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+            metrics={"is_verified": True, "client_id": p.cid,
+                     "per_class_pretrain_var": _json.dumps(vec)},
+        )))
+    strategy.aggregate_fit(1, results, [])
+
+    # EMA: trust_after = 0.9 * 0.25 + 0.1 * behaviour
+    recovered = {p.cid: (strategy.scheduler.trust_scores[p.cid] - 0.225) / 0.1
+                 for p in proxies}
+    ordered = [recovered[f"c{i}"] for i in range(5)]
+    for a, b in zip(ordered, ordered[1:]):
+        assert a > b + 1e-6, (
+            f"behaviour scores must fall as per-class variance rises; got {ordered}"
+        )
+    assert abs(ordered[0] - 1.0) < 1e-6, (
+        f"lowest-variance client should score 1.0 (fully trusted), got {ordered[0]}"
+    )
+    assert abs(ordered[-1] - 0.0) < 1e-6, (
+        f"highest-variance client should score 0.0, got {ordered[-1]}"
+    )
+
+    # BVD must still be logged in parallel -- the single-run comparison.
+    hist = strategy._oracle_signal_history[1]
+    for p in proxies:
+        for k in ("bvd_behavior_score", "bvd_max_z", "bvd_raw_dist", "bvd_sigma_sq"):
+            assert k in hist[p.cid], (
+                f"{p.cid} missing {k} under per_class_loss_var -- BVD was skipped"
+            )
+    print("✓ per_class_loss_var drives trust monotonically, spans [0,1] with no "
+          "rescale window, and BVD stays logged in parallel")
+    return True
+
+
+def test_per_class_loss_var_ignores_non_reporting_clients():
+    """A client that reports no per-class vector must fall back to BVD's
+    score, exactly as the pretrain_loss_var path does. Scoring it 0 or 1 by
+    default would hand a silent verdict to a client we have no data on."""
+    print("\nTesting per_class_loss_var falls back for non-reporters...")
+    import json as _json
+
+    def _run(signal, reporters):
+        cfg = DummyConfig()
+        cfg.trust_signal = signal
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(5)]
+        for p in proxies:
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25
+            strategy.scheduler.clean_streaks[p.cid] = 0
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        strategy._round_assignments[1] = {
+            "verified": {p.cid for p in proxies}, "promoted": set(),
+            "decoy": set(), "sampled": {p.cid for p in proxies},
+        }
+        rng = np.random.RandomState(5)
+        results = []
+        for i, p in enumerate(proxies):
+            m = {"is_verified": True, "client_id": p.cid}
+            if p.cid in reporters:
+                m["per_class_pretrain_var"] = _json.dumps([float(i)] * 10)
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000) * 0.1).astype(np.float32)]),
+                metrics=m,
+            )))
+        strategy.aggregate_fit(1, results, [])
+        return dict(strategy.scheduler.trust_scores)
+
+    reporters = {"c0", "c1", "c2", "c3"}   # c4 stays silent
+    pc = _run("per_class_loss_var", reporters)
+    bvd = _run("bvd", reporters)
+    assert abs(pc["c4"] - bvd["c4"]) < 1e-9, (
+        f"non-reporting client should match the BVD run bit-for-bit; "
+        f"got {pc['c4']} vs {bvd['c4']}"
+    )
+    # Assert divergence on the HIGHEST-variance reporter, not the lowest.
+    # c0 reports the cohort minimum, so it scores 1.0 -- which coincides with
+    # BVD's inlier default of ~1.0 and would make this assertion vacuous.
+    # c3 is the cohort maximum and scores 0.0, as far from BVD as possible.
+    assert abs(pc["c3"] - bvd["c3"]) > 1e-6, (
+        f"the highest-variance reporter should diverge from the BVD baseline; "
+        f"got {pc['c3']} vs {bvd['c3']}"
+    )
+    print("✓ non-reporting clients fall back to BVD; reporters are overridden")
+    return True
+
+
 def test_oracle_clean_cosine_logged_when_clean_cids_provided():
     """When TavsEspConfig.oracle_clean_client_config_ids is non-empty AND
     oracle logging is on, aggregate_fit logs each verified client's cosine
@@ -1380,7 +1508,10 @@ def main():
         rs19 = test_pretrain_loss_var_keeps_bvd_logged_in_parallel()
         rs20 = test_oracle_clean_cosine_logged_when_clean_cids_provided()
         rs21 = test_pretrain_loss_var_does_not_affect_scheduling_config()
-        assert all(x is True for x in (rs15, rs16, rs17, rs18, rs19, rs20, rs21))
+        rs22 = test_per_class_loss_var_drives_trust_and_keeps_bvd()
+        rs23 = test_per_class_loss_var_ignores_non_reporting_clients()
+        assert all(x is True for x in (rs15, rs16, rs17, rs18, rs19, rs20,
+                                       rs21, rs22, rs23))
 
         if all([success1, success2, success3, success4, success5,
                 rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10,

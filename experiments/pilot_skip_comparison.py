@@ -140,6 +140,9 @@ def _config_tag(args) -> str:
             lo = int(round(float(parts_r[0]) * 100))
             hi = int(round(float(parts_r[1]) * 100))
             parts.append(f"rescale-{lo:02d}-{hi:02d}")
+    # Only tagged for "pretrain_loss_var"; "per_class_loss_var" is
+    # self-normalising and ignores the window entirely, so tagging it would
+    # imply a knob that did nothing.
     pv_rescale = getattr(args, "pretrain_loss_var_rescale", None)
     if pv_rescale and trust_signal == "pretrain_loss_var":
         parts_r = [p.strip() for p in str(pv_rescale).split(",") if p.strip()]
@@ -291,17 +294,26 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         # signal the "midpoint" is the raw midpoint, and the rescaled
         # trust at that midpoint is 1 - 0.5 = 0.5, same as SLF's midpoint
         # by symmetry -- so the arithmetic below needs only the right lo/hi.
-        if tavs_config.trust_signal == "pretrain_loss_var":
-            win_lo, win_hi = pv_lo, pv_hi
-            invert = True
+        if tavs_config.trust_signal == "per_class_loss_var":
+            # Cohort-relative and already bounded in [0, 1]: the median
+            # client sits at the middle of the cohort by construction, so
+            # there is no window to mis-size and the projected midpoint is
+            # 0.5. Reported as such rather than skipping the preflight, so
+            # the theta_low check below still runs.
+            win_lo, win_hi, invert = 0.0, 1.0, False
+            rescaled_mid = 0.5
         else:
-            win_lo, win_hi = rescale_lo, rescale_hi
-            invert = False
-        raw_mid = (win_lo + win_hi) / 2.0
-        rescaled_mid = ((raw_mid - win_lo) / (win_hi - win_lo)
-                        if win_hi > win_lo else 0.5)
-        if invert:
-            rescaled_mid = 1.0 - rescaled_mid
+            if tavs_config.trust_signal == "pretrain_loss_var":
+                win_lo, win_hi = pv_lo, pv_hi
+                invert = True
+            else:
+                win_lo, win_hi = rescale_lo, rescale_hi
+                invert = False
+            raw_mid = (win_lo + win_hi) / 2.0
+            rescaled_mid = ((raw_mid - win_lo) / (win_hi - win_lo)
+                            if win_hi > win_lo else 0.5)
+            if invert:
+                rescaled_mid = 1.0 - rescaled_mid
         projected = _probe.scheduler.expected_trust_from_participation(
             expected_raw=rescaled_mid,
             total_rounds=args.rounds,
@@ -616,7 +628,8 @@ def main():
                              "majority), random1/2/3 ~17-18%% (single worker), worst "
                              "~40%%. Ignored unless --label-noise-type=cifar10n.")
     parser.add_argument("--trust-signal", default="bvd",
-                        choices=("bvd", "small_loss_fraction", "pretrain_loss_var"),
+                        choices=("bvd", "small_loss_fraction", "pretrain_loss_var",
+                                 "per_class_loss_var"),
                         help="Which signal drives the trust EMA. 'bvd' (default) "
                              "uses the BVD outlier Z-score. 'small_loss_fraction' "
                              "swaps in a per-client scalar: the fraction of a "
@@ -634,7 +647,16 @@ def main():
                              "see --pretrain-loss-var-rescale. BVD still runs "
                              "and its diagnostics stay in scheduling_history "
                              "regardless, so the two can be compared on one "
-                             "run.")
+                             "run. "
+                             "'per_class_loss_var' computes that variance "
+                             "SEPARATELY PER CLASS and normalises each class "
+                             "against the rest of the round's cohort "
+                             "(FedNoRo IJCAI 2023). Pooled variance collapses "
+                             "under class imbalance -- measured AUROC 0.734 on "
+                             "Dirichlet(0.3), and 0.436 on milder noise -- "
+                             "where the per-class form reaches 0.899 on the "
+                             "same logs. Self-normalising, so "
+                             "--pretrain-loss-var-rescale does not apply.")
     parser.add_argument("--small-loss-rescale", default=None,
                         help="Optional 'lo,hi' linear rescale of the raw "
                              "small_loss_fraction value before it enters the "

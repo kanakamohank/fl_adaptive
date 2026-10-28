@@ -41,7 +41,11 @@ import argparse
 import json
 import math
 import statistics
+import sys
 from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
+from src.tavs_v2.per_class_score import per_class_cohort_scores
 
 
 def pairwise_counts(scored):
@@ -69,42 +73,14 @@ def pairwise_counts(scored):
 
 
 def fednoro_scores(cohort):
-    """cohort: list of (cid, per_class_loss_list). Returns {cid: score}.
+    """Cohort-relative per-class score; see src/tavs_v2/per_class_score.py.
 
-    Implements FedNoRo Sec 4.1 steps 1-3 (see module docstring).
+    Imported rather than reimplemented so the number measured here is the
+    same number the strategy acts on under trust_signal='per_class_loss_var'.
+    An earlier copy of this logic lived here; the duplicate was removed when
+    the signal moved into the trust path.
     """
-    if not cohort:
-        return {}
-    num_classes = len(cohort[0][1])
-
-    # Step 1: fill a missing class with the cohort minimum for that class.
-    per_class_present = {c: [] for c in range(num_classes)}
-    for _cid, vec in cohort:
-        for c, v in enumerate(vec):
-            if v is not None and not math.isnan(v):
-                per_class_present[c].append(v)
-    filled = {}
-    for cid, vec in cohort:
-        row = []
-        for c, v in enumerate(vec):
-            if v is None or math.isnan(v):
-                row.append(min(per_class_present[c]) if per_class_present[c] else 0.0)
-            else:
-                row.append(v)
-        filled[cid] = row
-
-    # Step 2: min-max normalise each class across the cohort.
-    lo = [min(filled[cid][c] for cid in filled) for c in range(num_classes)]
-    hi = [max(filled[cid][c] for cid in filled) for c in range(num_classes)]
-    norm = {}
-    for cid, row in filled.items():
-        norm[cid] = [
-            ((row[c] - lo[c]) / (hi[c] - lo[c])) if hi[c] > lo[c] else 0.0
-            for c in range(num_classes)
-        ]
-
-    # Step 3: L2 norm of the normalised vector.
-    return {cid: math.sqrt(sum(v * v for v in row)) for cid, row in norm.items()}
+    return per_class_cohort_scores(cohort)
 
 
 def analyse_seed(path):
