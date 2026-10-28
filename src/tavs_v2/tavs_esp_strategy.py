@@ -18,6 +18,7 @@ from flwr.server.strategy import Strategy
 from src.tavs_v2.algo1_tavs_scheduler import TavsScheduler
 from src.tavs_v2.algo2_esp_projection import EphemeralStructuredProjection
 from src.tavs_v2.algo3_bvd_aggregation import BlockVarianceDetector, UnifiedBayesianAggregator
+from src.tavs_v2.per_class_score import decode_vector, per_class_cohort_scores
 
 logger = logging.getLogger(__name__)
 
@@ -166,6 +167,20 @@ class TavsEspConfig:
     #                         computed and logged in scheduling_history even
     #                         under this signal, so the two can be compared
     #                         side by side without a second run.
+    #   "per_class_loss_var"  -- the same per-sample loss variance, but
+    #                         computed SEPARATELY PER CLASS and normalised
+    #                         against what the rest of the cohort reports for
+    #                         that same class (FedNoRo IJCAI 2023 Sec. 4.1).
+    #                         Pooled variance collapses under class imbalance
+    #                         -- a clean client holding rare classes shows a
+    #                         wide spread that mimics a noisy one -- which is
+    #                         why it scores AUROC 0.734 on Dirichlet(0.3) and
+    #                         inverts to 0.436 on milder noise. Measured on
+    #                         the same logs, the per-class form reaches 0.899.
+    #                         Self-normalising: needs no rescale window,
+    #                         unlike "pretrain_loss_var". Cohort-relative, so
+    #                         it assumes each round's cohort is a mix of clean
+    #                         and noisy clients -- see per_class_score.py.
     trust_signal: str = "bvd"
     # Optional linear rescaling of the raw small_loss_fraction (val-accuracy)
     # value BEFORE it enters the trust EMA. Needed because raw val-accuracy
@@ -923,6 +938,36 @@ class TavsEspStrategy(Strategy):
                         f"overrode {overridden}/{len(V_ids)} verified clients' "
                         f"behavior_score from BVD to inverted pretrain variance "
                         f"(rescale: [{lo:.2f}, {hi:.2f}] -> trust [1, 0])")
+        elif trust_signal == "per_class_loss_var":
+            # Per-class variance, normalised against the cohort for each
+            # class (see per_class_score.py for why, and for the
+            # cohort-relative caveat). Higher score => more anomalous, so
+            # trust is 1 - score. Needs no rescale window: the score is
+            # already bounded in [0, 1] by construction.
+            #
+            # The normalising cohort is EVERY client that returned this
+            # round, not just the verified ones: a wider cohort gives a
+            # better per-class min/max estimate, and it matches how the
+            # offline analysis measured AUROC 0.899 on this signal. The
+            # OVERRIDE still applies only to verified clients, because trust
+            # updates only on verification.
+            cohort = []
+            for proxy, fit_res in results:
+                vec = decode_vector((fit_res.metrics or {}).get("per_class_pretrain_var"))
+                if vec:
+                    cohort.append((proxy.cid, vec))
+            pc_scores = per_class_cohort_scores(cohort)
+            overridden = 0
+            for proxy, _fit_res in results:
+                cid = proxy.cid
+                if cid not in V_ids or cid not in pc_scores:
+                    continue
+                behavior_scores[cid] = 1.0 - pc_scores[cid]
+                overridden += 1
+            logger.info(f"Round {server_round} trust_signal='per_class_loss_var': "
+                        f"overrode {overridden}/{len(V_ids)} verified clients' "
+                        f"behavior_score from BVD to inverted per-class variance "
+                        f"(cohort of {len(cohort)} reporting clients)")
 
         if getattr(self.config, "soft_outlier_weighting", True):
             # Everyone verified contributes; behaviour_score sets how much.
