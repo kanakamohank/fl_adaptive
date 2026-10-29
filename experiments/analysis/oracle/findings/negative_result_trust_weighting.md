@@ -1,17 +1,22 @@
-# Re-weighting clients by a reliability signal does not help under non-IID label noise
+# Client re-weighting by a reliability signal helps under IID and hurts under non-IID
 
-**Status:** complete, negative. Four configurations × 5 seeds. Mechanism open.
+**Status:** complete. Six configurations × 5 seeds. Mechanism open.
 
 ---
 
 ## 1. Claim
 
-> Down-weighting clients by a loss-based reliability signal does not improve
-> accuracy under non-IID label noise, and **improving the signal makes it worse**.
+> Down-weighting clients by a loss-based reliability signal **improves**
+> accuracy under an IID partition and **degrades** it under a Dirichlet(0.3)
+> partition. The sign of the effect is set by data heterogeneity, not by the
+> quality of the signal — under non-IID, **improving the signal makes the harm
+> worse**.
 
-The second half is what makes this worth reporting. The obvious objection to
-any negative result here is "your detector was too weak". We raised detection
-from near-chance to 17/20 and the harm **doubled**.
+Two things make this worth reporting. First, the sign flip is total: across
+three arms × 5 seeds, **15/15 comparisons improve under IID and 15/15 degrade
+under non-IID**, with no exceptions. Second, the obvious objection to the
+negative half — "your detector was too weak" — is ruled out: we raised
+detection from near-chance to 17/20 and the harm **doubled**.
 
 ---
 
@@ -20,7 +25,7 @@ from near-chance to 17/20 and the harm **doubled**.
 | | |
 |---|---|
 | Dataset | CIFAR-10, labels from CIFAR-10N `worst` (~40% annotator error) |
-| Partition | Dirichlet, α = 0.3 (non-IID) |
+| Partition | **two settings compared**: IID, and Dirichlet α = 0.3 |
 | Noise | 40% of clients noisy, `label_noise_rate = 1.0` → ~16% of all labels wrong |
 | Federation | 50 clients, 10 sampled per round, 40 rounds, 5 local epochs |
 | Model | small CIFAR CNN (~1.2M params) |
@@ -35,6 +40,30 @@ noisy client contributes less.
 ---
 
 ## 3. Main result
+
+### 3a. The sign flip
+
+Effect of enabling the weighting, paired by seed, all three arms:
+
+| partition | arm | weighting OFF | weighting ON | change | t | seeds improved |
+|---|---|---|---|---|---|---|
+| **IID** | full verify | 0.7295 | 0.7406 | **+0.0110** | +9.53 | **5/5** |
+| **IID** | TAVS | 0.7290 | **0.7415** | **+0.0125** | +11.42 | **5/5** |
+| **IID** | random | 0.7278 | 0.7326 | **+0.0048** | +3.37 | **5/5** |
+| non-IID | full verify | 0.3073 | 0.2994 | −0.0079 | −3.47 | **0/5** |
+| non-IID | TAVS | 0.3076 | 0.3013 | −0.0063 | −8.58 | **0/5** |
+| non-IID | random | 0.3073 | 0.2666 | −0.0407 | −6.10 | **0/5** |
+
+The IID pair differs in **exactly one** configuration field
+(`disable_trust_weighted_aggregation`), verified programmatically against the
+saved configs; the non-IID pair likewise.
+
+Under IID with weighting enabled, TAVS reaches **0.7415** — above full
+verification (0.7406), above random skip (0.7326), and **+0.0125 above the
+unweighted baseline**. This is the one configuration in which the system
+delivers what it was designed to.
+
+### 3b. Under non-IID, a better detector makes it worse
 
 | config | detector AUROC | detection (of 20 noisy) | TAVS late10 | vs baseline |
 |---|---|---|---|---|
@@ -132,10 +161,18 @@ mechanically lowers its measured irreplaceability. Splitting by true status:
 Among noisy clients, the more irreplaceable ones are penalised slightly
 harder — the harmful case. Clean irreplaceable clients are not penalised.
 
-**Verdict: inconclusive.** Every sign points the predicted way, but the
-magnitudes (entropy −0.04, rare-class share −0.004, behaviour −0.03) are too
-small to obviously account for a −0.0139 accuracy loss. **The mechanism
-remains unexplained.** What is established is the effect, not its cause.
+**Verdict: inconclusive at the level of direct measurement.** Every sign
+points the predicted way, but the magnitudes (entropy −0.04, rare-class share
+−0.004, behaviour −0.03) are too small to obviously account for a −0.0139
+accuracy loss.
+
+**However, the IID/non-IID contrast in §3a is the hypothesis's central
+prediction, and it holds exactly.** The coverage account predicts harm only
+where client data stops overlapping — and the effect is positive in every IID
+arm and negative in every non-IID arm, 15/15 each way. That is strong
+circumstantial support even though the direct proxies were too blunt to
+confirm it. **The mechanism is consistent with the evidence but not
+established.**
 
 ---
 
@@ -143,9 +180,8 @@ remains unexplained.** What is established is the effect, not its cause.
 
 - **One dataset, one partition setting, one noise type.** CIFAR-10 / CIFAR-10N
   `worst` / Dirichlet α = 0.3. No claim beyond this.
-- **No IID control for the weighting.** We never ran IID with the weighting
-  off, so we **cannot** claim "helps under IID, hurts under non-IID". Only the
-  non-IID result is established.
+- **One partition parameter.** The contrast is IID versus Dirichlet α = 0.3.
+  Whether the sign flips gradually with α, or at some threshold, is untested.
 - **N = 50 clients, 10 sampled.** Not tested at larger scale.
 - **Absolute accuracy is low (~0.30).** Non-IID plus 16% corrupted labels
   nearly breaks the model; chance is 0.10. A result measured on a badly
@@ -157,9 +193,10 @@ remains unexplained.** What is established is the effect, not its cause.
 
 ## 8. What would strengthen this
 
-1. **IID control with the weighting off.** One run; turns the central claim
-   from "harmful under non-IID" into "harmful under non-IID, helpful under
-   IID", which is a sharper and more useful statement.
+1. **A partition sweep (α = 0.1, 0.3, 1.0, IID).** The sign flip is
+   established at the two endpoints; locating where it crosses zero would turn
+   a binary contrast into a dose-response curve, which is far stronger
+   evidence for heterogeneity being the cause.
 2. **Direct mechanism test.** Hold out a known-rare class and measure
    per-class accuracy with and without weighting. The aggregate-level proxies
    used here were too blunt.
@@ -194,9 +231,10 @@ python3 experiments/analysis/oracle/trust_vs_imbalance.py
 python3 experiments/analysis/oracle/mechanism_coverage_loss.py
 ```
 
-Results directories: `tavs_integration_v3_noniid_perclass` (pooled signal,
-weighted), `v4_noniid_notwagg` (unweighted baseline),
-`v5_noniid_perclass_trust` (per-class signal, weighted).
+Results directories: `tavs_integration_v2_iid_worst_twagg` (IID, weighted),
+`v6_iid_notwagg` (IID, unweighted), `v3_noniid_perclass` (non-IID, pooled
+signal, weighted), `v4_noniid_notwagg` (non-IID, unweighted baseline),
+`v5_noniid_perclass_trust` (non-IID, per-class signal, weighted).
 
 ---
 
