@@ -7,16 +7,19 @@
 ## 1. Claim
 
 > Down-weighting clients by a loss-based reliability signal **improves**
-> accuracy under an IID partition and **degrades** it under a Dirichlet(0.3)
-> partition. The sign of the effect is set by data heterogeneity, not by the
-> quality of the signal — under non-IID, **improving the signal makes the harm
-> worse**.
+> accuracy only under a **perfectly IID** partition. At Dirichlet α = 1.0 —
+> mild heterogeneity, the gentlest non-IID setting commonly tested — the
+> effect has already **reversed**, and it deepens as skew increases. The sign
+> is set by data heterogeneity, not by the quality of the signal: under
+> non-IID, **improving the signal makes the harm worse**.
 
-Two things make this worth reporting. First, the sign flip is total: across
-three arms × 5 seeds, **15/15 comparisons improve under IID and 15/15 degrade
-under non-IID**, with no exceptions. Second, the obvious objection to the
-negative half — "your detector was too weak" — is ruled out: we raised
-detection from near-chance to 17/20 and the harm **doubled**.
+Three things make this worth reporting. First, the sign flip is total: across
+three arms × 5 seeds at each of three partition settings, **15/15 comparisons
+improve under IID and 30/30 degrade under non-IID**, with no exceptions.
+Second, the flip occurs at the *first* departure from uniformity, not only
+under severe skew. Third, the obvious objection to the negative half — "your
+detector was too weak" — is ruled out: we raised detection from near-chance
+to 17/20 and the harm **doubled**.
 
 ---
 
@@ -50,13 +53,33 @@ Effect of enabling the weighting, paired by seed, all three arms:
 | **IID** | full verify | 0.7295 | 0.7406 | **+0.0110** | +9.53 | **5/5** |
 | **IID** | TAVS | 0.7290 | **0.7415** | **+0.0125** | +11.42 | **5/5** |
 | **IID** | random | 0.7278 | 0.7326 | **+0.0048** | +3.37 | **5/5** |
-| non-IID | full verify | 0.3073 | 0.2994 | −0.0079 | −3.47 | **0/5** |
-| non-IID | TAVS | 0.3076 | 0.3013 | −0.0063 | −8.58 | **0/5** |
-| non-IID | random | 0.3073 | 0.2666 | −0.0407 | −6.10 | **0/5** |
+| α = 1.0 | full verify | 0.3646 | 0.3600 | −0.0046 | −3.22 | **0/5** |
+| α = 1.0 | TAVS | 0.3645 | 0.3591 | −0.0055 | −4.28 | **0/5** |
+| α = 1.0 | random | 0.3649 | 0.3395 | −0.0254 | −11.01 | **0/5** |
+| α = 0.3 | full verify | 0.3073 | 0.2994 | −0.0079 | −3.47 | **0/5** |
+| α = 0.3 | TAVS | 0.3076 | 0.3013 | −0.0063 | −8.58 | **0/5** |
+| α = 0.3 | random | 0.3073 | 0.2666 | −0.0407 | −6.10 | **0/5** |
 
-The IID pair differs in **exactly one** configuration field
+Each OFF/ON pair differs in **exactly one** configuration field
 (`disable_trust_weighted_aggregation`), verified programmatically against the
-saved configs; the non-IID pair likewise.
+saved configs. Paired seeds were confirmed to hold the **identical** set of 20
+noisy clients on both sides, so the pairing is valid.
+
+**Where the sign flips.** α = 1.0 is mild heterogeneity — the gentlest non-IID
+setting in common use, with α = 0.3 the aggressive one. The benefit is already
+gone at α = 1.0, so the crossover lies between IID and α = 1.0, not between
+α = 1.0 and α = 0.3. The harm then deepens with skew, most visibly on random
+skip (+0.0048 → −0.0254 → −0.0407).
+
+**One measured caveat.** Random skip's rate is matched to TAVS's *observed*
+rate within each run, so a shift in TAVS's rate moves random's too. Only the
+IID pair shifted (TAVS 34.5% → 36.5%, random 34.7% → 36.4%); α = 1.0 and
+α = 0.3 shifted by ≤ 0.3 points. Scale of the contamination: in the
+weighting-OFF data a **34-point** skip difference (full verify at 0% versus
+TAVS at 34.5%) moved accuracy by **0.0005**, so a 1.6-point shift is worth
+roughly **0.00002** — about 200× smaller than the +0.0048 random delta it
+could affect, and it does not touch the two non-IID settings that carry the
+central finding.
 
 Under IID with weighting enabled, TAVS reaches **0.7415** — above full
 verification (0.7406), above random skip (0.7326), and **+0.0125 above the
@@ -180,8 +203,9 @@ established.**
 
 - **One dataset, one partition setting, one noise type.** CIFAR-10 / CIFAR-10N
   `worst` / Dirichlet α = 0.3. No claim beyond this.
-- **One partition parameter.** The contrast is IID versus Dirichlet α = 0.3.
-  Whether the sign flips gradually with α, or at some threshold, is untested.
+- **Three partition points, not a curve.** IID, α = 1.0 and α = 0.3. The sign
+  flips between IID and α = 1.0; exactly where in that gap, and whether the
+  decay is gradual or abrupt, is unmeasured.
 - **N = 50 clients, 10 sampled.** Not tested at larger scale.
 - **Absolute accuracy is low (~0.30).** Non-IID plus 16% corrupted labels
   nearly breaks the model; chance is 0.10. A result measured on a badly
@@ -193,17 +217,26 @@ established.**
 
 ## 8. What would strengthen this
 
-1. **A partition sweep (α = 0.1, 0.3, 1.0, IID).** The sign flip is
-   established at the two endpoints; locating where it crosses zero would turn
-   a binary contrast into a dose-response curve, which is far stronger
-   evidence for heterogeneity being the cause.
-2. **Direct mechanism test.** Hold out a known-rare class and measure
+1. **Close the IID → α = 1.0 gap** (α = 3.0 or 5.0, i.e. very mild skew).
+   The sign is known to flip inside that interval. Showing whether the benefit
+   decays gradually or vanishes at the first departure from uniformity decides
+   between two quite different claims, and the latter is the more striking.
+2. **A second noise model.** Everything here uses CIFAR-10N `worst` (real
+   human annotation errors). Repeating the contrast with uniform or pair-flip
+   synthetic noise at a matched effective rate would show whether the
+   interaction depends on the noise process. No new code is required.
+3. **Direct mechanism test.** Hold out a known-rare class and measure
    per-class accuracy with and without weighting. The aggregate-level proxies
    used here were too blunt.
-3. **Milder noise.** At ~16% corruption the model is near collapse. The same
+4. **Milder noise.** At ~16% corruption the model is near collapse. The same
    comparison at 3–7% would show whether the harm is specific to severe noise.
-4. **A second partition setting** (α = 0.1 and α = 1.0) to establish whether
-   the harm scales with skew.
+5. **A second dataset.** CIFAR-100 is supported in the codebase but did not
+   train under Dirichlet(0.3) at 16% noise with this model: accuracy stayed at
+   chance (0.0121 against 0.0100) for all 40 rounds while loss rose from
+   `ln(100)` = 4.606 to 6.43. An earlier CIFAR-100 run under IID at 15% noise
+   reached 0.32, so the dataset path works; the non-IID high-noise corner is
+   out of reach for a ~1.2M-parameter CNN. Reaching it would need a larger
+   backbone or many more rounds.
 
 ---
 
