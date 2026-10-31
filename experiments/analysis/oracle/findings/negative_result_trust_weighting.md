@@ -35,6 +35,13 @@ to 17/20 and the harm **doubled**.
 | Metric | mean test accuracy over the last 10 rounds ("late10"), 5 seeds, paired |
 | Arms | full verification / TAVS skip / random skip at matched skip rate |
 
+**Mechanisms actually exercised.** Across the four weighted runs (800
+scheduled rounds), decoy verification fired **135** times and promoted-update
+clipping **20** times; peak client trust reached **0.938**, well past the
+`theta_high = 0.70` tier threshold. The cosine filter never fired because it
+is disabled by configuration (`cosine_filter_promoted = False`). So the
+scheduler's tier machinery is live in these results, not dormant.
+
 The weighting under test: when enabled, a verified client contributes
 `behaviour_score × num_examples` to the aggregate instead of `num_examples`
 alone. `behaviour_score` is the reliability signal, inverted so a suspected
@@ -278,8 +285,17 @@ under skew, which this model does not.
 - **Absolute accuracy under non-IID is low (~0.30 against 0.10 chance).**
   Examined in §7: the harm persists while accuracy doubles, so a weak model
   does not explain it, but no healthy non-IID measurement exists either.
-- **Honest-but-noisy threat model only.** No adversarial clients were present
-  in any run (`byzantine_fraction = 0.0` throughout).
+- **Honest-but-noisy threat model only.** Every run reported here has
+  `byzantine_fraction = 0.0`: the noisy clients make labelling mistakes, they
+  do not craft malicious updates. Six older runs elsewhere in the repository
+  (`verification_strategy_comparison/`, `clip_factor_sweep/`) do include
+  layerwise and distributed attackers at 15–25% Byzantine, but they use 20
+  clients, 20 rounds and a single seed, so they are not comparable with
+  anything here and are not drawn on.
+- **The signal in use cannot see model poisoning.** `pretrain_loss_var` is
+  computed on a client's own data before local training, so an attacker with
+  clean data that corrupts its update afterwards reports a normal value.
+  Nothing in this document speaks to adversarial robustness.
 
 ---
 
