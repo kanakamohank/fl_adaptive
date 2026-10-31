@@ -199,7 +199,75 @@ established.**
 
 ---
 
-## 7. Scope limits
+## 7. Is the harm just a weak baseline?
+
+The strongest objection to §3a is that heterogeneity does not only flip the
+weighting's sign — it also wrecks the model. Holding rounds, noise and
+weighting fixed and changing **only** the partition:
+
+| partition | TAVS accuracy, weighting OFF |
+|---|---|
+| IID | **0.7290** |
+| α = 1.0 | **0.3645** |
+
+Mild heterogeneity alone halves accuracy before noise or weighting enter. So
+a reviewer can reasonably ask whether the weighting hurts *because data is
+heterogeneous*, or merely *because the model is bad* — these move together.
+
+### 7a. Trying to fix the baseline: client drift is not the bottleneck
+
+Local drift between averaging rounds is the textbook cause of FedAvg
+degrading under skew, and the textbook fix is to average more often. Tested
+at α = 1.0, holding total training work constant (learning rate unchanged, so
+the comparison is not confounded by step size):
+
+| config | rounds × local epochs | total passes | TAVS late10 |
+|---|---|---|---|
+| original | 40 × 5 | 200 | 0.3645 |
+| more frequent averaging | 100 × 2 | 200 | **0.3337** |
+
+Averaging 2.5× more often made it slightly **worse**, and the curve had
+flattened by the end (+0.0005 over the final ten rounds). **Client drift is
+not what limits this model under heterogeneity.** The remaining candidates —
+a larger backbone, more clients per round, or an algorithmic fix such as
+FedProx or SCAFFOLD — are each either a separate project or a reimplementation
+of published work, and were not pursued.
+
+### 7b. The harm does not fade as the model improves
+
+If a weak model were the cause, the harm should shrink as training lifts
+accuracy. It does not. Weighting effect measured at four points during
+training:
+
+| partition | window | baseline accuracy | weighting effect |
+|---|---|---|---|
+| IID | r1–10 | 0.4743 | +0.0010 |
+| IID | r11–20 | 0.6347 | **+0.0122** |
+| IID | r21–30 | 0.7007 | **+0.0126** |
+| IID | r31–40 | 0.7290 | **+0.0125** |
+| α = 0.3 | r1–10 | 0.1596 | **−0.0067** |
+| α = 0.3 | r11–20 | 0.2297 | −0.0022 |
+| α = 0.3 | r21–30 | 0.2761 | −0.0026 |
+| α = 0.3 | r31–40 | 0.3076 | **−0.0063** |
+
+Under α = 0.3 the baseline nearly **doubles** (0.16 → 0.31) while the effect
+stays negative in all four windows, with no trend toward zero. The simple
+form of the objection — "too weak to benefit" — is not supported.
+
+The two settings also differ in *timing*. Under IID the benefit takes 10–20
+rounds to appear (+0.0010 → +0.0122) as the trust average accumulates; under
+non-IID the harm is present in the first ten rounds. Different signatures,
+suggesting the two are not the same mechanism with opposite sign.
+
+**What remains unresolved.** Every non-IID measurement sits between 0.16 and
+0.37 accuracy. We have never observed a *healthy* non-IID model, so the
+confound between heterogeneity and baseline quality is **weakened, not
+broken**. Separating them cleanly needs a federated setup that trains well
+under skew, which this model does not.
+
+---
+
+## 8. Scope limits
 
 - **One dataset, one partition setting, one noise type.** CIFAR-10 / CIFAR-10N
   `worst` / Dirichlet α = 0.3. No claim beyond this.
@@ -207,30 +275,34 @@ established.**
   flips between IID and α = 1.0; exactly where in that gap, and whether the
   decay is gradual or abrupt, is unmeasured.
 - **N = 50 clients, 10 sampled.** Not tested at larger scale.
-- **Absolute accuracy is low (~0.30).** Non-IID plus 16% corrupted labels
-  nearly breaks the model; chance is 0.10. A result measured on a badly
-  damaged model is weaker than one measured on a healthy one.
+- **Absolute accuracy under non-IID is low (~0.30 against 0.10 chance).**
+  Examined in §7: the harm persists while accuracy doubles, so a weak model
+  does not explain it, but no healthy non-IID measurement exists either.
 - **Honest-but-noisy threat model only.** No adversarial clients were present
   in any run (`byzantine_fraction = 0.0` throughout).
 
 ---
 
-## 8. What would strengthen this
+## 9. What would strengthen this
 
-1. **Close the IID → α = 1.0 gap** (α = 3.0 or 5.0, i.e. very mild skew).
+1. **A federated setup that trains well under skew** (larger backbone, more
+   clients per round, or FedProx/SCAFFOLD). This is the one change that would
+   fully break the confound in §7. More frequent averaging has already been
+   ruled out.
+2. **Close the IID → α = 1.0 gap** (α = 3.0 or 5.0, i.e. very mild skew).
    The sign is known to flip inside that interval. Showing whether the benefit
    decays gradually or vanishes at the first departure from uniformity decides
    between two quite different claims, and the latter is the more striking.
-2. **A second noise model.** Everything here uses CIFAR-10N `worst` (real
+3. **A second noise model.** Everything here uses CIFAR-10N `worst` (real
    human annotation errors). Repeating the contrast with uniform or pair-flip
    synthetic noise at a matched effective rate would show whether the
    interaction depends on the noise process. No new code is required.
-3. **Direct mechanism test.** Hold out a known-rare class and measure
+4. **Direct mechanism test.** Hold out a known-rare class and measure
    per-class accuracy with and without weighting. The aggregate-level proxies
    used here were too blunt.
-4. **Milder noise.** At ~16% corruption the model is near collapse. The same
+5. **Milder noise.** At ~16% corruption the model is near collapse. The same
    comparison at 3–7% would show whether the harm is specific to severe noise.
-5. **A second dataset.** CIFAR-100 is supported in the codebase but did not
+6. **A second dataset.** CIFAR-100 is supported in the codebase but did not
    train under Dirichlet(0.3) at 16% noise with this model: accuracy stayed at
    chance (0.0121 against 0.0100) for all 40 rounds while loss rose from
    `ln(100)` = 4.606 to 6.43. An earlier CIFAR-100 run under IID at 15% noise
@@ -240,7 +312,7 @@ established.**
 
 ---
 
-## 9. Reproduction
+## 10. Reproduction
 
 ```bash
 # baseline: weighting off
@@ -271,7 +343,7 @@ signal, weighted), `v4_noniid_notwagg` (non-IID, unweighted baseline),
 
 ---
 
-## 10. Secondary observation: which statistic, when
+## 11. Secondary observation: which statistic, when
 
 A side finding from the same logs. Comparing per-class **mean** loss
 (FedNoRo's statistic) against per-class **variance** (ours):
