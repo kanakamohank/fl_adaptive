@@ -611,6 +611,222 @@ def test_disable_trust_weighted_aggregation_flag_changes_aggregate():
     return True
 
 
+def test_trust_weighting_start_round_delays_weighting():
+    """`trust_weighting_start_round` must gate the WEIGHT and nothing else.
+
+    Three things have to hold for the FedCNI-style switching-round arm to
+    mean what the experiment claims:
+
+      1. Before the start round, the aggregate is bit-identical to a
+         weighting-OFF run. If it merely "mostly matches", the delay is
+         leaking weight and the arm is not a clean control.
+      2. At and after the start round, the aggregate matches a
+         weighting-ON-from-round-1 run. A gate that stayed latched shut
+         would silently turn the arm into plain FedAvg and the comparison
+         would be against the wrong thing in the direction that flatters
+         the finding.
+      3. The default is 1, i.e. no delay, so every run already on disk
+         keeps its meaning.
+
+    Point 2 is checked by driving the SAME strategy object through rounds
+    so trust state is shared; the gate is a pure function of
+    server_round, so a per-round aggregate comparison is the whole claim.
+    """
+    print("\nTesting trust_weighting_start_round gates only the weight...")
+
+    from src.tavs_v2 import TavsEspConfig
+    default = TavsEspConfig()
+    assert getattr(default, "trust_weighting_start_round", None) == 1, (
+        "trust_weighting_start_round default must stay 1 (weight from round "
+        "1) or every existing twagg result silently changes meaning"
+    )
+
+    START = 5
+
+    def _mk(twagg_on: bool, start_round: int):
+        cfg = DummyConfig()
+        cfg.disable_trust_weighted_aggregation = not twagg_on
+        cfg.trust_weighting_start_round = start_round
+        # Fixed window so behaviour scores are deterministic and spread,
+        # which is what makes weighted and unweighted aggregates differ.
+        cfg.trust_signal = "pretrain_loss_var"
+        cfg.pretrain_loss_var_rescale_lo = 0.5
+        cfg.pretrain_loss_var_rescale_hi = 3.0
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(6)]
+        for i, p in enumerate(proxies):
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25 + 0.1 * i
+            strategy.scheduler.clean_streaks[p.cid] = 3
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        return strategy, proxies
+
+    def _results(proxies, rnd):
+        # Same RandomState seed per round across arms, so the only thing
+        # that can differ between arms is the aggregation weight.
+        rng = np.random.RandomState(100 + rnd)
+        out = []
+        for i, p in enumerate(proxies):
+            scale = 50.0 if i < 2 else 0.1
+            arr = (rng.randn(150000) * scale).astype(np.float32)
+            out.append((p, MockFitRes(
+                parameters=MockParameters([arr]),
+                # Spread of raw variances -> spread of behaviour scores.
+                metrics={"is_verified": True, "client_id": f"honest_{i:02d}",
+                         "pretrain_loss_var": 0.5 + 0.5 * i},
+            )))
+        return out
+
+    def _trace(twagg_on, start_round, n_rounds=6):
+        strategy, proxies = _mk(twagg_on, start_round)
+        agg = {}
+        for rnd in range(1, n_rounds + 1):
+            strategy._round_assignments[rnd] = {
+                "verified": {p.cid for p in proxies},
+                "promoted": set(), "decoy": set(),
+                "sampled": {p.cid for p in proxies},
+            }
+            params, _m = strategy.aggregate_fit(rnd, _results(proxies, rnd), [])
+            agg[rnd] = mock_parameters_to_ndarrays(params)[0].ravel()
+        return agg
+
+    off = _trace(twagg_on=False, start_round=1)
+    on_now = _trace(twagg_on=True, start_round=1)
+    delayed = _trace(twagg_on=True, start_round=START)
+
+    # Sanity: weighting on vs off must differ at round 1, else the test
+    # cannot distinguish the delay from a no-op.
+    base = float(np.abs(on_now[1] - off[1]).sum())
+    assert base > 1e-4, (
+        f"weighting on vs off is indistinguishable at round 1 (L1={base:.2e}); "
+        f"the fixture cannot detect a delay"
+    )
+
+    # 1. Before START: identical to weighting OFF, exactly.
+    for rnd in range(1, START):
+        d = float(np.abs(delayed[rnd] - off[rnd]).sum())
+        assert d == 0.0, (
+            f"round {rnd} < start {START}: delayed arm differs from "
+            f"weighting-OFF by L1={d:.3e}; the gate is leaking weight"
+        )
+
+    # 2. At START: matches weighting ON. Compared against the on-from-1
+    #    arm, whose trust EMA has had the same inputs every round (the
+    #    behaviour score comes from the reported variance, not from the
+    #    aggregate), so the weights at START are the same in both arms.
+    d_on = float(np.abs(delayed[START] - on_now[START]).sum())
+    d_off = float(np.abs(delayed[START] - off[START]).sum())
+    assert d_off > 1e-4, (
+        f"round {START} == start: delayed arm still matches weighting-OFF "
+        f"(L1={d_off:.2e}) -- the gate never opened"
+    )
+    assert d_on < 1e-4, (
+        f"round {START} == start: delayed arm should match weighting-ON "
+        f"(L1 vs on={d_on:.2e}, vs off={d_off:.2e})"
+    )
+
+    # 3. A start round of 0 or a negative value means "from round 1", not
+    #    a crash and not an always-closed gate.
+    zero = _trace(twagg_on=True, start_round=0, n_rounds=1)
+    assert float(np.abs(zero[1] - on_now[1]).sum()) < 1e-9, (
+        "start_round<=1 must behave as start_round=1"
+    )
+
+    print(f"✓ rounds 1-{START-1} bit-identical to weighting OFF; "
+          f"round {START} matches weighting ON; default is 1; start<=1 safe")
+    return True
+
+
+def test_trust_weight_strength_interpolates_to_weighting_off():
+    """`trust_weight_strength` must be a true interpolation.
+
+    The dose sweep is only interpretable if its endpoints land where they
+    claim to. Three checks:
+
+      1. strength=0.0 with weighting ON must be BIT-IDENTICAL to weighting
+         OFF. If it is not, the strength arm differs from the baseline in
+         something other than the weight, and every point on the sweep is
+         confounded by that difference. This is the self-check arm the
+         experiment relies on, so it is asserted exactly, not approximately.
+      2. strength=1.0 must be bit-identical to the existing behaviour, so
+         the flag is a no-op for every run already on disk.
+      3. An intermediate strength must sit strictly between the two, and
+         out-of-range values must clamp rather than invert or amplify.
+    """
+    print("\nTesting trust_weight_strength interpolates ON -> OFF...")
+
+    from src.tavs_v2 import TavsEspConfig
+    assert abs(float(getattr(TavsEspConfig(), "trust_weight_strength", -1)) - 1.0) < 1e-12, (
+        "trust_weight_strength default must stay 1.0 or every existing "
+        "twagg result silently changes meaning"
+    )
+
+    def _run(twagg_on, strength):
+        cfg = DummyConfig()
+        cfg.disable_trust_weighted_aggregation = not twagg_on
+        cfg.trust_weight_strength = strength
+        cfg.trust_signal = "pretrain_loss_var"
+        cfg.pretrain_loss_var_rescale_lo = 0.5
+        cfg.pretrain_loss_var_rescale_hi = 3.0
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(6)]
+        for i, p in enumerate(proxies):
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25 + 0.1 * i
+            strategy.scheduler.clean_streaks[p.cid] = 3
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        strategy._round_assignments[1] = {
+            "verified": {p.cid for p in proxies},
+            "promoted": set(), "decoy": set(),
+            "sampled": {p.cid for p in proxies},
+        }
+        rng = np.random.RandomState(0)
+        results = []
+        for i, p in enumerate(proxies):
+            scale = 50.0 if i < 2 else 0.1
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000) * scale).astype(np.float32)]),
+                metrics={"is_verified": True, "client_id": f"honest_{i:02d}",
+                         "pretrain_loss_var": 0.5 + 0.5 * i},
+            )))
+        params, _m = strategy.aggregate_fit(1, results, [])
+        return mock_parameters_to_ndarrays(params)[0].ravel()
+
+    off = _run(False, 1.0)
+    full = _run(True, 1.0)
+    zero = _run(True, 0.0)
+    half = _run(True, 0.5)
+
+    d_full = float(np.abs(full - off).sum())
+    assert d_full > 1e-4, (
+        f"weighting on vs off indistinguishable (L1={d_full:.2e}); fixture "
+        f"cannot detect a strength change"
+    )
+    d_zero = float(np.abs(zero - off).sum())
+    assert d_zero == 0.0, (
+        f"strength=0.0 must reproduce weighting-OFF exactly, got L1={d_zero:.3e} "
+        f"-- the sweep's baseline arm is confounded"
+    )
+    # Intermediate strictly between, and on the OFF side of full strength.
+    d_half_off = float(np.abs(half - off).sum())
+    assert 0.0 < d_half_off < d_full, (
+        f"strength=0.5 must sit between OFF and full: "
+        f"L1(half,off)={d_half_off:.4f} vs L1(full,off)={d_full:.4f}"
+    )
+
+    # Clamping: out-of-range must not invert (negative) or amplify (>1).
+    assert float(np.abs(_run(True, -0.5) - off).sum()) == 0.0, \
+        "negative strength must clamp to 0 (weighting off), not invert"
+    assert float(np.abs(_run(True, 2.5) - full).sum()) == 0.0, \
+        "strength > 1 must clamp to 1, not amplify the pull"
+
+    print(f"✓ strength 0.0 == weighting OFF exactly; 0.5 strictly between "
+          f"(L1 {d_half_off:.4f} < {d_full:.4f}); default 1.0; out-of-range clamps")
+    return True
+
+
 def test_trust_signal_default_is_bvd():
     """The config default must remain 'bvd' so existing pilots are
     byte-identical. A silent flip to 'small_loss_fraction' would alter
@@ -1510,8 +1726,10 @@ def main():
         rs21 = test_pretrain_loss_var_does_not_affect_scheduling_config()
         rs22 = test_per_class_loss_var_drives_trust_and_keeps_bvd()
         rs23 = test_per_class_loss_var_ignores_non_reporting_clients()
+        rs24 = test_trust_weighting_start_round_delays_weighting()
+        rs25 = test_trust_weight_strength_interpolates_to_weighting_off()
         assert all(x is True for x in (rs15, rs16, rs17, rs18, rs19, rs20,
-                                       rs21, rs22, rs23))
+                                       rs21, rs22, rs23, rs24, rs25))
 
         if all([success1, success2, success3, success4, success5,
                 rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10,
