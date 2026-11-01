@@ -192,10 +192,15 @@ Every intermediate mechanism improved between the two weighted runs:
 The machinery worked. Detection, trust separation, and scheduling all improved
 substantially. Accuracy still fell, and fell further.
 
-**Independent check on the detector.** On the same logged data, FedNoRo's own
-statistic (per-class mean loss, IJCAI 2023 §4.1) scores **AUROC 0.965**. This
-is not a broken reimplementation of a known method — their detection
-reproduces, and it is the *downstream use* that fails.
+**A note on what has and has not been benchmarked.** Feeding the per-class
+**mean** loss into our own scoring pipeline — the statistic FedNoRo uses,
+scored our way — reaches **AUROC 0.965** on the same logged data, against
+0.895 for the per-class variance. That compares two *statistics inside our
+pipeline*. It is **not** a comparison against FedNoRo's method, which also
+requires its GMM split, warm-up phase, logit adjustment and full client
+participation. **No published method has been benchmarked against anywhere
+in this document.** The detector is shown to work; it is not shown to be
+competitive.
 
 ---
 
@@ -442,7 +447,8 @@ Results directories, by role:
 ## 11. Secondary observation: which statistic, when
 
 A side finding from the same logs. Comparing per-class **mean** loss
-(FedNoRo's statistic) against per-class **variance** (ours):
+(the statistic FedNoRo uses) against per-class **variance** (ours), both
+scored by our own pipeline rather than by FedNoRo's method:
 
 | run | noise | per-class mean | per-class variance |
 |---|---|---|---|
