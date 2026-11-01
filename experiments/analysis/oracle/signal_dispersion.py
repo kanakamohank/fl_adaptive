@@ -58,9 +58,20 @@ def window_from_config(cfg, path):
     config-tag directory name (pv-rescale-06-15 -> 0.6, 1.5), else the
     strategy default. Hard-coding one window would silently mis-score any run
     launched with a different --pretrain-loss-var-rescale.
+
+    The strategy fields live under config["tavs_config"], NOT at the top
+    level of the dump -- pipeline_results.json's top-level `config` holds
+    only the experiment-level keys (num_rounds, data_alpha, ...). Reading the
+    top level alone made this whole branch unreachable and left the function
+    depending on the directory tag, which pilot_skip_comparison.py only
+    emits when trust_signal == "pretrain_loss_var"; any other signal then
+    fell through to the default window regardless of what the run did.
     """
-    lo = cfg.get("pretrain_loss_var_rescale_lo")
-    hi = cfg.get("pretrain_loss_var_rescale_hi")
+    tc = cfg.get("tavs_config") or {}
+    lo = tc.get("pretrain_loss_var_rescale_lo",
+                cfg.get("pretrain_loss_var_rescale_lo"))
+    hi = tc.get("pretrain_loss_var_rescale_hi",
+                cfg.get("pretrain_loss_var_rescale_hi"))
     if lo is not None and hi is not None and float(hi) > float(lo):
         return float(lo), float(hi)
     m = re.search(r"pv-rescale-(\d+)-(\d+)", str(path))
@@ -70,6 +81,23 @@ def window_from_config(cfg, path):
         if hi > lo:
             return lo, hi
     return DEFAULT_LO, DEFAULT_HI
+
+
+def strength_from_config(cfg):
+    """The trust_weight_strength this run used, 1.0 for anything older.
+
+    aggregate_fit computes the inlier weight as
+    max(0.05, 1 - strength*(1 - score)) * n, so a reconstruction that
+    assumed strength=1.0 would report identical concentration for every
+    point of a strength sweep -- constant along the very axis being swept.
+    """
+    tc = cfg.get("tavs_config") or {}
+    try:
+        s = float(tc.get("trust_weight_strength",
+                         cfg.get("trust_weight_strength", 1.0)))
+    except (TypeError, ValueError):
+        return 1.0
+    return max(0.0, min(1.0, s))
 
 
 def _summarise(spread, gap, pinned_lo, pinned_hi, total):
@@ -97,7 +125,9 @@ def analyse(root: Path):
         osh = fts.get("oracle_signal_history") or {}
         cmap = fts.get("cid_to_client_config_id", {})
         noisy = set(d.get("noisy_client_config_ids", []))
-        lo, hi = window_from_config(d.get("config") or {}, p)
+        _cfg = d.get("config") or {}
+        lo, hi = window_from_config(_cfg, p)
+        strength = strength_from_config(_cfg)
 
         for _r, entries in osh.items():
             ver = [(cid, e) for cid, e in entries.items() if e.get("is_verified")]
@@ -118,8 +148,18 @@ def analyse(root: Path):
                     w_lo += 1
                 if s >= 1.0:
                     w_hi += 1
-                # the 0.05 floor is what aggregate_fit applies to an inlier
-                weights.append(max(0.05, s) * n)
+                # Mirror aggregate_fit's inlier expression:
+                #   max(0.05, 1 - strength*(1 - score)) * n
+                # CAVEAT: aggregate_fit exempts clients BVD flagged from the
+                # floor (an outlier must be able to reach zero weight), and
+                # outlier membership is not recoverable from
+                # oracle_signal_history. Every client is floored here, so a
+                # flagged client scoring 0 is reconstructed at 0.05n instead
+                # of 0. That inflates the bottom of the distribution and
+                # therefore UNDERSTATES concentration -- most under IID,
+                # where 49% of clients score 0. Read the concentration column
+                # as a lower bound, not an exact figure.
+                weights.append(max(0.05, 1.0 - strength * (1.0 - s)) * n)
                 counts.append(float(n))
             if len(scores) >= 3:
                 w_spread.append(statistics.stdev(scores.values()))
@@ -194,6 +234,9 @@ def main():
 
     print("\nconc = top client's share of the aggregate under weighting, as a multiple")
     print("of its share without weighting. >1 means weighting concentrated the update.")
+    print("It is a LOWER bound: clients BVD flagged are exempt from the 0.05 floor in")
+    print("aggregate_fit but cannot be identified from the logs, so they are floored")
+    print("here, which inflates the bottom of the distribution.")
 
 
 if __name__ == "__main__":

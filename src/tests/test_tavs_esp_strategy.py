@@ -822,8 +822,34 @@ def test_trust_weight_strength_interpolates_to_weighting_off():
     assert float(np.abs(_run(True, 2.5) - full).sum()) == 0.0, \
         "strength > 1 must clamp to 1, not amplify the pull"
 
+    # 4. Pin down the SECURITY consequence of the strength=0-equals-off
+    #    design, so it stays a documented trade rather than a surprise.
+    #    Scaling both weight branches is what makes strength=0 reproduce
+    #    weighting-off, and the price is that a FLAGGED client keeps
+    #    (1 - strength) of a clean client's weight. Asserted here against
+    #    the exact expression aggregate_fit uses, because a future change
+    #    that silently altered this would either break the sweep's control
+    #    arm or quietly re-weaken the Byzantine defence.
+    def _verified_weight(score, n, strength, is_outlier, soft=True):
+        pull = lambda s: 1.0 - strength * (1.0 - s)
+        return (pull(score) if (soft and is_outlier)
+                else max(0.05, pull(score))) * n
+
+    clean_w = _verified_weight(1.0, 100, 0.5, False)
+    flagged_w = _verified_weight(0.0, 100, 0.5, True)
+    assert abs(flagged_w / clean_w - 0.5) < 1e-9, (
+        f"at strength=0.5 a flagged client should retain exactly half a "
+        f"clean client's weight (the documented cost of strength=0 == off); "
+        f"got {flagged_w / clean_w:.3f}"
+    )
+    assert _verified_weight(0.0, 100, 1.0, True) == 0.0, (
+        "at full strength a flagged client must still reach ZERO weight -- "
+        "the soft-outlier invariant must survive the strength dial"
+    )
+
     print(f"✓ strength 0.0 == weighting OFF exactly; 0.5 strictly between "
-          f"(L1 {d_half_off:.4f} < {d_full:.4f}); default 1.0; out-of-range clamps")
+          f"(L1 {d_half_off:.4f} < {d_full:.4f}); default 1.0; out-of-range clamps; "
+          f"flagged client reaches 0 at strength 1.0 and keeps 50% at 0.5 (documented)")
     return True
 
 

@@ -178,6 +178,15 @@ class TavsEspConfig:
     # partition -- 49% of IID clients score 0 and get floored, versus 0.3%
     # at Dirichlet(0.3) -- so a strength sweep moves the IID and non-IID
     # arms by different absolute amounts even at the same strength.
+    #
+    # SAFETY: this scales the OUTLIER down-weighting as well, so at 0.5 a
+    # client BVD flagged keeps half a clean client's weight, and at 0.0 it
+    # keeps all of it. That is forced by the strength=0 == weighting-off
+    # requirement (see the verified_weights comment in aggregate_fit) and is
+    # fine for a benign dose study, but it means a value below 1.0 partially
+    # disables the Byzantine defence. aggregate_fit logs a warning at round 1
+    # when this is set. Never use strength < 1.0 for a run making a security
+    # claim; sweep the dose with byzantine_fraction=0 only.
     trust_weight_strength: float = 1.0
 
     # Master switch for BVD outlier detection.
@@ -1091,6 +1100,22 @@ class TavsEspStrategy(Strategy):
         def _pull(score: float) -> float:
             return 1.0 - _strength * (1.0 - score)
 
+        # A strength below 1.0 scales the Byzantine down-weighting as well as
+        # the trust weighting (see the verified_weights comment for why they
+        # cannot be separated without destroying the strength=0 control), so
+        # a flagged client keeps 1 - strength of a clean client's weight.
+        # That is acceptable in a benign dose study and NOT acceptable in any
+        # run making a security claim, so say so once, loudly, rather than
+        # leaving it to be discovered in the results.
+        if not disable_trust_agg and _strength < 1.0 and server_round == 1:
+            logger.warning(
+                f"trust_weight_strength={_strength:.2f} < 1.0: this scales the "
+                f"outlier down-weighting too, so a FLAGGED client retains "
+                f"{1.0 - _strength:.0%} of a clean client's weight. Intended for "
+                f"benign dose studies (byzantine_fraction=0) only -- do not use "
+                f"for a security claim."
+            )
+
         if disable_trust_agg:
             promoted_weights = {cid: num_examples.get(cid, 1) for cid in P_ids}
         else:
@@ -1111,6 +1136,24 @@ class TavsEspStrategy(Strategy):
                 cid: num_examples.get(cid, 1) for cid in verified_updates.keys()
             }
         else:
+            # trust_weight_strength scales BOTH branches, including the
+            # outlier one, and that is a deliberate trade with a sharp edge.
+            #
+            # The alternative -- dial the inlier branch only, leaving flagged
+            # clients at raw score -- keeps a detected attacker at zero
+            # weight, but then strength=0.0 no longer reproduces
+            # weighting-off: the off path (disable_trust_agg) gives EVERY
+            # client num_examples, outliers included, so the two differ
+            # whenever anything is flagged. BVD flags clients even with zero
+            # attackers (26% of verified clients under IID, see
+            # enable_outlier_detection), so that divergence would show up in
+            # every run and the strength=0 self-check arm -- the thing that
+            # makes the whole sweep interpretable -- would be worthless.
+            #
+            # Scaling both branches keeps strength=0.0 bit-identical to
+            # weighting-off, at the cost that strength is a dial on the
+            # Byzantine down-weighting too: at 0.5 a flagged client keeps
+            # half a clean client's weight. See the warning logged above.
             verified_weights = {
                 cid: (_pull(float(behavior_scores.get(cid, 0.0)))
                       if (soft and cid in outliers)
