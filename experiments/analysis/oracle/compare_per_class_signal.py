@@ -72,13 +72,20 @@ def pairwise_counts(scored):
     return wins, total
 
 
-def fednoro_scores(cohort):
+def perclass_score(cohort):
     """Cohort-relative per-class score; see src/tavs_v2/per_class_score.py.
 
-    Imported rather than reimplemented so the number measured here is the
-    same number the strategy acts on under trust_signal='per_class_loss_var'.
-    An earlier copy of this logic lived here; the duplicate was removed when
-    the signal moved into the trust path.
+    NOT a FedNoRo baseline. This column was once labelled "perclass_mean" because
+    the scoring is modelled on FedNoRo Sec 4.1, and that name caused a false
+    claim to be drawn from it -- that FedNoRo's published method outscores
+    ours. It does not say that. BOTH the per-class columns run THIS SAME
+    function; they differ only in which statistic is fed in, the per-class
+    mean or the per-class variance. So the comparison is our own scoring
+    pipeline under two statistics, not our method against a published one.
+
+    A real FedNoRo baseline would additionally need its GMM split, its
+    warm-up phase, logit adjustment, and all clients online each round. No
+    published method has been benchmarked against here.
     """
     return per_class_cohort_scores(cohort)
 
@@ -93,7 +100,7 @@ def analyse_seed(path):
         return None
 
     acc = {k: [0.0, 0] for k in
-           ("pooled_var", "pooled_mean", "fednoro", "perclass_var")}
+           ("pooled_var", "pooled_mean", "perclass_mean", "perclass_var")}
     for r_key, entries in osh.items():
         cohort_pc = []      # per-class MEAN loss  (FedNoRo's statistic)
         cohort_pcv = []     # per-class VARIANCE   (their decomposition, ours)
@@ -107,11 +114,11 @@ def analyse_seed(path):
             pcv = e.get("per_class_pretrain_var")
             if pcv:
                 cohort_pcv.append((cid, pcv))
-        fn = fednoro_scores(cohort_pc)
+        fn = perclass_score(cohort_pc)
         # Same FedNoRo processing applied to the variance vector. The
         # fill-missing rule still holds: an absent class contributes no noisy
         # samples, so the cohort minimum is the right stand-in.
-        fnv = fednoro_scores(cohort_pcv)
+        fnv = perclass_score(cohort_pcv)
 
         round_scores = {k: [] for k in acc}
         for cid, e, is_noisy in rows:
@@ -122,7 +129,7 @@ def analyse_seed(path):
             if m is not None:
                 round_scores["pooled_mean"].append((float(m), is_noisy))
             if cid in fn:
-                round_scores["fednoro"].append((fn[cid], is_noisy))
+                round_scores["perclass_mean"].append((fn[cid], is_noisy))
             if cid in fnv:
                 round_scores["perclass_var"].append((fnv[cid], is_noisy))
 
@@ -141,7 +148,7 @@ def analyse_run(root: Path, label: str):
     if not seeds:
         return None
     per_signal = {"pooled_var": [], "pooled_mean": [],
-                  "fednoro": [], "perclass_var": []}
+                  "perclass_mean": [], "perclass_var": []}
     for p in seeds:
         res = analyse_seed(p)
         if res is None:
@@ -182,7 +189,7 @@ def main():
     print("Pairwise AUROC (noisy ranked above clean). 0.50 = chance.")
     print("perclass_var is blank for runs logged before that field existed.\n")
     header = (f"{'run':<44} {'seeds':>5}  {'pooled_var':>15} {'pooled_mean':>15} "
-              f"{'fednoro':>15} {'perclass_var':>15}")
+              f"{'perclass_mean':>15} {'perclass_var':>15}")
     print(header)
     print("-" * len(header))
     for root, label in runs:
@@ -201,7 +208,7 @@ def main():
             return f"{m:.3f} ± {s:.3f}"
         print(f"{label:<44} {res['n_seeds']:>5}  "
               f"{fmt('pooled_var'):>15} {fmt('pooled_mean'):>15} "
-              f"{fmt('fednoro'):>15} {fmt('perclass_var'):>15}")
+              f"{fmt('perclass_mean'):>15} {fmt('perclass_var'):>15}")
 
 
 if __name__ == "__main__":
