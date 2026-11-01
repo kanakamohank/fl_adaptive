@@ -1,25 +1,38 @@
-# Client re-weighting by a reliability signal helps under IID and hurts under non-IID
+# Client re-weighting by a reliability signal helps only under IID; any heterogeneity removes the benefit
 
-**Status:** complete. Six configurations × 5 seeds. Mechanism open.
+**Status:** complete. Ten configurations × 5 seeds, across two noise models.
+Mechanism open.
 
 ---
 
 ## 1. Claim
 
-> Down-weighting clients by a loss-based reliability signal **improves**
-> accuracy only under a **perfectly IID** partition. At Dirichlet α = 1.0 —
-> mild heterogeneity, the gentlest non-IID setting commonly tested — the
-> effect has already **reversed**, and it deepens as skew increases. The sign
-> is set by data heterogeneity, not by the quality of the signal: under
-> non-IID, **improving the signal makes the harm worse**.
+> Down-weighting clients by a loss-based reliability signal gives a clear
+> benefit under a **perfectly IID** partition (+0.012 to +0.017, t = 11–14).
+> **Any** departure from uniformity removes that benefit entirely — already by
+> Dirichlet α = 3.0, which is very mild skew — after which the effect is
+> small and slightly negative and does **not** worsen with further skew. The
+> outcome is governed by data heterogeneity, not by the quality of the signal:
+> under non-IID, **improving the signal makes matters worse, not better**.
 
-Three things make this worth reporting. First, the sign flip is total: across
-three arms × 5 seeds at each of three partition settings, **15/15 comparisons
-improve under IID and 30/30 degrade under non-IID**, with no exceptions.
-Second, the flip occurs at the *first* departure from uniformity, not only
-under severe skew. Third, the obvious objection to the negative half — "your
-detector was too weak" — is ruled out: we raised detection from near-chance
-to 17/20 and the harm **doubled**.
+**Two claims of different strength, stated separately on purpose.**
+
+*The benefit vanishes* — strongly supported. The IID effect is large and
+unambiguous (t = 11.42 on CIFAR-10N, t = 13.69 on uniform noise), and it is
+absent at every non-IID setting tested.
+
+*It turns actively harmful* — directionally consistent but weak. Across four
+non-IID settings, **19 of 20** seed-comparisons are negative, yet the effect
+is only −0.005 and several measurements sit near the significance threshold
+(t = −2.19 at uniform α = 1.0 does not clear it). Do not lean on this half.
+
+Three things make the result worth reporting. First, it **replicates under a
+second, structurally different noise model** (§3c), so it is not an artefact
+of one corruption process. Second, the flip occurs at the *first* departure
+from uniformity rather than only under severe skew, and is a cliff rather
+than a slope (§3a). Third, the obvious objection — "your detector was too
+weak" — is ruled out: we raised detection from near-chance to 17/20 and the
+harm got worse, not better (§4).
 
 ---
 
@@ -60,6 +73,9 @@ Effect of enabling the weighting, paired by seed, all three arms:
 | **IID** | full verify | 0.7295 | 0.7406 | **+0.0110** | +9.53 | **5/5** |
 | **IID** | TAVS | 0.7290 | **0.7415** | **+0.0125** | +11.42 | **5/5** |
 | **IID** | random | 0.7278 | 0.7326 | **+0.0048** | +3.37 | **5/5** |
+| α = 3.0 | full verify | 0.4085 | 0.4041 | −0.0044 | −2.65 | 1/5 |
+| α = 3.0 | TAVS | 0.4094 | 0.4041 | −0.0053 | −3.10 | 1/5 |
+| α = 3.0 | random | 0.4098 | 0.3870 | −0.0228 | −8.85 | **0/5** |
 | α = 1.0 | full verify | 0.3646 | 0.3600 | −0.0046 | −3.22 | **0/5** |
 | α = 1.0 | TAVS | 0.3645 | 0.3591 | −0.0055 | −4.28 | **0/5** |
 | α = 1.0 | random | 0.3649 | 0.3395 | −0.0254 | −11.01 | **0/5** |
@@ -72,11 +88,25 @@ Each OFF/ON pair differs in **exactly one** configuration field
 saved configs. Paired seeds were confirmed to hold the **identical** set of 20
 noisy clients on both sides, so the pairing is valid.
 
-**Where the sign flips.** α = 1.0 is mild heterogeneity — the gentlest non-IID
-setting in common use, with α = 0.3 the aggressive one. The benefit is already
-gone at α = 1.0, so the crossover lies between IID and α = 1.0, not between
-α = 1.0 and α = 0.3. The harm then deepens with skew, most visibly on random
-skip (+0.0048 → −0.0254 → −0.0407).
+**A cliff, not a slope.** Tracking the TAVS arm as skew increases:
+
+| partition | TAVS effect |
+|---|---|
+| IID | **+0.0125** |
+| α = 3.0 | −0.0053 |
+| α = 1.0 | −0.0055 |
+| α = 0.3 | −0.0063 |
+
+α = 3.0 is *very* mild skew — much closer to uniform than α = 1.0, itself the
+gentlest non-IID setting in common use. The benefit is already gone there, and
+the effect then sits at roughly −0.005 regardless of how much more skewed the
+data becomes. **The transition happens at the first departure from
+uniformity**, and further heterogeneity adds almost nothing.
+
+This corrects an earlier reading of these data. The harm does deepen with skew
+for **random skip** (−0.0228 → −0.0254 → −0.0407), and that pattern was
+wrongly generalised to the other arms. For TAVS and full verification it is
+flat.
 
 **One measured caveat.** Random skip's rate is matched to TAVS's *observed*
 rate within each run, so a shift in TAVS's rate moves random's too. Only the
@@ -93,6 +123,15 @@ verification (0.7406), above random skip (0.7326), and **+0.0125 above the
 unweighted baseline**. This is the one configuration in which the system
 delivers what it was designed to.
 
+**An unexplained arm difference.** Under IID, random skip benefits on
+CIFAR-10N (+0.0048, t = 3.37, 5/5) but **not** under uniform noise (+0.0007,
+t = 0.36, 3/5), while full verification and TAVS benefit under both. Random
+skip applies the weighting to the fewest clients, since it drops ~34% at
+random and those receive a different weighting path. That is consistent with
+the benefit requiring verification *coverage* rather than the weighting
+alone — but it is one observation across two noise models, not a tested
+claim.
+
 ### 3b. Under non-IID, a better detector makes it worse
 
 | config | detector AUROC | detection (of 20 noisy) | TAVS late10 | vs baseline |
@@ -108,6 +147,36 @@ With the weighting off, all three arms are indistinguishable: full 0.3073,
 TAVS 0.3076, random 0.3073.
 
 ---
+
+### 3c. It replicates under a second noise model
+
+Everything above uses CIFAR-10N `worst` — real human annotator errors, which
+carry structure (people confuse particular class pairs). If the result
+depended on that structure rather than on heterogeneity, the claim would be
+wrong. Repeating the 2×2 with **uniform synthetic noise** — errors scattered
+at random, matched to the same ~16% of labels corrupted — gives:
+
+| noise model | partition | arm | OFF | ON | change | t | seeds improved |
+|---|---|---|---|---|---|---|---|
+| uniform | **IID** | full verify | 0.7237 | 0.7409 | **+0.0172** | +14.73 | **5/5** |
+| uniform | **IID** | TAVS | 0.7238 | 0.7404 | **+0.0166** | +13.69 | **5/5** |
+| uniform | **IID** | random | 0.7241 | 0.7249 | +0.0007 | +0.36 | 3/5 |
+| uniform | α = 1.0 | full verify | 0.3488 | 0.3435 | −0.0053 | −2.00 | 1/5 |
+| uniform | α = 1.0 | TAVS | 0.3486 | 0.3439 | −0.0047 | −2.19 | 1/5 |
+| uniform | α = 1.0 | random | 0.3493 | 0.3191 | −0.0302 | −9.91 | **0/5** |
+
+**The pattern reproduces.** Same corruption level, structurally different
+corruption process, same outcome: a clear benefit under IID (if anything
+larger, +0.0166 against +0.0125) and no benefit under α = 1.0. The finding
+is about data heterogeneity, not about how the labels were corrupted.
+
+**Where it is weaker.** Under uniform noise the non-IID effect for full
+verification and TAVS is **not statistically significant** (t = −2.00 and
+−2.19 against the ~2.78 bar for 5 seeds, 1/5 seeds positive). The direction
+matches, the magnitude does not reach significance. This is the main evidence
+behind stating "the benefit vanishes" as the claim and treating "it becomes
+harmful" as the weaker companion.
+
 
 ## 4. Ruling out "the detector was too weak"
 
@@ -276,11 +345,12 @@ under skew, which this model does not.
 
 ## 8. Scope limits
 
-- **One dataset, one partition setting, one noise type.** CIFAR-10 / CIFAR-10N
-  `worst` / Dirichlet α = 0.3. No claim beyond this.
-- **Three partition points, not a curve.** IID, α = 1.0 and α = 0.3. The sign
-  flips between IID and α = 1.0; exactly where in that gap, and whether the
-  decay is gradual or abrupt, is unmeasured.
+- **One dataset.** CIFAR-10 only. Two noise models (CIFAR-10N `worst` and
+  uniform) and four partition settings are covered; the dataset is not.
+- **Four partition points, not a curve.** IID, α = 3.0, α = 1.0, α = 0.3.
+  The benefit is gone by α = 3.0, so the transition sits between IID and
+  α = 3.0 and is narrower than a gradual decay — but its exact location is
+  still unmeasured.
 - **N = 50 clients, 10 sampled.** Not tested at larger scale.
 - **Absolute accuracy under non-IID is low (~0.30 against 0.10 chance).**
   Examined in §7: the harm persists while accuracy doubles, so a weak model
@@ -305,20 +375,16 @@ under skew, which this model does not.
    clients per round, or FedProx/SCAFFOLD). This is the one change that would
    fully break the confound in §7. More frequent averaging has already been
    ruled out.
-2. **Close the IID → α = 1.0 gap** (α = 3.0 or 5.0, i.e. very mild skew).
-   The sign is known to flip inside that interval. Showing whether the benefit
-   decays gradually or vanishes at the first departure from uniformity decides
-   between two quite different claims, and the latter is the more striking.
-3. **A second noise model.** Everything here uses CIFAR-10N `worst` (real
-   human annotation errors). Repeating the contrast with uniform or pair-flip
-   synthetic noise at a matched effective rate would show whether the
-   interaction depends on the noise process. No new code is required.
-4. **Direct mechanism test.** Hold out a known-rare class and measure
+2. **Close the IID → α = 3.0 gap** (α = 10 or 30, i.e. near-uniform). The
+   benefit is present at IID and gone by α = 3.0, so the transition is inside
+   that interval. Locating it would say whether the mechanism needs *exact*
+   uniformity or merely something close to it.
+3. **Direct mechanism test.** Hold out a known-rare class and measure
    per-class accuracy with and without weighting. The aggregate-level proxies
    used here were too blunt.
-5. **Milder noise.** At ~16% corruption the model is near collapse. The same
+4. **Milder noise.** At ~16% corruption the model is near collapse. The same
    comparison at 3–7% would show whether the harm is specific to severe noise.
-6. **A second dataset.** CIFAR-100 is supported in the codebase but did not
+5. **A second dataset.** CIFAR-100 is supported in the codebase but did not
    train under Dirichlet(0.3) at 16% noise with this model: accuracy stayed at
    chance (0.0121 against 0.0100) for all 40 rounds while loss rose from
    `ln(100)` = 4.606 to 6.43. An earlier CIFAR-100 run under IID at 15% noise
@@ -352,10 +418,24 @@ python3 experiments/analysis/oracle/trust_vs_imbalance.py
 python3 experiments/analysis/oracle/mechanism_coverage_loss.py
 ```
 
-Results directories: `tavs_integration_v2_iid_worst_twagg` (IID, weighted),
-`v6_iid_notwagg` (IID, unweighted), `v3_noniid_perclass` (non-IID, pooled
-signal, weighted), `v4_noniid_notwagg` (non-IID, unweighted baseline),
-`v5_noniid_perclass_trust` (non-IID, per-class signal, weighted).
+The uniform-noise replication and the α = 3.0 point were produced by
+`experiments/run_overnight_noise_model.sh`, which runs all six jobs in order
+and resumes from disk if interrupted.
+
+Results directories, by role:
+
+| directory | noise | partition | weighting |
+|---|---|---|---|
+| `tavs_integration_v6_iid_notwagg` | CIFAR-10N worst | IID | off |
+| `tavs_integration_v2_iid_worst_twagg` | CIFAR-10N worst | IID | on |
+| `sweep_a30_notwagg` / `sweep_a30_twagg` | CIFAR-10N worst | α = 3.0 | off / on |
+| `sweep_a10_notwagg` / `sweep_a10_twagg` | CIFAR-10N worst | α = 1.0 | off / on |
+| `tavs_integration_v4_noniid_notwagg` | CIFAR-10N worst | α = 0.3 | off |
+| `tavs_integration_v3_noniid_perclass` | CIFAR-10N worst | α = 0.3 | on (pooled signal) |
+| `tavs_integration_v5_noniid_perclass_trust` | CIFAR-10N worst | α = 0.3 | on (per-class signal) |
+| `nm_uniform_iid_notwagg` / `nm_uniform_iid_twagg` | uniform | IID | off / on |
+| `nm_uniform_a10_notwagg` / `nm_uniform_a10_twagg` | uniform | α = 1.0 | off / on |
+| `probe_a10_r100ep2` | CIFAR-10N worst | α = 1.0 | off, 100r × 2ep (§7a) |
 
 ---
 
