@@ -127,6 +127,68 @@ class TavsEspConfig:
     # strict only at t=0.
     disable_trust_weighted_aggregation: bool = True
 
+    # Round at which trust weighting starts taking effect. Rounds strictly
+    # BEFORE this use num_examples only, exactly as if
+    # disable_trust_weighted_aggregation were True.
+    #
+    # Why this exists: FedCNI (Wu et al., ICME 2023, Sec. III-E) does not
+    # weight by reliability from round 1. It aggregates by data size until a
+    # switching round Ts, then switches to clean-count weighting, on the
+    # grounds that the early phase is when the network "learns the correct
+    # samples which have common patterns" and the late phase is when it
+    # memorises noise. They set Ts = 15 of 100 rounds. FedLAW (ICLR 2026)
+    # reaches the opposite schedule -- it learns weights only during the
+    # first 20 rounds and then freezes them -- so the two published systems
+    # agree that WHEN the weighting applies matters, and disagree on which
+    # half. Our runs have applied it from round 1 throughout, which is
+    # neither. This flag makes the schedule a measurable variable.
+    #
+    # 1 (the default) means "from the first round", i.e. the existing
+    # behaviour, so this field is a no-op unless set. Values <= 1 are
+    # treated as 1 rather than rejected, since "start at round 0" is the
+    # same request.
+    #
+    # Scope: this gates the WEIGHT only. The trust EMA, BVD, routing and
+    # tiering all keep running and updating during the delay, so by the
+    # time weighting switches on, trust scores are already warm. That is
+    # deliberate -- it matches FedCNI, whose noise levels are tracked from
+    # the start and only enter the aggregation at Ts -- but it does mean
+    # this flag does not isolate "no trust machinery at all before Ts".
+    trust_weighting_start_round: int = 1
+
+    # How far trust weighting is allowed to move a client from its fair
+    # (num_examples) share. The score entering the weight becomes
+    #
+    #     score' = 1 - strength * (1 - score)
+    #
+    # so strength=1.0 is the existing behaviour, strength=0.0 reproduces
+    # weighting-off exactly (every score' = 1), and 0.5 halves the pull.
+    #
+    # Why a continuous dial rather than another on/off arm: the claim that
+    # the harm under a skewed partition grows WITH how hard the weighting
+    # pulls currently rests on one matched pair of runs that happen to use
+    # two different trust signals, so signal and strength are confounded.
+    # This dial varies strength alone, inside one signal, at one partition,
+    # which is the controlled form of that comparison. strength=0 is also a
+    # self-check: it must land on the weighting-off result, and if it does
+    # not, something other than the weight is differing between the arms.
+    #
+    # Applied BEFORE the 0.05 inlier floor, so the floor still protects a
+    # client the detector accepted. Note the floor binds very unevenly by
+    # partition -- 49% of IID clients score 0 and get floored, versus 0.3%
+    # at Dirichlet(0.3) -- so a strength sweep moves the IID and non-IID
+    # arms by different absolute amounts even at the same strength.
+    #
+    # SAFETY: this scales the OUTLIER down-weighting as well, so at 0.5 a
+    # client BVD flagged keeps half a clean client's weight, and at 0.0 it
+    # keeps all of it. That is forced by the strength=0 == weighting-off
+    # requirement (see the verified_weights comment in aggregate_fit) and is
+    # fine for a benign dose study, but it means a value below 1.0 partially
+    # disables the Byzantine defence. aggregate_fit logs a warning at round 1
+    # when this is set. Never use strength < 1.0 for a run making a security
+    # claim; sweep the dose with byzantine_fraction=0 only.
+    trust_weight_strength: float = 1.0
+
     # Master switch for BVD outlier detection.
     #
     # Off means every verified client is treated as an inlier and scores 1.0.
@@ -1012,13 +1074,55 @@ class TavsEspStrategy(Strategy):
         disable_trust_agg = getattr(self.config,
                                     "disable_trust_weighted_aggregation", False)
 
+        # Schedule gate (FedCNI-style switching round). Before the start
+        # round, behave exactly as if weighting were off. Folding this into
+        # the existing flag rather than adding a second branch keeps the two
+        # weight expressions below single-sourced.
+        _twagg_start = max(1, int(getattr(self.config,
+                                          "trust_weighting_start_round", 1) or 1))
+        _twagg_delayed = (not disable_trust_agg) and server_round < _twagg_start
+        if _twagg_delayed:
+            disable_trust_agg = True
+            if server_round == 1 or server_round == _twagg_start - 1:
+                logger.info(
+                    f"Round {server_round} trust weighting DELAYED: "
+                    f"num_examples-only until round {_twagg_start} "
+                    f"(trust_weighting_start_round). Trust EMA and routing "
+                    f"continue to update during the delay."
+                )
+
+        # Shrink a score toward 1.0 (no pull) by the configured strength.
+        # Clamped to [0, 1]: a strength above 1 would amplify the pull past
+        # what the signal supports, and a negative one would invert it.
+        _strength = max(0.0, min(1.0, float(getattr(
+            self.config, "trust_weight_strength", 1.0))))
+
+        def _pull(score: float) -> float:
+            return 1.0 - _strength * (1.0 - score)
+
+        # A strength below 1.0 scales the Byzantine down-weighting as well as
+        # the trust weighting (see the verified_weights comment for why they
+        # cannot be separated without destroying the strength=0 control), so
+        # a flagged client keeps 1 - strength of a clean client's weight.
+        # That is acceptable in a benign dose study and NOT acceptable in any
+        # run making a security claim, so say so once, loudly, rather than
+        # leaving it to be discovered in the results.
+        if not disable_trust_agg and _strength < 1.0 and server_round == 1:
+            logger.warning(
+                f"trust_weight_strength={_strength:.2f} < 1.0: this scales the "
+                f"outlier down-weighting too, so a FLAGGED client retains "
+                f"{1.0 - _strength:.0%} of a clean client's weight. Intended for "
+                f"benign dose studies (byzantine_fraction=0) only -- do not use "
+                f"for a security claim."
+            )
+
         if disable_trust_agg:
             promoted_weights = {cid: num_examples.get(cid, 1) for cid in P_ids}
         else:
             promoted_weights = {
-                cid: self.scheduler.bayesian_posterior_weight(
+                cid: _pull(self.scheduler.bayesian_posterior_weight(
                     self.scheduler.get_effective_trust(cid, server_round)
-                ) * num_examples.get(cid, 1)
+                )) * num_examples.get(cid, 1)
                 for cid in P_ids
             }
 
@@ -1032,10 +1136,28 @@ class TavsEspStrategy(Strategy):
                 cid: num_examples.get(cid, 1) for cid in verified_updates.keys()
             }
         else:
+            # trust_weight_strength scales BOTH branches, including the
+            # outlier one, and that is a deliberate trade with a sharp edge.
+            #
+            # The alternative -- dial the inlier branch only, leaving flagged
+            # clients at raw score -- keeps a detected attacker at zero
+            # weight, but then strength=0.0 no longer reproduces
+            # weighting-off: the off path (disable_trust_agg) gives EVERY
+            # client num_examples, outliers included, so the two differ
+            # whenever anything is flagged. BVD flags clients even with zero
+            # attackers (26% of verified clients under IID, see
+            # enable_outlier_detection), so that divergence would show up in
+            # every run and the strength=0 self-check arm -- the thing that
+            # makes the whole sweep interpretable -- would be worthless.
+            #
+            # Scaling both branches keeps strength=0.0 bit-identical to
+            # weighting-off, at the cost that strength is a dial on the
+            # Byzantine down-weighting too: at 0.5 a flagged client keeps
+            # half a clean client's weight. See the warning logged above.
             verified_weights = {
-                cid: (float(behavior_scores.get(cid, 0.0))
+                cid: (_pull(float(behavior_scores.get(cid, 0.0)))
                       if (soft and cid in outliers)
-                      else max(0.05, float(behavior_scores.get(cid, 0.0)))) * num_examples.get(cid, 1)
+                      else max(0.05, _pull(float(behavior_scores.get(cid, 0.0))))) * num_examples.get(cid, 1)
                 for cid in verified_updates.keys()
             }
         clip_stats: Dict[str, object] = {}

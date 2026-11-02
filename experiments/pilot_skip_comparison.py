@@ -165,6 +165,15 @@ def _config_tag(args) -> str:
         parts.append(f"it{int(round(float(args.initial_trust)*100)):02d}")
     if bool(getattr(args, "trust_weighted_aggregation", False)):
         parts.append("twagg")
+        # Only meaningful alongside twagg, and only when delayed, so an
+        # undelayed run keeps its existing tag and stays --skip-completed
+        # compatible with results already on disk.
+        _start = int(getattr(args, "trust_weighting_start_round", 1) or 1)
+        if _start > 1:
+            parts.append(f"twstart{_start}")
+        _str = float(getattr(args, "trust_weight_strength", 1.0))
+        if abs(_str - 1.0) > 1e-9:
+            parts.append(f"twstr{int(round(_str * 100)):03d}")
     return "_".join(parts)
 
 
@@ -267,6 +276,10 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         cosine_filter_promoted=False,
         enable_outlier_detection=True,
         disable_trust_weighted_aggregation=_disable_trust_wagg,
+        trust_weighting_start_round=int(
+            getattr(args, "trust_weighting_start_round", 1) or 1),
+        trust_weight_strength=float(
+            getattr(args, "trust_weight_strength", 1.0)),
         trust_signal=getattr(args, "trust_signal", "bvd"),
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
@@ -714,6 +727,31 @@ def main():
                              "clients in the verified bucket proportional to "
                              "their inverted pretrain variance. Needed to translate "
                              "trust routing into aggregation weight.")
+    parser.add_argument("--trust-weighting-start-round", type=int, default=1,
+                        dest="trust_weighting_start_round",
+                        help="Delay trust-weighted aggregation until this round. "
+                             "Rounds before it aggregate by num_examples only. "
+                             "Default 1 = weight from the first round (existing "
+                             "behaviour). FedCNI (ICME 2023) uses a switching "
+                             "round Ts=15 of 100 for exactly this reason: the "
+                             "early phase is when the network learns the common "
+                             "patterns, the late phase is when it memorises noise. "
+                             "Trust EMA and routing keep updating during the "
+                             "delay, so weighting switches on with warm trust "
+                             "scores. No effect without "
+                             "--trust-weighted-aggregation.")
+    parser.add_argument("--trust-weight-strength", type=float, default=1.0,
+                        dest="trust_weight_strength",
+                        help="How hard trust weighting pulls, in [0, 1]. The "
+                             "score entering the aggregation weight becomes "
+                             "1 - strength*(1 - score). 1.0 (default) is the "
+                             "existing behaviour; 0.0 reproduces "
+                             "weighting-off exactly and is a useful self-check "
+                             "arm; 0.5 halves the pull. Use this to sweep the "
+                             "weighting dose at a FIXED partition and signal, "
+                             "which is the controlled version of comparing two "
+                             "different trust signals. No effect without "
+                             "--trust-weighted-aggregation.")
     parser.add_argument("--alpha-trust", type=float, default=0.9,
                         help="Trust-EMA damping factor. Default 0.9 (historical). "
                              "Lower (e.g. 0.7) accelerates EMA convergence when the "
