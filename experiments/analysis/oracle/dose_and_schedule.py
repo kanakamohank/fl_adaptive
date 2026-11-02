@@ -263,12 +263,17 @@ def fmt_row(label, ref_seeds, arm_seeds):
             cleared += 1
         ts = "   n/a" if math.isnan(t) else f"{t:+6.2f}"
         cells.append(f"{m:+8.4f} {ts} {better}/{n}")
-    return f"{label:<26} " + "  ".join(cells) + f"   [{cleared}/4]"
+    ns = {compare(ref_seeds, arm_seeds, nm)[2] for nm, _ in ENDPOINTS}
+    n_here = max(ns) if ns else 0
+    bar = t_crit(n_here)
+    bars = "  n=0" if n_here == 0 else f"n={n_here:<2} bar {bar:.2f}"
+    return (f"{label:<26} " + "  ".join(cells)
+            + f"   [{cleared}/4]  {bars}")
 
 
 def header():
     cols = "  ".join(f"{name:>18}" for name, _ in ENDPOINTS)
-    line = f"{'arm':<26} {cols}   {'sig':>5}"
+    line = f"{'arm':<26} {cols}   {'sig':>5}  {'sample':<14}"
     return line, "-" * len(line)
 
 
@@ -439,11 +444,14 @@ def main():
           f"{len(off)} seeds.")
     print("All numbers are PAIRED differences vs weighting-OFF "
           f"({OFF}).")
-    n_off = len(off)
-    print(f"Positive = better than not weighting at all. The significance bar "
-          f"follows the\nsample size: |t|>{t_crit(n_off):.2f} is p<0.05 at "
-          f"n={n_off}.")
-    print("[k/4] = how many of the four endpoints clear that threshold.\n")
+    print("Positive = better than not weighting at all.")
+    print("[k/4] = how many of the four endpoints clear p<0.05. The bar "
+          "follows each ARM's")
+    print("own paired sample size and is printed per row: arms can differ in "
+          "seed count")
+    print("(strength 0.00 is a control and is not re-run when seeds are "
+          "added), so one")
+    print("global threshold would be wrong for some rows.\n")
 
     print("ONE-VARIABLE CHECK (config fields differing from the OFF reference,")
     print("excluding the knobs under test):")

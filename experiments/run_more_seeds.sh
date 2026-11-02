@@ -35,7 +35,10 @@
 # Resume:  re-run it -- every job passes --skip-completed, so finished
 #          (arm, seed) pairs are reconstructed from disk instead of retrained.
 #
-# About 1.5 h per job: ~3 h for Phase 1, ~4.5 h for Phase 2+3, ~7.5 h for all.
+# Only the tavs_skip arm is trained (ARMS), because that is the only arm the
+# analysis reads. At ~2 min/round-set that is about 30 min per job: ~1 h for
+# Phase 1, ~2 h for Phases 2+3, ~3 h for all six. Training all three arms
+# instead would take about 9 h and discard two thirds of it.
 
 set -u   # deliberately NOT -e: one failed job must not abandon the rest
 
@@ -43,7 +46,23 @@ PY="${PY:-.venv/bin/python3}"
 C10N="${C10N:-data/cifar10n/CIFAR-10_human.pt}"
 export RAY_local_fs_capacity_threshold="${RAY_local_fs_capacity_threshold:-0.99}"
 
+# Fail fast on a missing interpreter or dataset. Without this, `set -u`
+# without `-e` lets all six jobs fail in 0 min and the script still prints
+# its full green-looking summary, so the only way to notice is to open six
+# logs.
+if [ ! -x "$PY" ]; then
+  echo "ERROR: python not executable at '$PY'." >&2
+  echo "       Set PY, e.g.  PY=python3 bash $0" >&2
+  exit 1
+fi
+if [ ! -f "$C10N" ]; then
+  echo "ERROR: CIFAR-10N labels not found at '$C10N'." >&2
+  echo "       Set C10N to the CIFAR-10_human.pt path." >&2
+  exit 1
+fi
+
 SEEDS="${SEEDS:-6,7,8,9,10}"
+ARMS="${ARMS:-tavs_skip}"
 LOG_DIR="results/_more_seeds_logs"
 mkdir -p "$LOG_DIR"
 
@@ -59,6 +78,17 @@ COMMON=(
   --trust-signal pretrain_loss_var --pretrain-loss-var-rescale 0.6,1.5
   --alpha-trust 0.7
   --log-oracle-signals
+  # Only the tavs_skip arm is analysed, so only it is trained. A job is
+  # len(arms) x len(seeds) runs: at the default three arms, 10 of every 15
+  # runs would be discarded, which is about 6 h of a 9 h batch. This also
+  # bypasses the matched-rate pass, and with it the skip{rate} directory
+  # whose name is the mean observed skip rate of the seeds just run -- a
+  # different seed set can round to a different integer and split or
+  # overwrite an earlier matched-rate record. That edge is already live:
+  # sweep_a10_twagg sits in skip31 while dose_a10_str050 and
+  # sched_a10_start15 sit in skip32, from rates of 0.3185-0.3210.
+  # Set ARMS=full_verify,tavs_skip,random_skip to restore the full pilot.
+  --arms "$ARMS"
   --seeds "$SEEDS"
   --skip-completed
 )
@@ -79,7 +109,7 @@ run_job () {
   fi
 }
 
-echo "Batch started $(date). Seeds: $SEEDS. Logs in $LOG_DIR/"
+echo "Batch started $(date). Seeds: $SEEDS. Arms: $ARMS. Logs in $LOG_DIR/"
 echo "Python: $PY"
 BATCH_T0=$SECONDS
 
@@ -125,16 +155,24 @@ echo ""
 echo "=============================================================="
 printf 'Batch finished %s  (total %d min)\n' "$(date '+%Y-%m-%d %H:%M:%S')" $(( (SECONDS - BATCH_T0) / 60 ))
 echo "=============================================================="
-echo "Seed counts per arm (should be 10 each for the arms touched above):"
+# Counted PER CONFIG SUBDIRECTORY, not per result directory. A plain
+# recursive count spans every config subdir, so the exact failure this check
+# exists to catch -- 5 seeds in one tag and 5 in another, because a flag
+# differed and the tag changed -- would total 10 and look correct.
+echo "tavs_skip seed count per config subdirectory (want ONE line per arm,"
+echo "showing 10):"
 for d in results/sweep_a10_notwagg results/sweep_a10_twagg \
          results/dose_a10_str025 results/dose_a10_str050 \
          results/sched_a10_start06 results/sched_a10_start15; do
-  [ -d "$d" ] && printf '  %-34s %s tavs_skip seeds\n' "$d" \
-    "$(find "$d" -path '*tavs_skip_seed*' -name pipeline_results.json | wc -l | tr -d ' ')"
+  [ -d "$d" ] || continue
+  echo "  $d"
+  find "$d" -path '*tavs_skip_seed*' -name pipeline_results.json \
+    | sed 's#/skip[0-9]*/tavs_skip_seed.*##' | sort | uniq -c \
+    | sed 's#^#    #'
 done
 echo ""
-echo "Each arm should show 10. If one shows 5 in TWO subdirectories instead"
-echo "of 10 in one, a flag differed and the tag changed -- say so before"
-echo "analysing, because mixing subdirectories would mix configurations."
+echo "Two lines for one arm means the config tag changed and seeds are split"
+echo "across configurations -- say so before analysing. The analysis reads"
+echo "one subdirectory's config while pooling both subdirectories' seeds."
 echo ""
 echo "Commit and push results/, then ask Claude to pull and analyse."
