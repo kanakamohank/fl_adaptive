@@ -727,6 +727,22 @@ def main():
                              "clients in the verified bucket proportional to "
                              "their inverted pretrain variance. Needed to translate "
                              "trust routing into aggregation weight.")
+    parser.add_argument("--arms", default=",".join(ARM_ORDER),
+                        help="Comma-separated arms to train. Default is all "
+                             "three, which is the historical behaviour. "
+                             "Restricting this saves real time: a job is "
+                             "len(arms) x len(seeds) runs, so an analysis "
+                             "that reads only tavs_skip pays for 3x what it "
+                             "uses. '--arms tavs_skip' also avoids the "
+                             "matched-rate pass entirely, and with it the "
+                             "skip{rate} directory whose name depends on the "
+                             "mean observed skip rate of the seeds just run "
+                             "-- a different seed set can round to a "
+                             "different integer and split or overwrite an "
+                             "earlier matched-rate record. Dropping "
+                             "random_skip also drops the matched-rate plot "
+                             "and the tavs-vs-random delta, which are the "
+                             "point of the full pilot.")
     parser.add_argument("--trust-weighting-start-round", type=int, default=1,
                         dest="trust_weighting_start_round",
                         help="Delay trust-weighted aggregation until this round. "
@@ -777,6 +793,20 @@ def main():
                              "crash is treated as invalid and re-run.")
     args = parser.parse_args()
     args.seed_list = [int(s) for s in args.seeds.split(",") if s.strip()]
+    # Parsed here rather than with argparse `choices` because the value is a
+    # comma-separated subset, not one of a fixed set of strings.
+    args.arm_list = [a.strip() for a in args.arms.split(",") if a.strip()]
+    _unknown = [a for a in args.arm_list if a not in ARM_ORDER]
+    if _unknown:
+        raise SystemExit(
+            f"--arms: unknown arm(s) {_unknown}. Choose from "
+            f"{','.join(ARM_ORDER)}."
+        )
+    if not args.arm_list:
+        raise SystemExit("--arms must name at least one arm.")
+    # Keep canonical order regardless of how they were typed, so the summary
+    # filename for a given arm set is stable.
+    args.arm_list = [a for a in ARM_ORDER if a in args.arm_list]
     # Guard: cifar100 has 100 classes and the noise flipper + model head both
     # consult --label-noise-num-classes. A mismatch silently produces a 10-way
     # head on 100-class data (training degenerates) and a noise map that only
@@ -799,31 +829,71 @@ def main():
     #
     # The one-pass fixed-rate mode is preserved via --skip-rate for
     # sensitivity checks but is not a matched-rate comparison.
+    # Which arms to actually train. Default is all three (historical
+    # behaviour, byte-identical). Restricting matters because an analysis
+    # that reads only one arm still pays for all three: at 3 arms x 5 seeds
+    # a job is 15 runs, and a tavs_skip-only study wastes 10 of them.
+    wanted = list(args.arm_list)
+
     rows = []
     for seed in args.seed_list:
         for arm in ("full_verify", "tavs_skip"):
-            rows.append(run_one(arm, seed, args, skip_rate=0.0))
+            if arm in wanted:
+                rows.append(run_one(arm, seed, args, skip_rate=0.0))
 
-    tavs_rates = [r["observed_skip_rate"] for r in rows if r["arm"] == "tavs_skip"]
-    matched_rate = (args.skip_rate if args.skip_rate is not None
-                    else float(np.mean(tavs_rates)))
-    print(f"\n[matched-rate] tavs_skip     observed skip = {tavs_rates}")
-    print(f"[matched-rate] -> random_skip target = {matched_rate:.3f}  "
-          f"(matched to tavs_skip mean)")
+    if "random_skip" in wanted:
+        tavs_rates = [r["observed_skip_rate"] for r in rows
+                      if r["arm"] == "tavs_skip"]
+        if args.skip_rate is None and not tavs_rates:
+            raise SystemExit(
+                "--arms includes random_skip without tavs_skip and no "
+                "--skip-rate was given, so there is no rate to match to. "
+                "Add tavs_skip to --arms or pass --skip-rate."
+            )
+        matched_rate = (args.skip_rate if args.skip_rate is not None
+                        else float(np.mean(tavs_rates)))
+        print(f"\n[matched-rate] tavs_skip     observed skip = {tavs_rates}")
+        print(f"[matched-rate] -> random_skip target = {matched_rate:.3f}  "
+              f"(matched to tavs_skip mean)")
 
-    for seed in args.seed_list:
-        rows.append(run_one("random_skip", seed, args, skip_rate=matched_rate))
-    # Path uses the matched rate so different runs do not collide.
-    out_dir = (Path(args.results_dir) / f"r{args.rounds}" / _config_tag(args)
-               / f"skip{int(matched_rate*100):02d}")
+        for seed in args.seed_list:
+            rows.append(run_one("random_skip", seed, args,
+                                skip_rate=matched_rate))
+        # Path uses the matched rate so different runs do not collide.
+        out_dir = (Path(args.results_dir) / f"r{args.rounds}" / _config_tag(args)
+                   / f"skip{int(matched_rate*100):02d}")
+        summary_name = "pilot_results.json"
+    else:
+        # No random arm, so there is no matched rate. Writing the summary
+        # under skip{rate} would be meaningless, and writing it under the
+        # usual name could CLOBBER a matched-rate record from an earlier
+        # run: the rate is the mean of the seeds just run, so a different
+        # seed set can round to a different integer. That edge is live --
+        # sweep_a10_twagg already sits in skip31 while dose_a10_str050 and
+        # sched_a10_start15 sit in skip32, from skip rates of 0.3185-0.3210.
+        # So park it beside the per-run directories under skip00, named for
+        # the arms it covers, where it cannot collide with anything.
+        matched_rate = None
+        out_dir = (Path(args.results_dir) / f"r{args.rounds}" / _config_tag(args)
+                   / "skip00")
+        summary_name = f"pilot_results_{'-'.join(sorted(wanted))}.json"
+
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "pilot_results.json").write_text(json.dumps(
-        {"config": {k: v for k, v in vars(args).items() if k != "seed_list"},
-         "seeds": args.seed_list, "matched_skip_rate": matched_rate,
+    (out_dir / summary_name).write_text(json.dumps(
+        {"config": {k: v for k, v in vars(args).items()
+                    if k not in ("seed_list", "arm_list")},
+         "seeds": args.seed_list, "arms": wanted,
+         "matched_skip_rate": matched_rate,
          "runs": rows}, indent=2))
 
-    plot_path = out_dir / "pilot_skip_comparison.png"
-    make_plot(rows, args, plot_path, matched_rate)
+    if matched_rate is not None:
+        plot_path = out_dir / "pilot_skip_comparison.png"
+        make_plot(rows, args, plot_path, matched_rate)
+    else:
+        plot_path = None
+        print(f"\n[arms={','.join(wanted)}] matched-rate plot skipped: it "
+              f"compares tavs_skip against random_skip at a matched rate, "
+              f"and random_skip was not run.")
 
     # Compact console report.
     print(f"\n{'=' * 80}")
@@ -832,7 +902,10 @@ def main():
     print(f"{'=' * 80}")
     print(f"{'arm':>14} {'late acc (mean+-std)':>26} "
           f"{'verified':>10} {'promoted':>10} {'obs skip':>10}")
-    for a in ARM_ORDER:
+    # Only arms that actually ran. summarise() returns nan for a missing arm
+    # and paired_delta() has nothing to pair, so printing them would fill the
+    # report with nan rows and invite someone to read a blank as a zero.
+    for a in [x for x in ARM_ORDER if any(r["arm"] == x for r in rows)]:
         la = summarise(rows, a, "late_accuracy")
         v  = summarise(rows, a, "total_verified")
         p  = summarise(rows, a, "total_promoted")
@@ -841,9 +914,12 @@ def main():
               f"{v['mean']:>10.0f} {p['mean']:>10.0f} {os_['mean']:>10.2%}")
 
     # Paired deltas -- the actual test the pilot is trying to run.
+    _ran = {r["arm"] for r in rows}
     for a, b in (("tavs_skip", "full_verify"),
                  ("random_skip", "full_verify"),
                  ("tavs_skip", "random_skip")):
+        if a not in _ran or b not in _ran:
+            continue
         d = paired_delta(rows, args.seed_list, "late_accuracy", a, b)
         signs = f"{max(d['n_negative'], d['n_positive'])}/{len(args.seed_list)} same-sign"
         print(f"\n  {a} - {b}  late-acc delta")

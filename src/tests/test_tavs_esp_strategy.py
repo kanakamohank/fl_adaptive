@@ -733,6 +733,21 @@ def test_trust_weighting_start_round_delays_weighting():
         "start_round<=1 must behave as start_round=1"
     )
 
+    # 4. start_round=1 must be a BIT-EXACT no-op across every round, not
+    #    merely equal at round 1. The gate is
+    #    `server_round < max(1, start_round)`, which is False for every
+    #    round >= 1, so the delayed path must never fire. This matters
+    #    because seeds from before the flag existed are pooled with seeds
+    #    run after it: if start_round=1 perturbed anything, those pools
+    #    would be cross-version and the paired comparison invalid.
+    explicit_one = _trace(twagg_on=True, start_round=1)
+    for rnd in sorted(on_now):
+        d = float(np.abs(explicit_one[rnd] - on_now[rnd]).sum())
+        assert d == 0.0, (
+            f"start_round=1 must be a bit-exact no-op; round {rnd} differs "
+            f"by L1={d:.3e}, so pre-flag and post-flag seeds cannot be pooled"
+        )
+
     print(f"✓ rounds 1-{START-1} bit-identical to weighting OFF; "
           f"round {START} matches weighting ON; default is 1; start<=1 safe")
     return True

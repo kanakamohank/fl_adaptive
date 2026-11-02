@@ -59,7 +59,33 @@ from pathlib import Path
 
 ARM = "tavs_skip"
 ENDPOINTS = [("final", 1), ("last3", 3), ("last5", 5), ("last10", 10)]
-T_CRIT = 2.78   # two-sided p<0.05 at n=5 (4 d.o.f.)
+# Two-sided p<0.05 critical values of Student's t, by degrees of freedom
+# (n-1). This MUST follow the sample size: an earlier version hardcoded 2.78
+# (the n=5 value) and labelled every table "at n=5", so the moment a run
+# family gained seeds the significance column would have been judged against
+# too strict a bar -- at n=10 the bar is 2.26, and an effect at t=2.4 would
+# have been reported as not significant when it is.
+_T_05 = {1: 12.71, 2: 4.303, 3: 3.182, 4: 2.776, 5: 2.571, 6: 2.447,
+         7: 2.365, 8: 2.306, 9: 2.262, 10: 2.228, 11: 2.201, 12: 2.179,
+         13: 2.160, 14: 2.145, 15: 2.131, 16: 2.120, 17: 2.110, 18: 2.101,
+         19: 2.093, 20: 2.086, 25: 2.060, 30: 2.042, 40: 2.021, 60: 2.000}
+
+
+def t_crit(n):
+    """Two-sided 0.05 critical t for a paired sample of size n.
+
+    For a d.o.f. not tabulated, the next LOWER tabulated d.o.f. is used,
+    which gives a larger (more conservative) threshold -- never a smaller
+    one, so this cannot manufacture significance. Returns inf for n<2,
+    where no t exists.
+    """
+    if n < 2:
+        return float("inf")
+    dof = n - 1
+    if dof in _T_05:
+        return _T_05[dof]
+    lower = [d for d in _T_05 if d < dof]
+    return _T_05[max(lower)] if lower else 1.96
 
 # Config fields allowed to differ between a run family and the
 # weighting-off reference. Anything else differing means the comparison is
@@ -233,16 +259,21 @@ def fmt_row(label, ref_seeds, arm_seeds):
         if n == 0:
             cells.append(f"{'--':>18}")
             continue
-        if not math.isnan(t) and abs(t) > T_CRIT:
+        if not math.isnan(t) and abs(t) > t_crit(n):
             cleared += 1
         ts = "   n/a" if math.isnan(t) else f"{t:+6.2f}"
         cells.append(f"{m:+8.4f} {ts} {better}/{n}")
-    return f"{label:<26} " + "  ".join(cells) + f"   [{cleared}/4]"
+    ns = {compare(ref_seeds, arm_seeds, nm)[2] for nm, _ in ENDPOINTS}
+    n_here = max(ns) if ns else 0
+    bar = t_crit(n_here)
+    bars = "  n=0" if n_here == 0 else f"n={n_here:<2} bar {bar:.2f}"
+    return (f"{label:<26} " + "  ".join(cells)
+            + f"   [{cleared}/4]  {bars}")
 
 
 def header():
     cols = "  ".join(f"{name:>18}" for name, _ in ENDPOINTS)
-    line = f"{'arm':<26} {cols}   {'sig':>5}"
+    line = f"{'arm':<26} {cols}   {'sig':>5}  {'sample':<14}"
     return line, "-" * len(line)
 
 
@@ -267,12 +298,14 @@ def phase0_gate(off, s000):
     """Verdict string + per-endpoint rows. Gates on ALL endpoints."""
     rows, verdict, worst_t = [], "PASS", 0.0
     any_shared = False
+    crit = float("inf")
     for name, _ in ENDPOINTS:
         m, t, n, _b = compare(off, s000, name)
         if n == 0:
             rows.append(f"    {name:<8} no shared seeds")
             continue
         any_shared = True
+        crit = min(crit, t_crit(n))
         # nan t means zero spread, i.e. bit-identical -> the strongest
         # possible pass, NOT a failure.
         ts = "n/a (identical)" if math.isnan(t) else f"t={t:+.2f}"
@@ -281,10 +314,10 @@ def phase0_gate(off, s000):
             worst_t = max(worst_t, abs(t))
     if not any_shared:
         verdict = "FAIL (no shared seeds -- the gate did not run)"
-    elif worst_t > T_CRIT:
-        verdict = f"FAIL (|t|={worst_t:.2f} > {T_CRIT} on at least one endpoint)"
+    elif worst_t > crit:
+        verdict = f"FAIL (|t|={worst_t:.2f} > {crit:.2f} on at least one endpoint)"
     else:
-        verdict = f"PASS (|t| <= {worst_t:.2f} on every endpoint)"
+        verdict = f"PASS (|t| <= {worst_t:.2f} on every endpoint, bar {crit:.2f})"
     return verdict, rows
 
 
@@ -355,6 +388,20 @@ def self_test():
         "a dotted tavs key must not be reduced to its final component, or it " \
         "could be wrongly exempted from the one-variable check"
 
+    # --- t_crit must FOLLOW the sample size. Hardcoding the n=5 value was a
+    # real bug: once an arm gains seeds, the bar must fall, or a genuine
+    # effect at t=2.4 with n=10 is reported as not significant.
+    assert abs(t_crit(5) - 2.776) < 1e-9, "n=5 -> 4 d.o.f. -> 2.776"
+    assert abs(t_crit(10) - 2.262) < 1e-9, "n=10 -> 9 d.o.f. -> 2.262"
+    assert t_crit(10) < t_crit(5), "more seeds must LOWER the bar"
+    assert t_crit(1) == float("inf") and t_crit(0) == float("inf"), \
+        "no t exists below n=2"
+    # An untabulated d.o.f. must round to the next LOWER one, giving a
+    # LARGER threshold -- conservative, so it cannot manufacture significance.
+    assert t_crit(23) == t_crit(21) == _T_05[20], \
+        "untabulated d.o.f. must use the next lower tabulated entry"
+    assert t_crit(23) > t_crit(26), "the bar must still fall as n grows"
+
     print("✓ self-test passed: tail_mean, paired_t (known value / zero spread "
           "/ n<2), compare sign + seed intersection, phase0 gate (identical "
           "PASSes, offset FAILs, no-seeds FAILs), _canon (order / numeric vs "
@@ -392,12 +439,19 @@ def main():
             print("  ", m)
         return 1
 
-    print("Dirichlet(1.0), CIFAR-10N worst, 50 clients, 40 rounds, 5 seeds.")
+    off = load_seeds(OFF)
+    print(f"Dirichlet(1.0), CIFAR-10N worst, 50 clients, 40 rounds, "
+          f"{len(off)} seeds.")
     print("All numbers are PAIRED differences vs weighting-OFF "
           f"({OFF}).")
-    print(f"Positive = better than not weighting at all. |t|>{T_CRIT} is "
-          f"p<0.05 at n=5.")
-    print("[k/4] = how many of the four endpoints clear that threshold.\n")
+    print("Positive = better than not weighting at all.")
+    print("[k/4] = how many of the four endpoints clear p<0.05. The bar "
+          "follows each ARM's")
+    print("own paired sample size and is printed per row: arms can differ in "
+          "seed count")
+    print("(strength 0.00 is a control and is not re-run when seeds are "
+          "added), so one")
+    print("global threshold would be wrong for some rows.\n")
 
     print("ONE-VARIABLE CHECK (config fields differing from the OFF reference,")
     print("excluding the knobs under test):")
@@ -410,8 +464,6 @@ def main():
         else:
             print(f"  {label:<26} clean")
     print()
-
-    off = load_seeds(OFF)
 
     verdict, rows = phase0_gate(off, load_seeds(S000))
     print("PHASE 0 GATE: strength=0.0 must reproduce weighting-off, on EVERY "
