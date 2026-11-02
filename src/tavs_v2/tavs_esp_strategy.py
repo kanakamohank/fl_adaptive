@@ -1097,8 +1097,19 @@ class TavsEspStrategy(Strategy):
         _strength = max(0.0, min(1.0, float(getattr(
             self.config, "trust_weight_strength", 1.0))))
 
-        def _pull(score: float) -> float:
-            return 1.0 - _strength * (1.0 - score)
+        # Short-circuit at full strength. `1.0 - 1.0*(1.0 - s)` is NOT
+        # bit-identical to `s` in IEEE754 -- it differs for 335 of the 999
+        # scores s = 0.001..0.999, e.g. 0.001 -> 0.0010000000000000009. At
+        # the default strength this field is advertised as a no-op, and a
+        # 1-ULP change in an aggregation weight compounds chaotically over
+        # 40 rounds, so without this branch every run made after the flag
+        # landed would be subtly incomparable with every run made before it.
+        if _strength >= 1.0:
+            def _pull(score: float) -> float:
+                return score
+        else:
+            def _pull(score: float) -> float:
+                return 1.0 - _strength * (1.0 - score)
 
         # A strength below 1.0 scales the Byzantine down-weighting as well as
         # the trust weighting (see the verified_weights comment for why they

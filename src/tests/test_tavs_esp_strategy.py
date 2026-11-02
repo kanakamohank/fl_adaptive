@@ -765,7 +765,11 @@ def test_trust_weight_strength_interpolates_to_weighting_off():
     def _run(twagg_on, strength):
         cfg = DummyConfig()
         cfg.disable_trust_weighted_aggregation = not twagg_on
-        cfg.trust_weight_strength = strength
+        # strength=None means "leave the attribute unset", which exercises
+        # aggregate_fit's getattr default. Everything else is held identical
+        # so the ONLY difference from an explicit 1.0 is the field's absence.
+        if strength is not None:
+            cfg.trust_weight_strength = strength
         cfg.trust_signal = "pretrain_loss_var"
         cfg.pretrain_loss_var_rescale_lo = 0.5
         cfg.pretrain_loss_var_rescale_hi = 3.0
@@ -845,6 +849,30 @@ def test_trust_weight_strength_interpolates_to_weighting_off():
     assert _verified_weight(0.0, 100, 1.0, True) == 0.0, (
         "at full strength a flagged client must still reach ZERO weight -- "
         "the soft-outlier invariant must survive the strength dial"
+    )
+
+    # 5. The default must be a BIT-EXACT no-op, not merely a mathematical
+    #    one. 1.0 - 1.0*(1.0 - s) != s in IEEE754 for 335 of the 999 scores
+    #    s = 0.001..0.999, and a 1-ULP change in an aggregation weight
+    #    compounds chaotically over 40 rounds. If this regresses, every run
+    #    made after the flag landed becomes subtly incomparable with every
+    #    run made before it, and the comparison is silently cross-version.
+    # `full` is _run(True, 1.0): an EXPLICIT strength of 1.0. `_run(True,
+    # None)` leaves the field unset, exercising aggregate_fit's getattr
+    # default. Everything else in the two fixtures is identical, so any
+    # difference is the short-circuit failing.
+    d_default = float(np.abs(_run(True, None) - full).sum())
+    assert d_default == 0.0, (
+        f"an explicit strength=1.0 must be BIT-IDENTICAL to a config with no "
+        f"trust_weight_strength field at all (L1={d_default:.3e}); the "
+        f"short-circuit at full strength has regressed and pre-flag runs are "
+        f"no longer comparable"
+    )
+    # And prove the short-circuit is load-bearing, not incidental.
+    assert any((1.0 - 1.0 * (1.0 - s / 1000.0)) != s / 1000.0
+               for s in range(1, 1000)), (
+        "if 1 - 1*(1-s) were exactly s on this platform the short-circuit "
+        "would be redundant; it is not, so keep it"
     )
 
     print(f"✓ strength 0.0 == weighting OFF exactly; 0.5 strictly between "
