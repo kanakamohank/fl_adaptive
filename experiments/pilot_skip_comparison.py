@@ -174,6 +174,9 @@ def _config_tag(args) -> str:
         _str = float(getattr(args, "trust_weight_strength", 1.0))
         if abs(_str - 1.0) > 1e-9:
             parts.append(f"twstr{int(round(_str * 100)):03d}")
+        _flr = float(getattr(args, "trust_weight_floor", 0.05))
+        if abs(_flr - 0.05) > 1e-9:
+            parts.append(f"twflr{int(round(_flr * 100)):03d}")
     return "_".join(parts)
 
 
@@ -280,6 +283,8 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
             getattr(args, "trust_weighting_start_round", 1) or 1),
         trust_weight_strength=float(
             getattr(args, "trust_weight_strength", 1.0)),
+        trust_weight_floor=float(
+            getattr(args, "trust_weight_floor", 0.05)),
         trust_signal=getattr(args, "trust_signal", "bvd"),
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
@@ -768,6 +773,24 @@ def main():
                              "which is the controlled version of comparing two "
                              "different trust signals. No effect without "
                              "--trust-weighted-aggregation.")
+    parser.add_argument("--trust-weight-floor", type=float, default=0.05,
+                        dest="trust_weight_floor",
+                        help="Smallest weight multiplier an ACCEPTED client "
+                             "can be reduced to, in [0, 1]. Default 0.05 is "
+                             "the historical value. Raising it at full "
+                             "strength separates two explanations the "
+                             "strength sweep cannot: whether the harm grows "
+                             "with how hard the weighting pulls, or comes "
+                             "specifically from clients crushed toward zero "
+                             "(the floor can only bind when strength > 1 - "
+                             "floor, so full strength is the only arm in that "
+                             "sweep where any accepted client nears zero). "
+                             "For reference, FedCNI and FedClean weight by "
+                             "detected-clean sample count, so a 40%%-noise "
+                             "client keeps about 0.6 weight. Does NOT touch "
+                             "the outlier branch, so it carries no security "
+                             "cost, unlike --trust-weight-strength. No effect "
+                             "without --trust-weighted-aggregation.")
     parser.add_argument("--alpha-trust", type=float, default=0.9,
                         help="Trust-EMA damping factor. Default 0.9 (historical). "
                              "Lower (e.g. 0.7) accelerates EMA convergence when the "

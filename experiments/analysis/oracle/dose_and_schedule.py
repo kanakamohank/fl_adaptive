@@ -321,6 +321,145 @@ def phase0_gate(off, s000):
     return verdict, rows
 
 
+def ci_halfwidth(diffs):
+    """Half-width of the 95% CI on a paired mean: t_crit * standard error.
+
+    Reported alongside every head-to-head because "not significant" on its
+    own is not a result. A null with a half-width of 0.0078 against a harm of
+    0.0139 cannot exclude the arm recovering half the harm; a half-width of
+    0.0017 can. Saying only "no difference" hides which of those it is.
+    """
+    n = len(diffs)
+    if n < 2:
+        return float("nan")
+    sd = statistics.stdev(diffs)
+    if sd == 0.0:
+        return 0.0
+    return t_crit(n) * sd / math.sqrt(n)
+
+
+def perturbation_tvd(root: Path, strength, lo, hi, floor=0.05):
+    """How far weighting at `strength` actually moves the client shares.
+
+    Total variation distance between the weighted and the unweighted share
+    vectors, averaged over rounds: 0 means identical to not weighting, 1
+    means no overlap. Computed from the scores a real run logged.
+
+    This exists because NOMINAL strength is the wrong yardstick for a
+    super-linearity test. The weight is max(floor, 1 - strength*(1 - score)),
+    and scores under a skewed partition cluster near 1, so halving the
+    strength does NOT halve the distortion. Measured on each arm's own logs:
+    strength 0.25/0.50/1.00 give TVD 0.0102/0.0234/0.0697, i.e. 0.147/0.336
+    of full strength rather than 0.25/0.50. Testing against the nominal
+    prediction overstates the super-linearity gap by roughly 30%.
+
+    Three scope limits, none of them fixable from the logs:
+
+    1. LATE-ROUND DOMINATED. Round TVDs are averaged unweighted, and the
+       distortion grows enormously over training -- on these runs, mean TVD
+       by decade is 0.0002 / 0.018 / 0.058 / 0.132 for rounds 1-10 / 11-20 /
+       21-30 / 31-40. So the single number is effectively a late-training
+       statistic. Mean-of-ratios is not an alternative: early rounds divide
+       by ~0.
+    2. VERIFIED CLIENTS ONLY. The aggregator normalises verified and
+       promoted weights jointly, and promoted weights are scaled by the
+       same strength, so down-weighting verified clients also shifts mass
+       toward promoted ones. About a third of logged client-rows are
+       unverified, and that movement is invisible here. Including promoted
+       clients at undistorted weight raises frac(0.25) by roughly 9%, i.e.
+       AWAY from the super-linearity conclusion, so omitting them is not
+       what produces the finding.
+    3. FLOOR APPLIED TO EVERYONE. aggregate_fit exempts BVD-flagged clients
+       from the floor; outlier membership is not recoverable from the logs,
+       so the floor is applied to all. Under 1% of scores are below the
+       floor and the floor cannot bind at all below strength 1.0 (the
+       minimum multiplier is 1-strength >= 0.5), so the worst case moves
+       frac(0.25) by about 1%.
+    """
+    if hi <= lo:
+        # Mirror the strategy's own guard (tavs_esp_strategy.py: `if hi <=
+        # lo: lo, hi = 0.5, 3.0`). Without this, hi == lo raises
+        # ZeroDivisionError and, worse, hi < lo silently INVERTS the signal
+        # and returns a plausible-looking number.
+        lo, hi = 0.5, 3.0
+    vals = []
+    pat = str(root / "**" / f"{ARM}_seed*" / "pipeline_results.json")
+    for p in sorted(glob.glob(pat, recursive=True)):
+        fts = json.loads(Path(p).read_text()).get("final_trust_state") or {}
+        for _r, ent in (fts.get("oracle_signal_history") or {}).items():
+            rows = []
+            for _c, e in ent.items():
+                raw = e.get("pretrain_loss_var")
+                n = e.get("num_examples") or 0
+                if not e.get("is_verified") or raw is None or n <= 0:
+                    continue
+                s = 1.0 - max(0.0, min(1.0, (float(raw) - lo) / (hi - lo)))
+                rows.append((s, float(n)))
+            if len(rows) < 3:
+                continue
+            w = [max(floor, 1.0 - strength * (1.0 - s)) * n for s, n in rows]
+            u = [n for _s, n in rows]
+            sw, su = sum(w), sum(u)
+            if sw <= 0 or su <= 0:
+                continue
+            vals.append(0.5 * sum(abs(a / sw - c / su) for a, c in zip(w, u)))
+    return statistics.mean(vals) if vals else float("nan")
+
+
+def batch_agreement(ref_seeds, arm_seeds, endpoint, split=5, atol=0.001):
+    """Paired effect computed separately for low and high seed numbers.
+
+    Seeds added in a later session can differ systematically from the
+    originals even when the config is identical: this pipeline re-seeds
+    torch/numpy/random per run, yet its own source notes that Ray and
+    DataLoader ordering still leave real movement, and our Phase-0 control
+    shows a 0.0085 residual between two configurations that are
+    mathematically identical.
+
+    This caught a false finding. An "early-training harm" of -0.0024
+    (t=-2.70, apparently significant at n=10) separated PERFECTLY by batch:
+    seeds 1-5 gave -0.0002 and seeds 6-10 gave -0.0047. Perfect separation
+    of 5 and 5 has probability 2/C(10,5) = 0.008 under one distribution, so
+    the quantity was a batch artifact, not an effect. The endpoint
+    comparisons passed the same check (final -0.0153 vs -0.0124, last10
+    -0.0055 vs -0.0082), which is why those survived and the early-window
+    claim was withdrawn.
+
+    Returns (low_mean, high_mean, verdict), verdict being "yes", "NO", or
+    "one-batch" when every seed falls on one side of the split. That third
+    value exists because returning a plain False there made the row vanish
+    from the caller's table, so renumbering seeds would silently remove the
+    guard while the table still read as all-pass.
+
+    `atol` keeps the rule from firing on noise. The magnitude test is a 3x
+    ratio, which is scale-free and so would flag -0.00002 against -0.0008 --
+    both indistinguishable from zero against the 0.022 round-to-round jitter
+    this script prints. Batches whose effects are BOTH below atol agree by
+    definition; there is nothing there to disagree about. atol also guards
+    the sign test, where an exactly-zero batch would otherwise read as
+    positive and flag a spurious sign flip.
+    """
+    out = []
+    for keep in (lambda k: k <= split, lambda k: k > split):
+        ks = [s for s in sorted(set(ref_seeds) & set(arm_seeds))
+              if s.isdigit() and keep(int(s))]
+        if not ks:
+            return float("nan"), float("nan"), "one-batch"
+        out.append(statistics.mean(arm_seeds[s][endpoint] - ref_seeds[s][endpoint]
+                                   for s in ks))
+    a, b = out
+    # Both negligible -> nothing to disagree about.
+    if abs(a) < atol and abs(b) < atol:
+        return a, b, "yes"
+    # Sign flip, but only when at least one side is big enough to mean it.
+    if (a < 0) != (b < 0) and max(abs(a), abs(b)) >= atol:
+        return a, b, "NO"
+    lo_m, hi_m = min(abs(a), abs(b)), max(abs(a), abs(b))
+    if lo_m == 0.0:
+        return a, b, "yes" if hi_m < atol else "NO"
+    return a, b, ("yes" if (hi_m / lo_m) <= 3.0 else "NO")
+
+
 def self_test():
     """Exercise every helper the reported numbers depend on."""
     # --- tail_mean
@@ -402,10 +541,68 @@ def self_test():
         "untabulated d.o.f. must use the next lower tabulated entry"
     assert t_crit(23) > t_crit(26), "the bar must still fall as n grows"
 
+    # --- ci_halfwidth: known value. [1,2,3] has sample stdev exactly 1 and
+    # n=3, so SE = 1/sqrt(3). n=3 means 2 degrees of freedom, whose critical
+    # value is 4.303 -- NOT 3.182, which is the dof=3 (n=4) entry. An
+    # earlier version of this assertion used 3.182 and the self-test caught
+    # it, which is the off-by-one this check exists to prevent.
+    hw = ci_halfwidth([1.0, 2.0, 3.0])
+    assert abs(hw - 4.303 / math.sqrt(3.0)) < 1e-9, hw
+    assert ci_halfwidth([2.0] * 6) == 0.0, "zero spread -> zero width"
+    assert math.isnan(ci_halfwidth([1.0])), "n<2 has no CI"
+    # More seeds must NARROW the interval for the same spread.
+    assert ci_halfwidth([1.0, 2.0, 3.0] * 4) < ci_halfwidth([1.0, 2.0, 3.0]), \
+        "a larger sample must give a narrower interval"
+
+    # --- batch_agreement. It must flag a SIGN split and a MAGNITUDE blowup,
+    # and pass genuinely consistent batches. This is the guard that caught a
+    # false early-training finding, so its failure modes are pinned.
+    def _mk(vals):
+        return {str(i + 1): {"final": v} for i, v in enumerate(vals)}
+    zeros = _mk([0.0] * 10)
+    # Agreeing batches: -0.01 either side.
+    a, bb, v = batch_agreement(zeros, _mk([-0.01] * 10), "final")
+    assert v == "yes" and abs(a - bb) < 1e-12, (a, bb, v)
+    # Sign split, both sides meaningful -> flagged.
+    a, bb, v = batch_agreement(zeros, _mk([0.01] * 5 + [-0.01] * 5), "final")
+    assert v == "NO" and a > 0 > bb, (a, bb, v)
+    # Magnitude blowup: same sign, 5x apart, above atol -> flagged.
+    a, bb, v = batch_agreement(zeros, _mk([-0.002] * 5 + [-0.010] * 5), "final")
+    assert v == "NO", (a, bb, v)
+    # Same sign, 2x apart -> within tolerance.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.002] * 5 + [-0.004] * 5), "final")
+    assert v == "yes", v
+    # The real early-window case that was withdrawn: -0.0002 vs -0.0047.
+    # 23x apart and the larger side is above atol, so it must flag.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.0002] * 5 + [-0.0047] * 5), "final")
+    assert v == "NO", "the withdrawn early-window split must be flagged"
+    # And the endpoint case that survived: -0.0153 vs -0.0124, must pass.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.0153] * 5 + [-0.0124] * 5), "final")
+    assert v == "yes", "the surviving endpoint split must not be flagged"
+    # NOISE must not be flagged: -0.00002 vs -0.0008 is 40x apart but both
+    # are far below the 0.022 round-to-round jitter. The scale-free 3x rule
+    # alone called this a disagreement.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.00002] * 5 + [-0.0008] * 5), "final")
+    assert v == "yes", "two negligible batches must not read as disagreement"
+    # A sign flip between two negligible batches is also noise.
+    _a, _b, v = batch_agreement(zeros, _mk([0.0001] * 5 + [-0.0002] * 5), "final")
+    assert v == "yes", "a sign flip below atol is noise, not disagreement"
+    # An exactly-zero batch against a meaningful one must still flag.
+    _a, _b, v = batch_agreement(zeros, _mk([0.0] * 5 + [-0.01] * 5), "final")
+    assert v == "NO", "zero vs a real effect is a disagreement"
+    # One batch only must be reported as such, NOT silently dropped and
+    # NOT counted as agreement.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.01] * 5), "final")
+    assert v == "one-batch", v
+
     print("✓ self-test passed: tail_mean, paired_t (known value / zero spread "
           "/ n<2), compare sign + seed intersection, phase0 gate (identical "
           "PASSes, offset FAILs, no-seeds FAILs), _canon (order / numeric vs "
-          "string / tuples / empty / unparseable), _bare prefix stripping")
+          "string / tuples / empty / unparseable), _bare prefix stripping, "
+          "t_crit (n=5/n=10/fallback/n<2), ci_halfwidth (known value / zero "
+          "spread / narrowing), batch_agreement (sign split / magnitude "
+          "blowup / the two real retraction cases / noise below atol / "
+          "one-batch)")
     return True
 
 
@@ -511,6 +708,125 @@ def main():
         print(fmt_row(f"{label} vs start 1", full, load_seeds(p)))
     print(fmt_row("start 15 vs start 6", load_seeds(b / "sched_a10_start06"),
                   load_seeds(b / "sched_a10_start15")))
+    print()
+    # "Not significant" is not a result on its own. The CI half-width says
+    # how large a real difference could still be hiding, which is what turns
+    # a null into a bounded statement.
+    print("  What those nulls can actually EXCLUDE (95% CI on the paired mean):")
+    for label, p2 in SCHED[:2]:
+        arm = load_seeds(p2)
+        for ep in ("final", "last10"):
+            # `off` is indexed below for the harm, so it must be in the
+            # intersection. Without it, a seed present in FULL and the
+            # schedule arm but missing from OFF raised KeyError -- exactly
+            # the partially-complete-batch case this report has to survive.
+            shared = sorted(set(full) & set(arm) & set(off))
+            if len(shared) < 2:
+                continue
+            d = [arm[s][ep] - full[s][ep] for s in shared]
+            m, _t, _n = paired_t(d)
+            hw = ci_halfwidth(d)
+            harm = statistics.mean(full[s][ep] - off[s][ep] for s in shared)
+            frac = (hw / abs(harm)) if harm else float("nan")
+            print(f"    {label:<16} {ep:<7} mean {m:+.4f}  CI [{m - hw:+.4f}, "
+                  f"{m + hw:+.4f}]  half-width is {frac:.0%} of the "
+                  f"{harm:+.4f} harm")
+    print("    A half-width near or above the harm means the test could not have")
+    print("    detected the schedule removing most of it -- underpowered, not null.\n")
+
+    # Super-linearity, tested against the ACTUAL perturbation each strength
+    # produces rather than its nominal value. See perturbation_tvd for why
+    # nominal strength is the wrong yardstick.
+    print("SUPER-LINEARITY (is the harm proportional to how much the weighting")
+    print("actually distorts the client shares?)")
+    # Each arm's distortion is measured on ITS OWN logs, and the full-strength
+    # denominator on the FULL arm's own logs.
+    #
+    # This is the consistent pairing and it is NOT the flattering one. The
+    # quantity being scaled, (full - off), is the harm the FULL arm produced
+    # under the distortion the FULL arm actually applied -- TVD 0.0697 on its
+    # own logs. An earlier version measured every strength on the OFF arm's
+    # logs, whose full-strength TVD is 0.0521, i.e. 34% smaller. Dividing by
+    # that smaller denominator inflates frac, inflates the predicted harm and
+    # inflates the gap, so it biased the test TOWARD super-linearity. It also
+    # changed the answer: 8/8 cells significant on the OFF reference versus
+    # 7/8 on this one. The sensitivity line below names whichever cells depend
+    # on that choice, rather than letting one reference silently decide it.
+    full_tvd = perturbation_tvd(FULL, 1.0, 0.6, 1.5)
+    print(f"  distortion of full strength, on its own logs (TVD) = "
+          f"{full_tvd:.4f}")
+    print(f"  {'strength':>9} {'endpoint':>8} {'distortion':>11} "
+          f"{'observed':>10} {'predicted':>10} {'gap':>9} {'t':>7} {'sig':>4}")
+    nsig = ntot = 0
+    borderline = []
+    for lab, p, st in [("0.25", b / "dose_a10_str025", 0.25),
+                       ("0.50", b / "dose_a10_str050", 0.50)]:
+        arm = load_seeds(p)
+        own = perturbation_tvd(p, st, 0.6, 1.5)
+        frac = (own / full_tvd) if full_tvd else float("nan")
+        # The plausible range across the three defensible references
+        # (own logs, OFF logs, FULL logs), used only to flag sensitivity.
+        alts = [frac,
+                perturbation_tvd(OFF, st, 0.6, 1.5)
+                / (perturbation_tvd(OFF, 1.0, 0.6, 1.5) or float("nan")),
+                perturbation_tvd(FULL, st, 0.6, 1.5) / (full_tvd or float("nan"))]
+        for ep, _ in ENDPOINTS:
+            shared = sorted(set(off) & set(arm) & set(full))
+            if len(shared) < 2:
+                continue
+            def _gap(f):
+                d = [(arm[s2][ep] - off[s2][ep]) - f * (full[s2][ep] - off[s2][ep])
+                     for s2 in shared]
+                return paired_t(d)
+            m, t, n = _gap(frac)
+            obs = statistics.mean(arm[s2][ep] - off[s2][ep] for s2 in shared)
+            pred = frac * statistics.mean(full[s2][ep] - off[s2][ep] for s2 in shared)
+            ntot += 1
+            ok = (not math.isnan(t)) and abs(t) > t_crit(n)
+            nsig += ok
+            # Does the verdict hold across every defensible reference?
+            verdicts = set()
+            for f in alts:
+                if math.isnan(f):
+                    continue
+                _m2, t2, n2 = _gap(f)
+                verdicts.add((not math.isnan(t2)) and abs(t2) > t_crit(n2))
+            if len(verdicts) > 1:
+                borderline.append(f"{lab}/{ep}")
+            print(f"  {lab:>9} {ep:>8} {frac:>11.3f} {obs:>+10.4f} "
+                  f"{pred:>+10.4f} {m:>+9.4f} {t:>+7.2f} "
+                  f"{('YES' if ok else 'no') + ('*' if len(verdicts) > 1 else ''):>4}")
+    print(f"  => {nsig}/{ntot} significant. A positive gap means that strength "
+          f"is LESS harmful\n     than its share of the distortion predicts.")
+    if borderline:
+        print(f"  * {', '.join(borderline)} flip verdict depending on which run's "
+              f"logs the\n    distortion is measured on, so that cell is not "
+              f"load-bearing evidence.")
+    else:
+        print("  No cell depends on the choice of distortion reference.")
+    print()
+
+    # Batch agreement. Runs added in a later session can differ
+    # systematically from the originals even at an identical config, so any
+    # pooled claim has to survive being split by seed batch.
+    print("BATCH AGREEMENT (do the first and second halves of the seeds give the")
+    print("same answer? a NO means that quantity is not poolable across batches)")
+    print(f"  {'arm / quantity':<26} {'endpoint':>8} {'seeds 1-5':>12} "
+          f"{'seeds 6-10':>12} {'agree':>7}")
+    for label, p in [("strength 1.00", FULL),
+                     ("strength 0.50", b / "dose_a10_str050"),
+                     ("start round 6", b / "sched_a10_start06"),
+                     ("start round 15", b / "sched_a10_start15")]:
+        arm = load_seeds(p)
+        for ep in ("final", "last10"):
+            lo_m, hi_m, verdict = batch_agreement(off, arm, ep)
+            if verdict == "one-batch":
+                print(f"  {label:<26} {ep:>8} {'--':>12} {'--':>12} "
+                      f"{'1 batch':>9}   (all seeds on one side of the split: "
+                      f"this guard did NOT run)")
+                continue
+            print(f"  {label:<26} {ep:>8} {lo_m:>+12.4f} {hi_m:>+12.4f} "
+                  f"{verdict:>9}")
     print()
 
     print("Absolute accuracies at the last10 endpoint (mean over seeds):")

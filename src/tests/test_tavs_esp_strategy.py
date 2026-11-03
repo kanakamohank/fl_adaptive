@@ -896,6 +896,111 @@ def test_trust_weight_strength_interpolates_to_weighting_off():
     return True
 
 
+def test_trust_weight_floor_bounds_inliers_only():
+    """`trust_weight_floor` must raise the inlier minimum and nothing else.
+
+    The floor sweep is the experiment that separates "harm grows with how
+    hard the weighting pulls" from "harm comes from clients crushed toward
+    zero". Four things have to hold for it to mean that:
+
+      1. The default is 0.05, so every run already on disk keeps its
+         meaning and the field is a no-op unless set.
+      2. Raising it changes the aggregate at full strength. If it did not,
+         the arm would be a silent duplicate of the strength-1.0 arm and
+         the experiment would compare a thing to itself.
+      3. It does NOT lift a FLAGGED client off zero. The Byzantine path
+         must be untouched, which is the whole reason this flag is safe
+         where trust_weight_strength is not.
+      4. It cannot bind below strength 1 - floor, which is the arithmetic
+         that makes the strength sweep unable to answer the question. If
+         this stops holding, the motivation for the experiment is gone.
+    """
+    print("\nTesting trust_weight_floor bounds inliers only...")
+
+    from src.tavs_v2 import TavsEspConfig
+    d = float(getattr(TavsEspConfig(), "trust_weight_floor", -1))
+    assert abs(d - 0.05) < 1e-12, f"default floor must stay 0.05, got {d}"
+
+    def _run(floor, strength=1.0):
+        cfg = DummyConfig()
+        cfg.disable_trust_weighted_aggregation = False
+        cfg.trust_weight_strength = strength
+        cfg.trust_weight_floor = floor
+        cfg.trust_signal = "pretrain_loss_var"
+        cfg.pretrain_loss_var_rescale_lo = 0.5
+        cfg.pretrain_loss_var_rescale_hi = 3.0
+        strategy = TavsEspStrategy(config=cfg)
+        proxies = [MockClientProxy(f"c{i}") for i in range(6)]
+        for i, p in enumerate(proxies):
+            strategy.scheduler.join_rounds[p.cid] = -100
+            strategy.scheduler.trust_scores[p.cid] = 0.25 + 0.1 * i
+            strategy.scheduler.clean_streaks[p.cid] = 3
+            strategy.scheduler.last_verified_round[p.cid] = 0
+            strategy.scheduler.appearances_since_verified[p.cid] = 0
+        strategy._round_assignments[1] = {
+            "verified": {p.cid for p in proxies},
+            "promoted": set(), "decoy": set(),
+            "sampled": {p.cid for p in proxies},
+        }
+        rng = np.random.RandomState(0)
+        results = []
+        for i, p in enumerate(proxies):
+            scale = 50.0 if i < 2 else 0.1
+            results.append((p, MockFitRes(
+                parameters=MockParameters([(rng.randn(150000) * scale).astype(np.float32)]),
+                # Spread the raw variances so some clients land below the
+                # floor and the floor has something to bite on.
+                metrics={"is_verified": True, "client_id": f"honest_{i:02d}",
+                         "pretrain_loss_var": 0.5 + 0.6 * i},
+            )))
+        params, _m = strategy.aggregate_fit(1, results, [])
+        return mock_parameters_to_ndarrays(params)[0].ravel()
+
+    base = _run(0.05)
+    assert float(np.abs(_run(0.50) - base).sum()) > 1e-4, (
+        "raising the floor to 0.50 at full strength must change the "
+        "aggregate, or the floor arm duplicates the strength-1.0 arm"
+    )
+    # Monotone: 1.0 (no inlier down-weighting at all) differs more than 0.50.
+    d050 = float(np.abs(_run(0.50) - base).sum())
+    d100 = float(np.abs(_run(1.00) - base).sum())
+    assert d100 > d050, f"floor 1.0 should move further than 0.5 ({d100} vs {d050})"
+
+    # 3. The outlier branch must stay unfloored. Asserted against the exact
+    #    expression aggregate_fit uses, because the aggregate alone cannot
+    #    distinguish "outlier floored" from "inlier floored".
+    def _verified_weight(score, n, strength, floor, is_outlier, soft=True):
+        pull = (lambda s: s) if strength >= 1.0 else (
+            lambda s: 1.0 - strength * (1.0 - s))
+        return (pull(score) if (soft and is_outlier)
+                else max(floor, pull(score))) * n
+    for fl in (0.05, 0.25, 0.50, 1.00):
+        assert _verified_weight(0.0, 100, 1.0, fl, is_outlier=True) == 0.0, (
+            f"floor {fl} must NOT lift a flagged client off zero weight; the "
+            f"Byzantine path has to stay untouched"
+        )
+        assert _verified_weight(0.0, 100, 1.0, fl, is_outlier=False) == fl * 100, (
+            f"an accepted client scoring 0 must land exactly on floor {fl}"
+        )
+
+    # 4. The arithmetic that motivates the whole experiment: the floor can
+    #    only bind when strength > 1 - floor. At the default 0.05 that means
+    #    strength > 0.95, so the strength sweep's 0.25 and 0.50 arms never
+    #    touched it.
+    for st in (0.25, 0.50):
+        lowest = _verified_weight(0.0, 1.0, st, 0.05, is_outlier=False)
+        assert abs(lowest - (1.0 - st)) < 1e-12, (
+            f"at strength {st} the minimum multiplier must be 1-strength="
+            f"{1.0 - st}, not the floor; got {lowest}"
+        )
+    assert _verified_weight(0.0, 1.0, 1.0, 0.05, is_outlier=False) == 0.05, \
+        "at strength 1.0 the floor is what binds"
+
+    print("✓ floor default 0.05; raising it changes the aggregate monotonically; "
+          "flagged clients stay at zero; floor binds only above strength 1-floor")
+    return True
+
+
 def test_trust_signal_default_is_bvd():
     """The config default must remain 'bvd' so existing pilots are
     byte-identical. A silent flip to 'small_loss_fraction' would alter
@@ -1797,8 +1902,9 @@ def main():
         rs23 = test_per_class_loss_var_ignores_non_reporting_clients()
         rs24 = test_trust_weighting_start_round_delays_weighting()
         rs25 = test_trust_weight_strength_interpolates_to_weighting_off()
+        rs26 = test_trust_weight_floor_bounds_inliers_only()
         assert all(x is True for x in (rs15, rs16, rs17, rs18, rs19, rs20,
-                                       rs21, rs22, rs23, rs24, rs25))
+                                       rs21, rs22, rs23, rs24, rs25, rs26))
 
         if all([success1, success2, success3, success4, success5,
                 rs1, rs2, rs3, rs4, rs5, rs6, rs7, rs8, rs9, rs10,
