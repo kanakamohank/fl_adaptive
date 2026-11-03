@@ -189,6 +189,43 @@ class TavsEspConfig:
     # claim; sweep the dose with byzantine_fraction=0 only.
     trust_weight_strength: float = 1.0
 
+    # Smallest weight multiplier an ACCEPTED (inlier) client can be reduced
+    # to. 0.05 is the historical value, so this field is a no-op unless set.
+    #
+    # Why it is worth varying: the strength sweep showed the harm is
+    # super-linear -- strength 0.25 and 0.50 cost nothing while 1.0 costs
+    # ~0.007 at the last10 endpoint. But the inlier weight is
+    # max(floor, 1 - strength*(1 - score)), so the floor can only ever bind
+    # when strength > 1 - floor: at strength 0.5 the minimum multiplier is
+    # already 0.5, well above 0.05. Full strength is therefore the ONLY arm
+    # in the sweep where any accepted client's weight approaches zero, which
+    # leaves two explanations indistinguishable:
+    #
+    #   (a) harm grows super-linearly with how hard the weighting pulls, or
+    #   (b) harm comes specifically from clients crushed toward zero.
+    #
+    # Raising this floor at full strength separates them. Under (a), the
+    # floor should not matter. Under (b), the harm should shrink as the floor
+    # rises. (b) is the interesting case because it is exactly how the
+    # published methods differ from us: FedCNI (ICME 2023) and FedClean
+    # (ICML 2025) weight by the client's count of detected-clean samples, so
+    # a client with 40% label noise keeps roughly 0.6 weight and can never
+    # be silenced, whereas our score can take it to 0.05 -- about 12x more
+    # aggressive.
+    #
+    # Scope: this does NOT touch the outlier branch, which stays unfloored
+    # so a flagged update can still reach zero weight (see the
+    # soft_outlier_weighting comment in aggregate_fit). So a floor sweep
+    # bounds the contribution of crushed INLIERS only; if the harm survives
+    # a high floor, flagged clients are the remaining candidate and need a
+    # separate arm. Keeping the Byzantine path untouched is deliberate --
+    # unlike trust_weight_strength, this flag carries no security cost.
+    #
+    # Values are clamped to [0, 1]. A floor of 1.0 disables inlier
+    # down-weighting entirely without disabling the outlier path, which is a
+    # cleaner control than turning weighting off wholesale.
+    trust_weight_floor: float = 0.05
+
     # Master switch for BVD outlier detection.
     #
     # Off means every verified client is treated as an inlier and scores 1.0.
@@ -1137,10 +1174,14 @@ class TavsEspStrategy(Strategy):
                 for cid in P_ids
             }
 
-        # The 0.05 floor guarantees a client the detector accepted is never
+        # The floor guarantees a client the detector accepted is never
         # silenced by a marginal score. It is deliberately NOT applied to a
         # flagged client: an update far enough out must be able to reach zero
         # weight, or soft weighting would leave every attacker a residual voice.
+        # Default 0.05 is the historical value; see trust_weight_floor for why
+        # it is now configurable.
+        _floor = max(0.0, min(1.0, float(getattr(
+            self.config, "trust_weight_floor", 0.05))))
         soft = getattr(self.config, "soft_outlier_weighting", True)
         if disable_trust_agg:
             verified_weights = {
@@ -1168,7 +1209,7 @@ class TavsEspStrategy(Strategy):
             verified_weights = {
                 cid: (_pull(float(behavior_scores.get(cid, 0.0)))
                       if (soft and cid in outliers)
-                      else max(0.05, _pull(float(behavior_scores.get(cid, 0.0))))) * num_examples.get(cid, 1)
+                      else max(_floor, _pull(float(behavior_scores.get(cid, 0.0))))) * num_examples.get(cid, 1)
                 for cid in verified_updates.keys()
             }
         clip_stats: Dict[str, object] = {}
