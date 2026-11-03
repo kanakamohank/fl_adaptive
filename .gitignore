@@ -17,3 +17,5 @@ test_temp
 # Generated analysis plots (regenerate on demand)
 plots/
 experiments/analysis/*/plots/
+src/__pycache__/*
+**.pyc
