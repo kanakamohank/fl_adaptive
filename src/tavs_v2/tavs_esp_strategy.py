@@ -226,6 +226,22 @@ class TavsEspConfig:
     # cleaner control than turning weighting off wholesale.
     trust_weight_floor: float = 0.05
 
+    # Smallest weight multiplier a PROMOTED client can be reduced to.
+    #
+    # Default 0.0 is the historical behaviour: promoted weights were never
+    # floored. That is not the same as "never small" -- the multiplier is
+    # sigmoid(c_lambda*(trust - 0.5)), which at the default c_lambda=8
+    # bottoms out at 0.018, BELOW the 0.05 inlier floor.
+    #
+    # It exists as its own field so the default pair (0.05, 0.0) reproduces
+    # every historical run exactly. The pilot CLI sets BOTH from one
+    # --trust-weight-floor flag, because a floor sweep that lifted only
+    # verified inliers would change the promoted:verified balance at the
+    # same time as the inlier dose -- promoted clients are about 31% of
+    # contributing clients on these runs, so that is a first-order
+    # confound, not a detail.
+    promoted_weight_floor: float = 0.0
+
     # Master switch for BVD outlier detection.
     #
     # Off means every verified client is treated as an inlier and scores 1.0.
@@ -1133,6 +1149,14 @@ class TavsEspStrategy(Strategy):
         # what the signal supports, and a negative one would invert it.
         _strength = max(0.0, min(1.0, float(getattr(
             self.config, "trust_weight_strength", 1.0))))
+        # Defined here, before BOTH weight blocks. The two floors are
+        # separate fields so their DEFAULTS (0.05 inlier, 0.0 promoted) are
+        # exactly the historical behaviour; the pilot CLI sets both from one
+        # flag when a sweep actually wants to move them together.
+        _floor = max(0.0, min(1.0, float(getattr(
+            self.config, "trust_weight_floor", 0.05))))
+        _pfloor = max(0.0, min(1.0, float(getattr(
+            self.config, "promoted_weight_floor", 0.0))))
 
         # Short-circuit at full strength. `1.0 - 1.0*(1.0 - s)` is NOT
         # bit-identical to `s` in IEEE754 -- it differs for 335 of the 999
@@ -1167,10 +1191,25 @@ class TavsEspStrategy(Strategy):
         if disable_trust_agg:
             promoted_weights = {cid: num_examples.get(cid, 1) for cid in P_ids}
         else:
+            # The floor covers promoted clients too. They are ACCEPTED
+            # clients -- trusted on reputation rather than verified this
+            # round -- and leaving them unfloored would have made the floor
+            # sweep measure two things at once. Their multiplier is
+            # sigmoid(c_lambda*(trust - 0.5)), which at the default
+            # c_lambda=8 bottoms out at 0.018, BELOW the historical 0.05
+            # inlier floor. Promoted clients are about 31% of contributing
+            # clients on these runs, so raising the inlier floor to 0.50
+            # while leaving them at 0.018 would shift the promoted:verified
+            # balance as well as the inlier dose, and the experiment could
+            # not tell those apart.
+            #
+            # promoted_weight_floor defaults to 0.0, so max(0.0, x) == x
+            # for the non-negative sigmoid and the default path is
+            # bit-identical to the historical one.
             promoted_weights = {
-                cid: _pull(self.scheduler.bayesian_posterior_weight(
+                cid: max(_pfloor, _pull(self.scheduler.bayesian_posterior_weight(
                     self.scheduler.get_effective_trust(cid, server_round)
-                )) * num_examples.get(cid, 1)
+                ))) * num_examples.get(cid, 1)
                 for cid in P_ids
             }
 
@@ -1180,8 +1219,6 @@ class TavsEspStrategy(Strategy):
         # weight, or soft weighting would leave every attacker a residual voice.
         # Default 0.05 is the historical value; see trust_weight_floor for why
         # it is now configurable.
-        _floor = max(0.0, min(1.0, float(getattr(
-            self.config, "trust_weight_floor", 0.05))))
         soft = getattr(self.config, "soft_outlier_weighting", True)
         if disable_trust_agg:
             verified_weights = {

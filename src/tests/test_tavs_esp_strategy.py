@@ -918,8 +918,16 @@ def test_trust_weight_floor_bounds_inliers_only():
     print("\nTesting trust_weight_floor bounds inliers only...")
 
     from src.tavs_v2 import TavsEspConfig
-    d = float(getattr(TavsEspConfig(), "trust_weight_floor", -1))
-    assert abs(d - 0.05) < 1e-12, f"default floor must stay 0.05, got {d}"
+    _c = TavsEspConfig()
+    d = float(getattr(_c, "trust_weight_floor", -1))
+    assert abs(d - 0.05) < 1e-12, f"default inlier floor must stay 0.05, got {d}"
+    # The PROMOTED default must stay 0.0, which is the historical behaviour
+    # (promoted weights were never floored). Their multiplier is
+    # sigmoid(c_lambda*(trust-0.5)) and bottoms out at 0.018 with
+    # c_lambda=8 -- BELOW the inlier floor -- so defaulting it to 0.05 to
+    # "match" would silently change every existing run.
+    pf = float(getattr(_c, "promoted_weight_floor", -1))
+    assert abs(pf - 0.0) < 1e-12, f"default promoted floor must stay 0.0, got {pf}"
 
     def _run(floor, strength=1.0):
         cfg = DummyConfig()
@@ -996,8 +1004,38 @@ def test_trust_weight_floor_bounds_inliers_only():
     assert _verified_weight(0.0, 1.0, 1.0, 0.05, is_outlier=False) == 0.05, \
         "at strength 1.0 the floor is what binds"
 
-    print("✓ floor default 0.05; raising it changes the aggregate monotonically; "
-          "flagged clients stay at zero; floor binds only above strength 1-floor")
+    # 5. The floor must reach PROMOTED clients too. A floor sweep that
+    #    lifted only verified inliers would move the promoted:verified
+    #    balance at the same time as the inlier dose -- promoted clients are
+    #    ~31% of contributions on these runs and their multiplier bottoms
+    #    out at 0.018, below even the 0.05 inlier floor -- so the experiment
+    #    could not tell the two apart.
+    import math as _math
+    c_lambda = 8.0
+    sigmoid = lambda t: 1.0 / (1.0 + _math.exp(-c_lambda * (t - 0.5)))
+    assert sigmoid(0.0) < 0.05, (
+        f"premise check: a promoted client's multiplier should be able to "
+        f"fall below the 0.05 inlier floor, got {sigmoid(0.0)}"
+    )
+
+    def _promoted_weight(trust, n, strength, pfloor):
+        pull = (lambda s: s) if strength >= 1.0 else (
+            lambda s: 1.0 - strength * (1.0 - s))
+        return max(pfloor, pull(sigmoid(trust))) * n
+
+    # Historical default: no lift at all.
+    assert abs(_promoted_weight(0.0, 1.0, 1.0, 0.0) - sigmoid(0.0)) < 1e-12, \
+        "promoted floor 0.0 must leave the sigmoid untouched"
+    # Swept value: lifted to the floor, same as an inlier.
+    assert _promoted_weight(0.0, 1.0, 1.0, 0.50) == 0.50, \
+        "a swept floor must lift promoted clients to the same minimum"
+    assert _verified_weight(0.0, 1.0, 1.0, 0.50, is_outlier=False) == 0.50, \
+        "...and that minimum must equal the inlier one, or the sweep is confounded"
+
+    print("✓ floor default 0.05 inlier / 0.0 promoted; raising it changes the "
+          "aggregate monotonically; flagged clients stay at zero; floor binds "
+          "only above strength 1-floor; a swept floor lifts promoted and "
+          "inlier clients to the SAME minimum")
     return True
 
 

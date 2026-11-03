@@ -71,15 +71,25 @@ def effect(off, arm, endpoint):
 
 def series(root: Path):
     """{seed -> [accuracy per round]}"""
-    out = {}
+    out, seen = {}, {}
     pat = str(root / "**" / f"{ARM}_seed*" / "pipeline_results.json")
     for p in sorted(glob.glob(pat, recursive=True)):
         m = re.search(rf"{ARM}_seed(\d+)", p)
         if not m:
             continue
         a = json.loads(Path(p).read_text()).get("server_accuracies") or []
-        if a:
-            out[str(int(m.group(1)))] = a
+        if not a:
+            continue
+        seed = str(int(m.group(1)))
+        if seed in out:
+            # load_seeds raises on exactly this case; silently keeping the
+            # last path would let the trajectory panel plot a DIFFERENT
+            # configuration from the tables, with no warning.
+            raise RuntimeError(
+                f"duplicate seed {seed} under {root}:\n  {seen[seed]}\n  {p}\n"
+                f"Two configurations are present; point --base at one."
+            )
+        out[seed], seen[seed] = a, p
     return out
 
 
@@ -132,7 +142,12 @@ def fig_dose(plt, b, off, out):
     # above it.
     if 1.0 in xs:
         full = ys[xs.index(1.0)]
-        ax.plot([0, 1], [0, full], color="#c0504d", lw=1.4, ls=":",
+        # Anchor on the MEASURED strength-0 point, not on y=0. The strength-0
+        # arm sits at about +0.0008, so anchoring at the origin drew the
+        # reference line a constant 0.0008 too low and made the measured
+        # points look further above it than they are.
+        base = ys[xs.index(0.0)] if 0.0 in xs else 0.0
+        ax.plot([0, 1], [base, full], color="#c0504d", lw=1.4, ls=":",
                 label="if harm were proportional to strength")
     _annotate(ax, xs, ys, cs, ns)
     ax.set_xlabel("trust_weight_strength  (0 = no weighting, 1 = full)")
@@ -168,9 +183,14 @@ def fig_schedule(plt, b, off, out):
     _annotate(ax, xs, ys, cs, ns)
     ax.set_xlabel("round at which trust weighting switches on  (of 40)")
     ax.set_ylabel(f"accuracy vs weighting OFF  ({QUOTE_EP})")
-    ax.set_title("Schedule: delaying the switch does not help\n"
-                 "FedCNI switches at 15% of training; here that changes "
-                 "nothing", fontsize=10)
+    # Deliberately not "delaying does not help": the head-to-head CI
+    # half-width is 56-57% of the harm at the final-round endpoint, so the
+    # test could not have detected the delay removing half of it. Saying
+    # "no difference" would contradict this script's own console output.
+    ax.set_title("Schedule: no benefit detected from delaying the switch\n"
+                 "the tail endpoints exclude recovering more than ~a third "
+                 "of the harm;\nthe final-round endpoint excludes almost "
+                 "nothing", fontsize=9)
     ax.set_xticks(xs)
     ax.set_xlim(min(xs) - 1.5, max(xs) + 3.5)
     fig.tight_layout()
@@ -186,7 +206,11 @@ def fig_trajectory(plt, b, out):
     if not shared:
         return None
     n = min(min(len(offs[s]) for s in shared), min(len(ons[s]) for s in shared))
-    rounds = list(range(1, n + 1))
+    # server_accuracies[0] is the evaluation BEFORE any training (accuracy
+    # ~0.10, i.e. chance on 10 classes), so index i is round i, not i+1. A
+    # 40-round run yields 41 entries. Labelling from 1 shifted every point
+    # by one and claimed a "round 41" that does not exist.
+    rounds = list(range(0, n))
     mo = [statistics.mean(offs[s][r] for s in shared) for r in range(n)]
     mn = [statistics.mean(ons[s][r] for s in shared) for r in range(n)]
     fig, ax = plt.subplots(figsize=(7.6, 4.4))
@@ -197,11 +221,19 @@ def fig_trajectory(plt, b, out):
         ax.plot(rounds, offs[s][:n], color="#1f4e79", lw=0.4, alpha=0.25)
         ax.plot(rounds, ons[s][:n], color="#c0504d", lw=0.4, alpha=0.25)
     # The jitter band: how much the baseline moves between adjacent rounds.
-    half = n // 2
+    # Band height: the baseline's own per-round standard deviation about its
+    # local level, estimated from successive differences. For a series whose
+    # mean |x[r]-x[r-1]| is d, the per-round sd is about d/sqrt(2) under a
+    # random-walk-free model, so a +-1 sd band has total height ~2*d/sqrt(2)
+    # = d*sqrt(2). An earlier version drew +- jit/2, i.e. total height d --
+    # about 44% too short -- which put the weighted curve OUTSIDE the band
+    # and so showed the opposite of what the panel says.
+    half = max(1, n // 2)
     jit = statistics.mean(abs(offs[s][r] - offs[s][r - 1])
                           for s in shared for r in range(half, n))
-    ax.axhspan(mo[-1] - jit / 2, mo[-1] + jit / 2, color="#999999", alpha=0.18,
-               label=f"round-to-round jitter of the baseline ({jit:.3f})")
+    sd_round = jit / math.sqrt(2.0)
+    ax.axhspan(mo[-1] - sd_round, mo[-1] + sd_round, color="#999999", alpha=0.18,
+               label=f"baseline's own per-round spread (+-1 sd = {sd_round:.3f})")
     ax.set_xlabel("communication round")
     ax.set_ylabel("global model accuracy")
     ax.set_title("Trajectory: the gap is small next to the jitter\n"

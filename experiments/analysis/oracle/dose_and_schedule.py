@@ -95,6 +95,8 @@ EXPECTED_DIFFS = {
     "disable_trust_weighted_aggregation",  # the knob itself
     "trust_weight_strength",               # dose arms
     "trust_weighting_start_round",         # schedule arms
+    "trust_weight_floor",                  # floor arms
+    "promoted_weight_floor",               # set together with the above
     # Serialised with default=str, so this is a function repr carrying a
     # memory address -- different in every process, never a real difference.
     "evaluate_fn",

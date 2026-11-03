@@ -37,7 +37,13 @@
 # flagged clients become the remaining candidate and need their own arm.
 #
 # ARMS (strength 1.00 throughout; only the floor moves)
-#   floor 0.05  already on disk as results/sweep_a10_twagg -- NOT re-run
+#   floor 0.05  the sweep's own baseline, and it IS run. results/sweep_a10_twagg
+#               is NOT a substitute: it predates the flag, so its floors are
+#               (0.05 inlier, 0.0 promoted), whereas every swept arm sets both
+#               to the same value. Running an explicit 0.05 arm makes the
+#               ladder 0.05 -> 0.25 -> 0.50 -> 1.00 move exactly one quantity.
+#               Comparing it against sweep_a10_twagg also measures what the
+#               promoted floor alone is worth (0.0 -> 0.05).
 #   floor 0.25  mild bound
 #   floor 0.50  matches FedCNI/FedClean calibration
 #   floor 1.00  no inlier down-weighting at all. A control: it isolates what
@@ -53,7 +59,7 @@
 # Seeds:   SEEDS=1,2,3,4,5 bash ... to halve the time for a first look.
 #
 # Only the tavs_skip arm is trained, because that is the only arm the
-# analysis reads. About 30 min per job, so roughly 1.5 h for all three at 10
+# analysis reads. About 30 min per job, so roughly 2 h for all four at 10
 # seeds.
 
 set -u   # deliberately NOT -e: one failed job must not abandon the rest
@@ -124,6 +130,10 @@ run_job "floor_050" \
   --trust-weight-floor 0.50 \
   --results-dir results/floor_a10_f050
 
+run_job "floor_005_baseline" \
+  --trust-weight-floor 0.05 \
+  --results-dir results/floor_a10_f005
+
 run_job "floor_025" \
   --trust-weight-floor 0.25 \
   --results-dir results/floor_a10_f025
@@ -137,7 +147,7 @@ echo "=============================================================="
 printf 'Batch finished %s  (total %d min)\n' "$(date '+%Y-%m-%d %H:%M:%S')" $(( (SECONDS - BATCH_T0) / 60 ))
 echo "=============================================================="
 echo "tavs_skip seed count per config subdirectory (want ONE line per arm):"
-for d in results/floor_a10_f025 results/floor_a10_f050 results/floor_a10_f100; do
+for d in results/floor_a10_f005 results/floor_a10_f025 results/floor_a10_f050 results/floor_a10_f100; do
   [ -d "$d" ] || continue
   echo "  $d"
   find "$d" -path '*tavs_skip_seed*' -name pipeline_results.json \
@@ -148,7 +158,7 @@ echo "Two lines for one arm means the config tag changed and seeds are split"
 echo "across configurations -- say so before analysing."
 echo ""
 echo "Already on disk, not re-run:"
-echo "  floor 0.05 (current) : results/sweep_a10_twagg"
-echo "  weighting OFF        : results/sweep_a10_notwagg"
+echo "  weighting OFF                     : results/sweep_a10_notwagg"
+echo "  pre-flag floors (0.05 / 0.0)      : results/sweep_a10_twagg"
 echo ""
 echo "Commit and push results/, then ask Claude to pull and analyse."

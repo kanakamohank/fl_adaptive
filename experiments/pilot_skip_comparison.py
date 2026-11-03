@@ -174,9 +174,14 @@ def _config_tag(args) -> str:
         _str = float(getattr(args, "trust_weight_strength", 1.0))
         if abs(_str - 1.0) > 1e-9:
             parts.append(f"twstr{int(round(_str * 100)):03d}")
-        _flr = float(getattr(args, "trust_weight_floor", 0.05))
-        if abs(_flr - 0.05) > 1e-9:
-            parts.append(f"twflr{int(round(_flr * 100)):03d}")
+        # Tagged whenever the flag is GIVEN, not only when it differs from
+        # 0.05. Passing 0.05 explicitly is not the historical setting: it
+        # also lifts the promoted floor from 0.0 to 0.05. Tagging on
+        # "value != 0.05" would give that run the same directory name as an
+        # untouched one while behaving differently.
+        _flr = getattr(args, "trust_weight_floor", None)
+        if _flr is not None:
+            parts.append(f"twflr{int(round(float(_flr) * 100)):03d}")
     return "_".join(parts)
 
 
@@ -283,8 +288,12 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
             getattr(args, "trust_weighting_start_round", 1) or 1),
         trust_weight_strength=float(
             getattr(args, "trust_weight_strength", 1.0)),
-        trust_weight_floor=float(
-            getattr(args, "trust_weight_floor", 0.05)),
+        # One CLI flag sets BOTH floors. Omitted -> the dataclass defaults
+        # (0.05 inlier, 0.0 promoted), which are the historical pair.
+        **({} if getattr(args, "trust_weight_floor", None) is None else {
+            "trust_weight_floor": float(args.trust_weight_floor),
+            "promoted_weight_floor": float(args.trust_weight_floor),
+        }),
         trust_signal=getattr(args, "trust_signal", "bvd"),
         small_loss_rescale_lo=rescale_lo,
         small_loss_rescale_hi=rescale_hi,
@@ -773,11 +782,18 @@ def main():
                              "which is the controlled version of comparing two "
                              "different trust signals. No effect without "
                              "--trust-weighted-aggregation.")
-    parser.add_argument("--trust-weight-floor", type=float, default=0.05,
+    parser.add_argument("--trust-weight-floor", type=float, default=None,
                         dest="trust_weight_floor",
                         help="Smallest weight multiplier an ACCEPTED client "
-                             "can be reduced to, in [0, 1]. Default 0.05 is "
-                             "the historical value. Raising it at full "
+                             "can be reduced to, in [0, 1]. Sets the floor "
+                             "for verified inliers AND for promoted clients, "
+                             "because promoted clients are about 31%% of "
+                             "contributions and their multiplier bottoms out "
+                             "at 0.018 -- lifting only inliers would change "
+                             "the promoted:verified balance at the same time "
+                             "as the inlier dose. Omit it for the historical "
+                             "pair (0.05 inlier, 0.0 promoted). Raising it at "
+                             "full "
                              "strength separates two explanations the "
                              "strength sweep cannot: whether the harm grows "
                              "with how hard the weighting pulls, or comes "
