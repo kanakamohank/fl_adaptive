@@ -5,7 +5,8 @@ Each panel answers one question and is readable on its own, because these
 end up in slides and a reader will not have the console table beside them.
 
   fig 1  DOSE          effect vs weighting strength, with error bars
-  fig 2  SCHEDULE      effect vs the round weighting switches on
+  fig 2  FLOOR         effect vs the minimum weight an accepted client keeps
+  fig 3  SCHEDULE      effect vs the round weighting switches on
   fig 3  TRAJECTORY    accuracy over rounds, weighted vs not
   fig 4  WEIGHT CURVE  the weight a client gets for a given score, per arm
                        -- this is the one that explains WHY the sweep cannot
@@ -199,6 +200,56 @@ def fig_schedule(plt, b, off, out):
     return f
 
 
+def fig_floor(plt, b, off, out):
+    """Effect vs the minimum weight an accepted client can be reduced to.
+
+    The companion to fig_dose. The dose sweep could not separate "harm grows
+    with the pull" from "harm comes from near-zero weights", because the
+    floor only binds at full strength. This panel holds strength at 1.0 and
+    moves the floor instead.
+
+    sweep_a10_twagg is deliberately NOT plotted as the floor-0.05 point: it
+    predates the flag and has floors (0.05 inlier, 0.0 promoted), so putting
+    it on the x-axis at 0.05 would fold the promoted floor into the ladder
+    and make the curve look steeper than the one-variable comparison is.
+    """
+    arms = [(0.05, b / "floor_a10_f005"), (0.25, b / "floor_a10_f025"),
+            (0.50, b / "floor_a10_f050"), (1.00, b / "floor_a10_f100")]
+    xs, ys, es, cs, ns = [], [], [], [], []
+    for fl, p in arms:
+        if not p.exists():
+            continue
+        sd = load_seeds(p)
+        m, hw, c = effect(off, sd, QUOTE_EP)
+        xs.append(fl); ys.append(m); es.append(hw); cs.append(c)
+        ns.append(len(set(off) & set(sd)))
+    if len(xs) < 2:
+        return None
+    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    ax.axhline(0, color="#999999", lw=1, ls="--")
+    ax.errorbar(xs, ys, yerr=es, marker="o", capsize=4, lw=1.8,
+                color="#548235")
+    _annotate(ax, xs, ys, cs, ns)
+    ax.set_xlabel("minimum weight an accepted client can be reduced to "
+                  "(both floors)")
+    ax.set_ylabel(f"accuracy vs weighting OFF  ({QUOTE_EP})")
+    # Deliberately descriptive, not causal. The point estimates fall
+    # monotonically to zero, but the DIRECT tests are weaker: head to head,
+    # floor 1.00 vs 0.05 excludes zero only at last10, and a per-seed trend
+    # fit across the four floors also clears significance on only 1 of 4
+    # endpoints. "The harm shrinks as clients stop being silenced" would
+    # assert more than that supports.
+    ax.set_title("Floor: harm falls as the minimum weight rises, to zero\n"
+                 "strength held at 1.00; flagged clients unfloored "
+                 "throughout.\nTrend is monotone but clears significance at "
+                 "1 of 4 endpoints", fontsize=9)
+    ax.set_xlim(-0.02, 1.16)
+    fig.tight_layout()
+    f = out / "floor.png"
+    fig.savefig(f, dpi=150); plt.close(fig)
+    return f
+
+
 def fig_trajectory(plt, b, out):
     offs = series(b / "sweep_a10_notwagg")
     ons = series(b / "sweep_a10_twagg")
@@ -330,6 +381,7 @@ def main():
 
     made = []
     for fn in (lambda: fig_dose(plt, args.base, off, args.out),
+               lambda: fig_floor(plt, args.base, off, args.out),
                lambda: fig_schedule(plt, args.base, off, args.out),
                lambda: fig_trajectory(plt, args.base, args.out),
                lambda: fig_weight_curve(plt, args.out)):
