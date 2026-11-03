@@ -348,11 +348,40 @@ def perturbation_tvd(root: Path, strength, lo, hi, floor=0.05):
     This exists because NOMINAL strength is the wrong yardstick for a
     super-linearity test. The weight is max(floor, 1 - strength*(1 - score)),
     and scores under a skewed partition cluster near 1, so halving the
-    strength does NOT halve the distortion. Measured here: strength
-    0.25/0.50/1.00 produce TVD 0.0123/0.0270/0.0697, i.e. 0.18/0.39/1.00 of
-    full strength, not 0.25/0.50/1.00. Testing against the nominal
+    strength does NOT halve the distortion. Measured on each arm's own logs:
+    strength 0.25/0.50/1.00 give TVD 0.0102/0.0234/0.0697, i.e. 0.147/0.336
+    of full strength rather than 0.25/0.50. Testing against the nominal
     prediction overstates the super-linearity gap by roughly 30%.
+
+    Three scope limits, none of them fixable from the logs:
+
+    1. LATE-ROUND DOMINATED. Round TVDs are averaged unweighted, and the
+       distortion grows enormously over training -- on these runs, mean TVD
+       by decade is 0.0002 / 0.018 / 0.058 / 0.132 for rounds 1-10 / 11-20 /
+       21-30 / 31-40. So the single number is effectively a late-training
+       statistic. Mean-of-ratios is not an alternative: early rounds divide
+       by ~0.
+    2. VERIFIED CLIENTS ONLY. The aggregator normalises verified and
+       promoted weights jointly, and promoted weights are scaled by the
+       same strength, so down-weighting verified clients also shifts mass
+       toward promoted ones. About a third of logged client-rows are
+       unverified, and that movement is invisible here. Including promoted
+       clients at undistorted weight raises frac(0.25) by roughly 9%, i.e.
+       AWAY from the super-linearity conclusion, so omitting them is not
+       what produces the finding.
+    3. FLOOR APPLIED TO EVERYONE. aggregate_fit exempts BVD-flagged clients
+       from the floor; outlier membership is not recoverable from the logs,
+       so the floor is applied to all. Under 1% of scores are below the
+       floor and the floor cannot bind at all below strength 1.0 (the
+       minimum multiplier is 1-strength >= 0.5), so the worst case moves
+       frac(0.25) by about 1%.
     """
+    if hi <= lo:
+        # Mirror the strategy's own guard (tavs_esp_strategy.py: `if hi <=
+        # lo: lo, hi = 0.5, 3.0`). Without this, hi == lo raises
+        # ZeroDivisionError and, worse, hi < lo silently INVERTS the signal
+        # and returns a plausible-looking number.
+        lo, hi = 0.5, 3.0
     vals = []
     pat = str(root / "**" / f"{ARM}_seed*" / "pipeline_results.json")
     for p in sorted(glob.glob(pat, recursive=True)):
@@ -377,7 +406,7 @@ def perturbation_tvd(root: Path, strength, lo, hi, floor=0.05):
     return statistics.mean(vals) if vals else float("nan")
 
 
-def batch_agreement(ref_seeds, arm_seeds, endpoint, split=5):
+def batch_agreement(ref_seeds, arm_seeds, endpoint, split=5, atol=0.001):
     """Paired effect computed separately for low and high seed numbers.
 
     Seeds added in a later session can differ systematically from the
@@ -396,26 +425,39 @@ def batch_agreement(ref_seeds, arm_seeds, endpoint, split=5):
     -0.0055 vs -0.0082), which is why those survived and the early-window
     claim was withdrawn.
 
-    Returns (low_mean, high_mean, agree). `agree` is False when the two
-    batches disagree in SIGN, or when one is more than 3x the other in
-    magnitude -- a deliberately crude rule, because its job is to force a
-    look, not to be a test.
+    Returns (low_mean, high_mean, verdict), verdict being "yes", "NO", or
+    "one-batch" when every seed falls on one side of the split. That third
+    value exists because returning a plain False there made the row vanish
+    from the caller's table, so renumbering seeds would silently remove the
+    guard while the table still read as all-pass.
+
+    `atol` keeps the rule from firing on noise. The magnitude test is a 3x
+    ratio, which is scale-free and so would flag -0.00002 against -0.0008 --
+    both indistinguishable from zero against the 0.022 round-to-round jitter
+    this script prints. Batches whose effects are BOTH below atol agree by
+    definition; there is nothing there to disagree about. atol also guards
+    the sign test, where an exactly-zero batch would otherwise read as
+    positive and flag a spurious sign flip.
     """
     out = []
     for keep in (lambda k: k <= split, lambda k: k > split):
         ks = [s for s in sorted(set(ref_seeds) & set(arm_seeds))
               if s.isdigit() and keep(int(s))]
         if not ks:
-            return float("nan"), float("nan"), False
+            return float("nan"), float("nan"), "one-batch"
         out.append(statistics.mean(arm_seeds[s][endpoint] - ref_seeds[s][endpoint]
                                    for s in ks))
     a, b = out
-    if (a < 0) != (b < 0):
-        return a, b, False
+    # Both negligible -> nothing to disagree about.
+    if abs(a) < atol and abs(b) < atol:
+        return a, b, "yes"
+    # Sign flip, but only when at least one side is big enough to mean it.
+    if (a < 0) != (b < 0) and max(abs(a), abs(b)) >= atol:
+        return a, b, "NO"
     lo_m, hi_m = min(abs(a), abs(b)), max(abs(a), abs(b))
     if lo_m == 0.0:
-        return a, b, hi_m == 0.0
-    return a, b, (hi_m / lo_m) <= 3.0
+        return a, b, "yes" if hi_m < atol else "NO"
+    return a, b, ("yes" if (hi_m / lo_m) <= 3.0 else "NO")
 
 
 def self_test():
@@ -519,32 +561,48 @@ def self_test():
         return {str(i + 1): {"final": v} for i, v in enumerate(vals)}
     zeros = _mk([0.0] * 10)
     # Agreeing batches: -0.01 either side.
-    a, bb, ok = batch_agreement(zeros, _mk([-0.01] * 10), "final")
-    assert ok and abs(a - bb) < 1e-12, (a, bb, ok)
-    # Sign split: low batch positive, high batch negative.
-    a, bb, ok = batch_agreement(zeros, _mk([0.01] * 5 + [-0.01] * 5), "final")
-    assert not ok and a > 0 > bb, (a, bb, ok)
-    # Magnitude blowup: same sign, 5x apart -> must NOT agree.
-    a, bb, ok = batch_agreement(zeros, _mk([-0.001] * 5 + [-0.005] * 5), "final")
-    assert not ok, (a, bb, ok)
-    # Same sign, 2x apart -> within tolerance, agrees.
-    _a, _b, ok = batch_agreement(zeros, _mk([-0.002] * 5 + [-0.004] * 5), "final")
-    assert ok
-    # The real early-window case that was withdrawn: -0.0002 vs -0.0047,
-    # same sign but 23x apart, must be flagged.
-    _a, _b, ok = batch_agreement(zeros, _mk([-0.0002] * 5 + [-0.0047] * 5), "final")
-    assert not ok, "the withdrawn early-window split must be flagged"
+    a, bb, v = batch_agreement(zeros, _mk([-0.01] * 10), "final")
+    assert v == "yes" and abs(a - bb) < 1e-12, (a, bb, v)
+    # Sign split, both sides meaningful -> flagged.
+    a, bb, v = batch_agreement(zeros, _mk([0.01] * 5 + [-0.01] * 5), "final")
+    assert v == "NO" and a > 0 > bb, (a, bb, v)
+    # Magnitude blowup: same sign, 5x apart, above atol -> flagged.
+    a, bb, v = batch_agreement(zeros, _mk([-0.002] * 5 + [-0.010] * 5), "final")
+    assert v == "NO", (a, bb, v)
+    # Same sign, 2x apart -> within tolerance.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.002] * 5 + [-0.004] * 5), "final")
+    assert v == "yes", v
+    # The real early-window case that was withdrawn: -0.0002 vs -0.0047.
+    # 23x apart and the larger side is above atol, so it must flag.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.0002] * 5 + [-0.0047] * 5), "final")
+    assert v == "NO", "the withdrawn early-window split must be flagged"
     # And the endpoint case that survived: -0.0153 vs -0.0124, must pass.
-    _a, _b, ok = batch_agreement(zeros, _mk([-0.0153] * 5 + [-0.0124] * 5), "final")
-    assert ok, "the surviving endpoint split must not be flagged"
-    # A missing batch must report disagreement, not silently pass.
-    _a, _b, ok = batch_agreement(zeros, _mk([-0.01] * 5), "final")
-    assert not ok, "only one batch present must not read as agreement"
+    _a, _b, v = batch_agreement(zeros, _mk([-0.0153] * 5 + [-0.0124] * 5), "final")
+    assert v == "yes", "the surviving endpoint split must not be flagged"
+    # NOISE must not be flagged: -0.00002 vs -0.0008 is 40x apart but both
+    # are far below the 0.022 round-to-round jitter. The scale-free 3x rule
+    # alone called this a disagreement.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.00002] * 5 + [-0.0008] * 5), "final")
+    assert v == "yes", "two negligible batches must not read as disagreement"
+    # A sign flip between two negligible batches is also noise.
+    _a, _b, v = batch_agreement(zeros, _mk([0.0001] * 5 + [-0.0002] * 5), "final")
+    assert v == "yes", "a sign flip below atol is noise, not disagreement"
+    # An exactly-zero batch against a meaningful one must still flag.
+    _a, _b, v = batch_agreement(zeros, _mk([0.0] * 5 + [-0.01] * 5), "final")
+    assert v == "NO", "zero vs a real effect is a disagreement"
+    # One batch only must be reported as such, NOT silently dropped and
+    # NOT counted as agreement.
+    _a, _b, v = batch_agreement(zeros, _mk([-0.01] * 5), "final")
+    assert v == "one-batch", v
 
     print("✓ self-test passed: tail_mean, paired_t (known value / zero spread "
           "/ n<2), compare sign + seed intersection, phase0 gate (identical "
           "PASSes, offset FAILs, no-seeds FAILs), _canon (order / numeric vs "
-          "string / tuples / empty / unparseable), _bare prefix stripping")
+          "string / tuples / empty / unparseable), _bare prefix stripping, "
+          "t_crit (n=5/n=10/fallback/n<2), ci_halfwidth (known value / zero "
+          "spread / narrowing), batch_agreement (sign split / magnitude "
+          "blowup / the two real retraction cases / noise below atol / "
+          "one-batch)")
     return True
 
 
@@ -658,7 +716,11 @@ def main():
     for label, p2 in SCHED[:2]:
         arm = load_seeds(p2)
         for ep in ("final", "last10"):
-            shared = sorted(set(full) & set(arm))
+            # `off` is indexed below for the harm, so it must be in the
+            # intersection. Without it, a seed present in FULL and the
+            # schedule arm but missing from OFF raised KeyError -- exactly
+            # the partially-complete-batch case this report has to survive.
+            shared = sorted(set(full) & set(arm) & set(off))
             if len(shared) < 2:
                 continue
             d = [arm[s][ep] - full[s][ep] for s in shared]
@@ -677,42 +739,72 @@ def main():
     # nominal strength is the wrong yardstick.
     print("SUPER-LINEARITY (is the harm proportional to how much the weighting")
     print("actually distorts the client shares?)")
-    # All strengths are evaluated on ONE common set of logged scores -- the
-    # weighting-OFF arm's. Using each arm's own logs instead would divide a
-    # TVD measured on one run's score distribution by a TVD measured on
-    # another's, mixing the transform's distortion with run-to-run
-    # differences in the scores themselves. It also matters numerically: the
-    # own-logs version puts strength 0.25 at 0.147 of full distortion and
-    # the common-reference version at 0.176, which moves one of the eight
-    # cells across the significance line. OFF is the right reference because
-    # it is the baseline every arm is compared against and its scores carry
-    # no weighting feedback.
-    full_tvd = perturbation_tvd(OFF, 1.0, 0.6, 1.5)
-    print(f"  measured distortion (TVD vs unweighted), full strength = "
+    # Each arm's distortion is measured on ITS OWN logs, and the full-strength
+    # denominator on the FULL arm's own logs.
+    #
+    # This is the consistent pairing and it is NOT the flattering one. The
+    # quantity being scaled, (full - off), is the harm the FULL arm produced
+    # under the distortion the FULL arm actually applied -- TVD 0.0697 on its
+    # own logs. An earlier version measured every strength on the OFF arm's
+    # logs, whose full-strength TVD is 0.0521, i.e. 34% smaller. Dividing by
+    # that smaller denominator inflates frac, inflates the predicted harm and
+    # inflates the gap, so it biased the test TOWARD super-linearity. It also
+    # changed the answer: 8/8 cells significant on the OFF reference versus
+    # 7/8 on this one. The sensitivity line below names whichever cells depend
+    # on that choice, rather than letting one reference silently decide it.
+    full_tvd = perturbation_tvd(FULL, 1.0, 0.6, 1.5)
+    print(f"  distortion of full strength, on its own logs (TVD) = "
           f"{full_tvd:.4f}")
-    print(f"  {'strength':>9} {'distortion':>11} {'observed':>10} "
-          f"{'predicted':>10} {'gap':>9} {'t':>7} {'sig':>4}")
+    print(f"  {'strength':>9} {'endpoint':>8} {'distortion':>11} "
+          f"{'observed':>10} {'predicted':>10} {'gap':>9} {'t':>7} {'sig':>4}")
     nsig = ntot = 0
+    borderline = []
     for lab, p, st in [("0.25", b / "dose_a10_str025", 0.25),
                        ("0.50", b / "dose_a10_str050", 0.50)]:
         arm = load_seeds(p)
-        frac = perturbation_tvd(OFF, st, 0.6, 1.5) / full_tvd if full_tvd else float("nan")
+        own = perturbation_tvd(p, st, 0.6, 1.5)
+        frac = (own / full_tvd) if full_tvd else float("nan")
+        # The plausible range across the three defensible references
+        # (own logs, OFF logs, FULL logs), used only to flag sensitivity.
+        alts = [frac,
+                perturbation_tvd(OFF, st, 0.6, 1.5)
+                / (perturbation_tvd(OFF, 1.0, 0.6, 1.5) or float("nan")),
+                perturbation_tvd(FULL, st, 0.6, 1.5) / (full_tvd or float("nan"))]
         for ep, _ in ENDPOINTS:
             shared = sorted(set(off) & set(arm) & set(full))
-            if not shared:
+            if len(shared) < 2:
                 continue
-            d = [(arm[s][ep] - off[s][ep]) - frac * (full[s][ep] - off[s][ep])
-                 for s in shared]
-            obs = statistics.mean(arm[s][ep] - off[s][ep] for s in shared)
-            pred = frac * statistics.mean(full[s][ep] - off[s][ep] for s in shared)
-            m, t, n = paired_t(d)
+            def _gap(f):
+                d = [(arm[s2][ep] - off[s2][ep]) - f * (full[s2][ep] - off[s2][ep])
+                     for s2 in shared]
+                return paired_t(d)
+            m, t, n = _gap(frac)
+            obs = statistics.mean(arm[s2][ep] - off[s2][ep] for s2 in shared)
+            pred = frac * statistics.mean(full[s2][ep] - off[s2][ep] for s2 in shared)
             ntot += 1
             ok = (not math.isnan(t)) and abs(t) > t_crit(n)
             nsig += ok
-            print(f"  {lab:>9} {frac:>11.3f} {obs:>+10.4f} {pred:>+10.4f} "
-                  f"{m:>+9.4f} {t:>+7.2f} {'YES' if ok else 'no':>4}")
+            # Does the verdict hold across every defensible reference?
+            verdicts = set()
+            for f in alts:
+                if math.isnan(f):
+                    continue
+                _m2, t2, n2 = _gap(f)
+                verdicts.add((not math.isnan(t2)) and abs(t2) > t_crit(n2))
+            if len(verdicts) > 1:
+                borderline.append(f"{lab}/{ep}")
+            print(f"  {lab:>9} {ep:>8} {frac:>11.3f} {obs:>+10.4f} "
+                  f"{pred:>+10.4f} {m:>+9.4f} {t:>+7.2f} "
+                  f"{('YES' if ok else 'no') + ('*' if len(verdicts) > 1 else ''):>4}")
     print(f"  => {nsig}/{ntot} significant. A positive gap means that strength "
-          f"is LESS harmful\n     than its share of the distortion predicts.\n")
+          f"is LESS harmful\n     than its share of the distortion predicts.")
+    if borderline:
+        print(f"  * {', '.join(borderline)} flip verdict depending on which run's "
+              f"logs the\n    distortion is measured on, so that cell is not "
+              f"load-bearing evidence.")
+    else:
+        print("  No cell depends on the choice of distortion reference.")
+    print()
 
     # Batch agreement. Runs added in a later session can differ
     # systematically from the originals even at an identical config, so any
@@ -727,11 +819,14 @@ def main():
                      ("start round 15", b / "sched_a10_start15")]:
         arm = load_seeds(p)
         for ep in ("final", "last10"):
-            lo_m, hi_m, ok = batch_agreement(off, arm, ep)
-            if math.isnan(lo_m):
+            lo_m, hi_m, verdict = batch_agreement(off, arm, ep)
+            if verdict == "one-batch":
+                print(f"  {label:<26} {ep:>8} {'--':>12} {'--':>12} "
+                      f"{'1 batch':>9}   (all seeds on one side of the split: "
+                      f"this guard did NOT run)")
                 continue
             print(f"  {label:<26} {ep:>8} {lo_m:>+12.4f} {hi_m:>+12.4f} "
-                  f"{'yes' if ok else 'NO':>7}")
+                  f"{verdict:>9}")
     print()
 
     print("Absolute accuracies at the last10 endpoint (mean over seeds):")
