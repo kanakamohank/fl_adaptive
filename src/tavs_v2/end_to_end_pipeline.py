@@ -142,6 +142,46 @@ class PipelineConfig:
         if self.ray_init_args is None:
             self.ray_init_args = {"ignore_reinit_error": True, "include_dashboard": False}
 
+def build_trust_logs(round_analytics):
+    """Build the four trust/tier log structures from a run's round analytics.
+
+    Returns (trust_evolution, tier_evolution, trust_by_round, tier_by_round).
+
+    A module-level function, not an inline loop, so the tests can exercise
+    THIS code rather than a copy of it. An earlier version of the test
+    re-implemented the loop, which meant deleting the round-keyed lines from
+    the pipeline left every test passing.
+
+    Rounds that produced no aggregate never reach round_analytics, so they
+    are absent from the round-keyed dicts rather than present-and-empty.
+    Consumers must therefore iterate the keys, or use .get(rk, {}) -- do not
+    assume range(1, num_rounds + 1) is covered.
+    """
+    trust_evolution, tier_evolution = {}, {}
+    trust_by_round, tier_by_round = {}, {}
+    for analytics in round_analytics:
+        decision = getattr(analytics, "scheduling_decision", None)
+        if not decision:
+            continue
+        # str() because JSON keys are strings anyway, so this round-trips
+        # through json.dump/load unchanged rather than silently becoming
+        # strings later.
+        rk = str(analytics.round_number)
+        tiers = decision.tier_assignments or {}
+        trust_by_round[rk] = dict(decision.trust_scores)
+        tier_by_round[rk] = {c: tiers.get(c, 1) for c in decision.trust_scores}
+        for client_id, trust_score in decision.trust_scores.items():
+            # Legacy ragged form. Preserved so older analyses keep running;
+            # see the PipelineResults field docstring for why it must not be
+            # used for anything new.
+            if client_id not in trust_evolution:
+                trust_evolution[client_id] = []
+                tier_evolution[client_id] = []
+            trust_evolution[client_id].append(trust_score)
+            tier_evolution[client_id].append(tiers.get(client_id, 1))
+    return trust_evolution, tier_evolution, trust_by_round, tier_by_round
+
+
 @dataclass
 class PipelineResults:
     config: PipelineConfig
@@ -182,6 +222,34 @@ class PipelineResults:
     # it via its configure_fit override. Empty for older cached runs that
     # predate this field.
     round_assignments: Dict[str, Dict[str, List[str]]] = field(default_factory=dict)
+
+    # Per-round trust and tier, keyed BY ROUND -- the usable form.
+    #
+    #   trust_by_round[str(round)][cid] -> trust score at that round
+    #   tier_by_round[str(round)][cid]  -> tier at that round
+    #
+    # `trust_evolution` / `tier_evolution` above are kept for backward
+    # compatibility but are NOT usable for per-round analysis, and nothing new
+    # should read them. They are built by appending one value per round from
+    # the round a client is first seen, so each client's list has a different
+    # length (21-40 in a 40-round run) with no record of where it starts. The
+    # round a given index refers to is therefore unrecoverable, and an attempt
+    # to recover it by offset was wrong for 86 of 123 promoted client-rounds.
+    #
+    # A second, independent defect: a promoted client's logged tier is often
+    # not 3, because schedule_verifications tentatively promotes Tier-2
+    # clients and only then demotes by the weight budget. So `tier_evolution`
+    # cannot be read as "promotable" either, at any index.
+    #
+    # Both fields were reconstructible after the fact -- trust replays exactly
+    # from the logged pretrain_loss_var via the EMA (verified to 0.0 error on
+    # 1500 client values) -- but only when the oracle signals happen to be
+    # logged, which is opt-in. These fields make it unconditional.
+    # A round that produced no aggregate never reaches round_analytics, so it
+    # is ABSENT here rather than present-and-empty. Iterate the keys or use
+    # .get(rk, {}); do not assume range(1, num_rounds + 1) is covered.
+    trust_by_round: Dict[str, Dict[str, float]] = field(default_factory=dict)
+    tier_by_round: Dict[str, Dict[str, int]] = field(default_factory=dict)
 
 class TAVSESPPipeline:
     def __init__(self, config: PipelineConfig):
@@ -689,16 +757,8 @@ class TAVSESPPipeline:
         # JSON keys are strings; keep round numbers as strings on the way out
         # so json.dump / json.load round-trip cleanly.
         round_assignments = {str(r): assn for r, assn in round_assn_raw.items()}
-        trust_evolution, tier_evolution = {}, {}
-
-        for analytics in strategy.round_analytics:
-            if analytics.scheduling_decision:
-                for client_id, trust_score in analytics.scheduling_decision.trust_scores.items():
-                    if client_id not in trust_evolution:
-                        trust_evolution[client_id] = []
-                        tier_evolution[client_id] = []
-                    trust_evolution[client_id].append(trust_score)
-                    tier_evolution[client_id].append(analytics.scheduling_decision.tier_assignments.get(client_id, 1))
+        (trust_evolution, tier_evolution,
+         trust_by_round, tier_by_round) = build_trust_logs(strategy.round_analytics)
 
         byzantine_detection_history = []
         for analytics in strategy.round_analytics:
@@ -737,6 +797,7 @@ class TAVSESPPipeline:
         return PipelineResults(
             config=self.config, server_metrics=[], server_losses=server_losses, server_accuracies=server_accuracies,
             final_trust_state=trust_state, trust_evolution=trust_evolution, tier_evolution=tier_evolution,
+            trust_by_round=trust_by_round, tier_by_round=tier_by_round,
             byzantine_detection_history=byzantine_detection_history,
             scheduling_history=list(getattr(strategy, 'scheduling_history', [])),
             attack_success_rates={},
