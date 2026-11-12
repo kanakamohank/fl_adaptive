@@ -28,6 +28,7 @@ import argparse
 import glob
 import json
 import math
+import re
 import statistics
 import sys
 from pathlib import Path
@@ -57,25 +58,41 @@ def pilot_rows(base: Path, fam: str):
     for p in sorted(glob.glob(str(base / fam / "**" / "pilot_results.json"),
                               recursive=True)):
         for r in json.loads(Path(p).read_text()).get("runs", []):
-            out.setdefault(r["arm"], {})[r["seed"]] = r
+            prev = out.setdefault(r["arm"], {})
+            if r["seed"] in prev:
+                # A second pilot file in the family (e.g. a re-run that
+                # landed at a different matched skip rate) would otherwise
+                # silently replace seeds and the figure would mix configs.
+                raise RuntimeError(
+                    f"duplicate {r['arm']} seed {r['seed']} in {fam}: more "
+                    f"than one pilot_results.json. Point --base at one.")
+            prev[r["seed"]] = r
     return out
 
 
 def arm_stats(rows, arm, ref="full_verify"):
-    """(mean accuracy, mean verifications, paired delta vs ref, ci, n)."""
+    """(mean accuracy, mean verifications, paired delta vs ref, ci, n).
+
+    The mean and the error bar are computed over the SAME seeds -- those
+    shared with the reference arm. An earlier version averaged accuracy over
+    all of the arm's seeds while pairing the error bar over the shared ones,
+    so with unequal seed sets the point and its interval would have
+    described different samples.
+    """
     if arm not in rows:
         return None
-    acc = [x["late_accuracy"] for x in rows[arm].values()]
-    ver = [x["total_verified"] for x in rows[arm].values()]
+    use = sorted(set(rows[arm]) & set(rows[ref])) if ref in rows else sorted(rows[arm])
+    if not use:
+        use = sorted(rows[arm])
+    acc = [rows[arm][s]["late_accuracy"] for s in use]
+    ver = [rows[arm][s]["total_verified"] for s in use]
     d = hw = float("nan")
-    n = len(acc)
-    if ref in rows:
-        shared = sorted(set(rows[arm]) & set(rows[ref]))
-        if len(shared) >= 2:
-            diffs = [rows[arm][s]["late_accuracy"] - rows[ref][s]["late_accuracy"]
-                     for s in shared]
-            d, _t, n = paired_t(diffs)
-            hw = ci_halfwidth(diffs)
+    n = len(use)
+    if ref in rows and len(use) >= 2 and set(use) <= set(rows[ref]):
+        diffs = [rows[arm][s]["late_accuracy"] - rows[ref][s]["late_accuracy"]
+                 for s in use]
+        d, _t, n = paired_t(diffs)
+        hw = ci_halfwidth(diffs)
     return statistics.mean(acc), statistics.mean(ver), d, hw, n
 
 
@@ -136,8 +153,10 @@ def fig_headroom(plt, base, fams, out, p_noisy=0.4, budget=400):
     fig, ax = plt.subplots(figsize=(7.6, 4.2))
     y = range(len(labels))
     ax.barh(list(y), got, color="#548235", label="skipped by TAVS")
-    ax.barh(list(y), [oracle - g for g in got], left=got, color="#d9d9d9",
-            label="left on the table")
+    # max(0, ...) so an arm that ever skipped MORE than the oracle bound
+    # cannot draw a negative-width bar with a negative "unclaimed" label.
+    ax.barh(list(y), [max(0.0, oracle - g) for g in got], left=got,
+            color="#d9d9d9", label="left on the table")
     ax.axvline(oracle, color="#c0504d", lw=1.6, ls="--")
     # Above the top bar, not beside it: at the bottom it sat under the
     # legend and both were unreadable.
@@ -148,8 +167,10 @@ def fig_headroom(plt, base, fams, out, p_noisy=0.4, budget=400):
     for i, g in enumerate(got):
         ax.annotate(f"{g:.0f}  ({g / budget:.0%})", (g / 2, i), ha="center",
                     va="center", fontsize=9, color="white")
-        ax.annotate(f"+{oracle - g:.0f} unclaimed", (g + (oracle - g) / 2, i),
-                    ha="center", va="center", fontsize=8, color="#444444")
+        gap = max(0.0, oracle - g)
+        if gap > 1:
+            ax.annotate(f"+{gap:.0f} unclaimed", (g + gap / 2, i),
+                        ha="center", va="center", fontsize=8, color="#444444")
     ax.set_yticks(list(y))
     ax.set_yticklabels(labels, fontsize=9)
     ax.set_xlabel(f"verifications skipped, of {budget} opportunities")
@@ -164,18 +185,28 @@ def fig_headroom(plt, base, fams, out, p_noisy=0.4, budget=400):
     return f
 
 
-def constraint_breakdown(base: Path, fam: str):
+def constraint_breakdown(base: Path, fam: str, seeds=None):
     """Per 10-client cohort: promoted, and who was held back by what.
 
     Trust is REPLAYED from the logged pretrain_loss_var through the same EMA
-    the scheduler used -- verified elsewhere to reproduce the recorded final
-    trust to 0.0 error on 1500 client values. The logged trust_evolution
+    the scheduler used -- verified to reproduce the recorded final
+    trust to 0.0 error on every replayed client value. The logged trust_evolution
     cannot be used: its per-client lists have ragged lengths with no recorded
     start round.
+
+    `seeds` restricts the replay to the same seed set the other two figures
+    use. Without it this globbed every tavs_skip_seed* in the family, which
+    picked up 10 seeds for Dirichlet against 5 for IID while figs 1-2 used
+    5 for both -- three panels presented as one story, averaged over
+    different samples.
     """
     acc = {"promoted": [], "below_theta_low": [], "forced_stale": []}
     for p in sorted(glob.glob(str(base / fam / "**" / "tavs_skip_seed*"
                                   / "pipeline_results.json"), recursive=True)):
+        if seeds is not None:
+            m = re.search(r"tavs_skip_seed(\d+)", p)
+            if not m or int(m.group(1)) not in seeds:
+                continue
         d = json.loads(Path(p).read_text())
         tc = d["config"]["tavs_config"]
         a, t0 = tc["alpha_trust"], tc["initial_trust"]
@@ -220,7 +251,10 @@ def constraint_breakdown(base: Path, fam: str):
 def fig_what_blocks(plt, base, fams, out):
     rows, labels = [], []
     for fam, title in fams:
-        b = constraint_breakdown(base, fam)
+        # Same seeds as figs 1-2, so all three panels describe one sample.
+        pr = pilot_rows(base, fam)
+        seeds = set(pr.get("tavs_skip", {})) or None
+        b = constraint_breakdown(base, fam, seeds=seeds)
         if b:
             rows.append(b)
             labels.append(title)
@@ -243,7 +277,8 @@ def fig_what_blocks(plt, base, fams, out):
             ax.annotate(f"{v:.1f}", (v + 0.08, off), va="center", fontsize=8,
                         color="#333333")
     ax.axvline(10, color="#999999", lw=1.0, ls=":")
-    ax.annotate("cohort size 10", (10, len(rows) - 0.55), fontsize=8,
+    ax.set_ylim(-0.55, len(rows) - 0.30)
+    ax.annotate("cohort size 10", (10, len(rows) - 0.52), fontsize=8,
                 color="#666666", ha="right", va="bottom")
     ax.set_yticks(list(range(len(labels))))
     ax.set_yticklabels(labels, fontsize=9)

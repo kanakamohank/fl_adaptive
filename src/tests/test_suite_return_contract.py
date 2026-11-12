@@ -20,10 +20,33 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[2]
-SUITES = ["test_end_to_end_pipeline.py", "test_tavs_esp_strategy.py"]
+# Every suite whose main() aggregates with all([...]). Found by grepping
+# "all([" across src/tests: these three. test_tavs_flower_client.py was
+# missing from the first version and is vulnerable to the identical bug.
+SUITES = ["test_end_to_end_pipeline.py", "test_tavs_esp_strategy.py",
+          "test_tavs_flower_client.py"]
 
 
 _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
+_DEFS = (ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _falsy_return(r):
+    """Does this return statement hand back something falsy?
+
+    `return` alone is the obvious case, but `return None`, `return False`
+    and `return []` are all equally fatal to an all([...]) aggregator and
+    were missed by the first version -- which checked only for a bare
+    return. Someone "fixing" a flagged test by writing `return None` would
+    have satisfied the guard and kept the bug.
+    """
+    if r.value is None:
+        return True
+    if isinstance(r.value, ast.Constant):
+        return not r.value.value
+    if isinstance(r.value, (ast.List, ast.Tuple, ast.Dict, ast.Set)):
+        return not getattr(r.value, "elts", getattr(r.value, "keys", [1]))
+    return False
 
 
 def _own_returns(node):
@@ -65,12 +88,24 @@ def _always_returns(body):
         return bool(last.orelse) and _always_returns(last.body) \
             and _always_returns(last.orelse)
     if isinstance(last, ast.Try):
+        # A return in `finally` swallows every other path.
         if last.finalbody and _always_returns(last.finalbody):
             return True
         body_ok = _always_returns(last.body) if not last.orelse \
             else _always_returns(last.orelse)
-        return body_ok and bool(last.handlers) and all(
-            _always_returns(h.body) for h in last.handlers)
+        # No `except` clauses at all means nothing is caught, so the body (or
+        # else) alone decides. Requiring handlers here flagged the correct
+        # `try: return True / finally: cleanup()` as falling off the end.
+        if not last.handlers:
+            return body_ok
+        return body_ok and all(_always_returns(h.body) for h in last.handlers)
+    if isinstance(last, getattr(ast, "Match", ())) and last.cases:
+        # Every case must return AND one case must be an irrefutable
+        # wildcard, or an unmatched subject falls through.
+        has_wildcard = any(
+            isinstance(c.pattern, ast.MatchAs) and c.pattern.pattern is None
+            and c.guard is None for c in last.cases)
+        return has_wildcard and all(_always_returns(c.body) for c in last.cases)
     return False
 
 
@@ -79,11 +114,14 @@ def offenders(path: Path):
     falls off the end."""
     tree = ast.parse(path.read_text())
     bad = []
-    for node in tree.body:
-        if not (isinstance(node, ast.FunctionDef) and node.name.startswith("test_")):
+    # Walk the whole tree, not just module level: an `async def test_*` or a
+    # test method on a class was silently skipped before, so the guard
+    # failed open on exactly the files most likely to drift.
+    for node in ast.walk(tree):
+        if not (isinstance(node, _DEFS) and node.name.startswith("test_")):
             continue
-        if any(r.value is None for r in _own_returns(node)):
-            bad.append((node.name, "has a bare `return`"))
+        if any(_falsy_return(r) for r in _own_returns(node)):
+            bad.append((node.name, "can return a falsy value"))
         elif not _always_returns(node.body):
             bad.append((node.name, "falls off the end without returning"))
     return bad
@@ -125,18 +163,35 @@ def test_detector_catches_a_missing_return():
         "def test_with_try_all_paths_return():\n"
         "    with open('/dev/null') as f:\n"
         "        try:\n            return True\n"
-        "        except Exception:\n            return True\n"
+        "        except Exception:\n            return True\n\n"
+        # Falsy explicit returns: all fatal to all([...]), all missed by the
+        # first version, which only looked for a bare `return`.
+        "def test_returns_none_explicitly():\n    return None\n\n"
+        "def test_returns_false():\n    return False\n\n"
+        "def test_returns_empty_list():\n    return []\n\n"
+        # try/finally with NO except: the body decides; requiring handlers
+        # flagged this correct shape.
+        "def test_try_finally_no_except():\n"
+        "    try:\n        return True\n    finally:\n        pass\n\n"
+        # async and methods were skipped entirely -- the guard failed open.
+        "async def test_async_falls_off():\n    print('x')\n\n"
+        "class TestGroup:\n"
+        "    def test_method_falls_off(self):\n        print('x')\n"
     )
     with tempfile.NamedTemporaryFile("w", suffix=".py", delete=False) as f:
         f.write(src)
         tmp = Path(f.name)
     try:
         names = {n for n, _ in offenders(tmp)}
-        assert names == {"test_falls_off", "test_bare_return"}, (
-            f"expected exactly the two real offenders, got {names}")
+        expected = {"test_falls_off", "test_bare_return",
+                    "test_returns_none_explicitly", "test_returns_false",
+                    "test_returns_empty_list", "test_async_falls_off",
+                    "test_method_falls_off"}
+        assert names == expected, (
+            f"missing {expected - names}; unexpected {names - expected}")
     finally:
         tmp.unlink()
-    print("✓ the detector flags a missing and a bare return, and nothing else")
+    print("✓ detector flags bare/None/False/[] returns, async and method tests,\n  and does NOT flag nested helpers, with/try, or try/finally")
     return True
 
 
