@@ -174,6 +174,15 @@ def test_server_strategy_creation():
     assert strategy.scheduler is not None
     print("✓ Strategy components initialized")
 
+    # main() aggregates every test's RETURN VALUE with all([...]). Without
+    # this, the function fell off its end and returned None, so the suite
+    # reported "Some End-to-End Pipeline tests FAILED" with every individual
+    # check printing a tick. The visible symptom was the unrelated warning
+    # from the next test ("TAVS cannot promote any client within 1 rounds"),
+    # which is a correct refusal of a meaningless 1-round config and is
+    # caught and counted as success -- a red herring that cost real time.
+    return True
+
 
 def test_client_function_creation():
     """Test client function creation for simulation."""
