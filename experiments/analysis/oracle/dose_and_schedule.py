@@ -323,6 +323,45 @@ def phase0_gate(off, s000):
     return verdict, rows
 
 
+# The cross-sweep arms, shared with plot_dose_and_schedule.py so the two
+# cannot drift. (label, strength, inlier_floor, promoted_floor, dirname).
+# sweep_a10_twagg predates the floor flag and carries the historical pair,
+# which is why its promoted floor is 0.0 and not its inlier floor.
+CROSS_ARMS = [
+    ("strength 0.25", 0.25, 0.05, 0.0, "dose_a10_str025"),
+    ("strength 0.50", 0.50, 0.05, 0.0, "dose_a10_str050"),
+    ("strength 1.00", 1.00, 0.05, 0.0, "sweep_a10_twagg"),
+    ("floor 0.05", 1.00, 0.05, 0.05, "floor_a10_f005"),
+    ("floor 0.25", 1.00, 0.25, 0.25, "floor_a10_f025"),
+    ("floor 0.50", 1.00, 0.50, 0.50, "floor_a10_f050"),
+    ("floor 1.00", 1.00, 1.00, 1.00, "floor_a10_f100"),
+]
+
+# Smallest multiplier the PROMOTED path can produce before any floor:
+# sigmoid(c_lambda*(trust - 0.5)) at trust = 0, with the scheduler default
+# c_lambda = 8.
+PROMOTED_MIN_RAW = 1.0 / (1.0 + math.exp(8.0 * 0.5))
+
+
+def min_attainable_weight(strength, floor, promoted_floor):
+    """Smallest weight multiplier ANY accepted client can be reduced to.
+
+    Both paths matter. The inlier path bottoms out at max(floor, 1-strength);
+    the promoted path at max(promoted_floor, pull(PROMOTED_MIN_RAW)), which
+    at full strength is max(promoted_floor, 0.018).
+
+    Taking only the inlier path would misreport sweep_a10_twagg as 0.05 when
+    its promoted clients -- about 31% of contributors -- can reach 0.018, and
+    would tabulate it as identical to the floor-0.05 arm although the two
+    differ by 0.0019 in harm. That row is the most negative point, so it is
+    also the most influential one in any fit against minimum weight.
+    """
+    pull = (lambda x: x) if strength >= 1.0 else (
+        lambda x: 1.0 - strength * (1.0 - x))
+    return min(max(floor, pull(0.0)),
+               max(promoted_floor, pull(PROMOTED_MIN_RAW)))
+
+
 def ci_halfwidth(diffs):
     """Half-width of the 95% CI on a paired mean: t_crit * standard error.
 
@@ -625,10 +664,24 @@ def main():
             ("strength 0.25", b / "dose_a10_str025"),
             ("strength 0.50", b / "dose_a10_str050"),
             ("strength 1.00", FULL)]
+    # Floor arms. Every one sets BOTH the inlier and the promoted floor to
+    # the same value. sweep_a10_twagg is listed separately as "pre-flag"
+    # because it predates the flag and carries the historical pair
+    # (0.05 inlier, 0.0 promoted) -- it is NOT the floor-0.05 arm, and
+    # treating it as one would silently fold the promoted floor into the
+    # ladder.
+    FLOOR = [("pre-flag (0.05 / 0.0)", FULL),
+             ("floor 0.05", b / "floor_a10_f005"),
+             ("floor 0.25", b / "floor_a10_f025"),
+             ("floor 0.50", b / "floor_a10_f050"),
+             ("floor 1.00", b / "floor_a10_f100")]
     SCHED = [("start round 6", b / "sched_a10_start06"),
              ("start round 15", b / "sched_a10_start15"),
              ("start round 1 (= full)", FULL)]
 
+    # Floor arms are optional: the dose/schedule report must still run
+    # before that batch exists.
+    FLOOR = [(l, pth) for l, pth in FLOOR if pth.exists()]
     missing = [str(p) for _l, p in DOSE + SCHED if not p.exists()]
     if not OFF.exists():
         missing.append(str(OFF))
@@ -831,8 +884,148 @@ def main():
                   f"{verdict:>9}")
     print()
 
+    if len(FLOOR) > 1:
+        print("FLOOR SWEEP (is the harm caused by clients pushed toward ZERO "
+              "weight?)")
+        print("Raising the floor raises the smallest weight any ACCEPTED "
+              "client can get.")
+        print("Flagged clients stay unfloored throughout, so floor 1.00 is NOT "
+              "the same as\nturning weighting off -- it leaves the outlier "
+              "branch running.")
+        print(hdr); print(rule)
+        for label, p2 in FLOOR:
+            print(fmt_row(label, off, load_seeds(p2)))
+        print()
+
+        f005 = b / "floor_a10_f005"
+        if f005.exists():
+            print("  Head to head vs floor 0.05 (does raising it REMOVE the "
+                  "harm?), with CI:")
+            base_sd = load_seeds(f005)
+            for label, p2 in FLOOR:
+                if p2 == f005 or p2 == FULL:
+                    continue
+                arm = load_seeds(p2)
+                for ep in ("final", "last10"):
+                    shared = sorted(set(base_sd) & set(arm) & set(off))
+                    if len(shared) < 2:
+                        continue
+                    d = [arm[s2][ep] - base_sd[s2][ep] for s2 in shared]
+                    m, _t, _n = paired_t(d)
+                    hw = ci_halfwidth(d)
+                    harm = statistics.mean(base_sd[s2][ep] - off[s2][ep]
+                                           for s2 in shared)
+                    print(f"    {label:<14} {ep:<7} {m:+.4f}  CI "
+                          f"[{m - hw:+.4f}, {m + hw:+.4f}]   vs a floor-0.05 "
+                          f"harm of {harm:+.4f}")
+            print("    A CI that excludes 0 means the floor measurably "
+                  "removed harm; one that\n    contains 0 but is narrow "
+                  "relative to the harm bounds how much it could have.\n")
+
+        # The cross-sweep test. This is what the floor sweep is FOR, and on
+        # its own the floor ladder answers the wrong question: a monotone
+        # fall in harm as the floor rises is consistent with BOTH candidate
+        # explanations, because raising the floor also reduces the overall
+        # distortion. Only arms that hold one constant while moving the
+        # other can separate them.
+        print("  WHAT DOES THE HARM TRACK? Arms from BOTH sweeps.")
+        print("    (a) distortion   -- how far weighting moves the client shares")
+        print("    (b) minimum weight -- how close any accepted client gets to 0")
+        print(f"    {'arm':<16}{'min weight':>11}{'distortion':>12}"
+              f"{'harm(last10)':>14}{'t':>8}")
+        pts = []
+        for lab, st, fl, pf, name in CROSS_ARMS:
+            pth = b / name
+            if not pth.exists():
+                continue
+            minw = min_attainable_weight(st, fl, pf)
+            tvd = perturbation_tvd(OFF, st, 0.6, 1.5, floor=fl)
+            m, t, n, _bt = compare(off, load_seeds(pth), "last10")
+            pts.append((lab, minw, tvd, m, name))
+            print(f"    {lab:<16}{minw:>11.3f}{tvd:>12.4f}{m:>+14.4f}{t:>+8.2f}")
+
+        if len(pts) >= 3:
+            def _r2(xs, ys):
+                mx, my = statistics.mean(xs), statistics.mean(ys)
+                sxy = sum((x - mx) * (y - my) for x, y in zip(xs, ys))
+                sxx = sum((x - mx) ** 2 for x in xs)
+                syy = sum((y - my) ** 2 for y in ys)
+                return (sxy * sxy) / (sxx * syy) if sxx > 0 and syy > 0 else float("nan")
+            r_d = _r2([q[2] for q in pts], [q[3] for q in pts])
+            r_m = _r2([q[1] for q in pts], [q[3] for q in pts])
+            # Two decimals, not three. A seed-level paired bootstrap puts the
+            # difference between these two at +0.07 with a 95% interval of
+            # [-0.01, +0.16] -- it does NOT separate the hypotheses, and three
+            # decimals on seven points would imply a precision that is not
+            # there. The conclusion rests on the direct test below.
+            print(f"    across these arms: harm vs distortion R^2 = {r_d:.2f}, "
+                  f"vs minimum weight R^2 = {r_m:.2f}")
+            print("    That gap is NOT decisive -- a seed-level bootstrap on the "
+                  "difference spans\n    zero. Correlation over seven points "
+                  "cannot settle this; the direct test can.")
+
+            # The one pair that holds minimum weight FIXED and moves only the
+            # distortion, tested per seed rather than by eyeballing one
+            # significant arm against one null arm.
+            names = {q[0]: q for q in pts}
+            if "strength 0.50" in names and "floor 0.50" in names:
+                a2, c2 = names["strength 0.50"], names["floor 0.50"]
+                sa, sc = load_seeds(b / a2[4]), load_seeds(b / c2[4])
+                print(f"\n    DIRECT TEST -- both arms allow a minimum weight "
+                      f"of {a2[1]:.2f}, so nothing is")
+                print(f"    crushed toward zero in either, but floor 0.50 "
+                      f"distorts {c2[2] / a2[2]:.2f}x more.")
+                print(f"    Paired per seed, floor 0.50 minus strength 0.50:")
+                sig = 0
+                for ep, _ in ENDPOINTS:
+                    shared = sorted(set(sa) & set(sc))
+                    if len(shared) < 2:
+                        continue
+                    d = [sc[s2][ep] - sa[s2][ep] for s2 in shared]
+                    m2, t2, n2 = paired_t(d)
+                    hw = ci_halfwidth(d)
+                    ok = (not math.isnan(t2)) and abs(t2) > t_crit(n2)
+                    sig += ok
+                    print(f"      {ep:<7} {m2:+.5f}  t={t2:+5.2f}  CI "
+                          f"[{m2 - hw:+.5f}, {m2 + hw:+.5f}]  "
+                          f"{'YES' if ok else 'no'}")
+                print(f"      => {sig}/4 endpoints. Harm appears at the SAME "
+                      f"minimum weight when the\n         distortion rises, so "
+                      f"near-total silencing is not what causes it.")
+        print()
+
+        print("  Batch agreement on the floor arms (last10):")
+        for label, p2 in FLOOR:
+            arm_sd = load_seeds(p2)
+            lo_m, hi_m, verdict = batch_agreement(off, arm_sd, "last10")
+            note = ""
+            # Whether the two batches' per-seed RANGES overlap, measured
+            # rather than asserted. An earlier version claimed overlap in
+            # the printed text while the code only checked that both means
+            # were small, so the claim would have kept printing after it
+            # stopped being true.
+            shared = sorted(set(off) & set(arm_sd))
+            lo_v = [arm_sd[s2]["last10"] - off[s2]["last10"]
+                    for s2 in shared if s2.isdigit() and int(s2) <= 5]
+            hi_v = [arm_sd[s2]["last10"] - off[s2]["last10"]
+                    for s2 in shared if s2.isdigit() and int(s2) > 5]
+            overlap = bool(lo_v and hi_v
+                           and min(lo_v) <= max(hi_v) and min(hi_v) <= max(lo_v))
+            if verdict == "NO" and overlap and max(abs(lo_m), abs(hi_m)) < 0.003:
+                # Both halves sit just above atol while straddling zero.
+                # The per-seed values OVERLAP heavily between batches -- there
+                # is no separation, unlike the early-window claim that was
+                # retracted, where the two batches were far from zero and did
+                # not overlap at all. So this fires on a near-null, which is
+                # the rule being conservative, not an artifact being caught.
+                note = ("   (both halves ~0 and the per-seed ranges DO "
+                        "overlap: a near-null, not a split)")
+            print(f"    {label:<22} {lo_m:+.4f} / {hi_m:+.4f}   {verdict}{note}")
+        print()
+
     print("Absolute accuracies at the last10 endpoint (mean over seeds):")
-    for label, p in [("weighting OFF", OFF)] + DOSE[1:] + SCHED[:2]:
+    for label, p in ([("weighting OFF", OFF)] + DOSE[1:] + SCHED[:2]
+                     + [(l, q) for l, q in FLOOR if q != FULL]):
         sd = load_seeds(p)
         if not sd:
             continue

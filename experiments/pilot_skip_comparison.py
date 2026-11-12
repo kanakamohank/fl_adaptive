@@ -182,6 +182,14 @@ def _config_tag(args) -> str:
         _flr = getattr(args, "trust_weight_floor", None)
         if _flr is not None:
             parts.append(f"twflr{int(round(float(_flr) * 100)):03d}")
+    # Staleness caps are OUTSIDE the twagg block: they govern routing, which
+    # applies whether or not trust is translated into aggregation weight.
+    _sa = int(getattr(args, "s_max_appearances", 4) or 4)
+    if _sa != 4:
+        parts.append(f"sa{_sa:02d}")
+    _sr = int(getattr(args, "s_max_rounds", 10) or 10)
+    if _sr != 10:
+        parts.append(f"sr{_sr:02d}")
     return "_".join(parts)
 
 
@@ -288,6 +296,8 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
             getattr(args, "trust_weighting_start_round", 1) or 1),
         trust_weight_strength=float(
             getattr(args, "trust_weight_strength", 1.0)),
+        s_max_appearances=int(getattr(args, "s_max_appearances", 4) or 4),
+        s_max_rounds=int(getattr(args, "s_max_rounds", 10) or 10),
         # One CLI flag sets BOTH floors. Omitted -> the dataclass defaults
         # (0.05 inlier, 0.0 promoted), which are the historical pair.
         **({} if getattr(args, "trust_weight_floor", None) is None else {
@@ -782,6 +792,28 @@ def main():
                              "which is the controlled version of comparing two "
                              "different trust signals. No effect without "
                              "--trust-weighted-aggregation.")
+    parser.add_argument("--s-max-appearances", type=int, default=4,
+                        dest="s_max_appearances",
+                        help="Force re-verification after this many rounds in "
+                             "which a client was SAMPLED but not verified. "
+                             "Default 4. Together with --s-max-rounds this is "
+                             "the hard expiry on trust: it fires regardless of "
+                             "how trustworthy a client is, and on the runs "
+                             "measured so far it forces 2.8-3.2 verifications "
+                             "per 10-client cohort -- about as many clients as "
+                             "the scheduler manages to skip. Raising it is the "
+                             "main lever on the skip rate; the weight budget "
+                             "(--gamma-budget equivalent) binds in under 6%% of "
+                             "rounds and is not.")
+    parser.add_argument("--s-max-rounds", type=int, default=10,
+                        dest="s_max_rounds",
+                        help="Force re-verification this many rounds after the "
+                             "last verification, regardless of sampling. "
+                             "Default 10. The wall-clock half of the staleness "
+                             "cap: a rarely-sampled client trips this one long "
+                             "before it accumulates appearances, so both caps "
+                             "must be raised together to actually lift the "
+                             "skip rate.")
     parser.add_argument("--trust-weight-floor", type=float, default=None,
                         dest="trust_weight_floor",
                         help="Smallest weight multiplier an ACCEPTED client "

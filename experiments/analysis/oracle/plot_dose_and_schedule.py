@@ -5,7 +5,8 @@ Each panel answers one question and is readable on its own, because these
 end up in slides and a reader will not have the console table beside them.
 
   fig 1  DOSE          effect vs weighting strength, with error bars
-  fig 2  SCHEDULE      effect vs the round weighting switches on
+  fig 2  FLOOR         effect vs the minimum weight an accepted client keeps
+  fig 3  SCHEDULE      effect vs the round weighting switches on
   fig 3  TRAJECTORY    accuracy over rounds, weighted vs not
   fig 4  WEIGHT CURVE  the weight a client gets for a given score, per arm
                        -- this is the one that explains WHY the sweep cannot
@@ -39,7 +40,8 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from experiments.analysis.oracle.dose_and_schedule import (  # noqa: E402
-    ENDPOINTS, ci_halfwidth, compare, load_seeds, paired_t, t_crit,
+    CROSS_ARMS, ENDPOINTS, ci_halfwidth, compare, load_seeds,
+    min_attainable_weight, paired_t, perturbation_tvd, t_crit,
 )
 
 ARM = "tavs_skip"
@@ -199,6 +201,121 @@ def fig_schedule(plt, b, off, out):
     return f
 
 
+def fig_floor(plt, b, off, out):
+    """Effect vs the minimum weight an accepted client can be reduced to.
+
+    The companion to fig_dose. The dose sweep could not separate "harm grows
+    with the pull" from "harm comes from near-zero weights", because the
+    floor only binds at full strength. This panel holds strength at 1.0 and
+    moves the floor instead.
+
+    sweep_a10_twagg is deliberately NOT plotted as the floor-0.05 point: it
+    predates the flag and has floors (0.05 inlier, 0.0 promoted), so putting
+    it on the x-axis at 0.05 would fold the promoted floor into the ladder
+    and make the curve look steeper than the one-variable comparison is.
+    """
+    arms = [(0.05, b / "floor_a10_f005"), (0.25, b / "floor_a10_f025"),
+            (0.50, b / "floor_a10_f050"), (1.00, b / "floor_a10_f100")]
+    xs, ys, es, cs, ns = [], [], [], [], []
+    for fl, p in arms:
+        if not p.exists():
+            continue
+        sd = load_seeds(p)
+        m, hw, c = effect(off, sd, QUOTE_EP)
+        xs.append(fl); ys.append(m); es.append(hw); cs.append(c)
+        ns.append(len(set(off) & set(sd)))
+    if len(xs) < 2:
+        return None
+    fig, ax = plt.subplots(figsize=(7.2, 4.4))
+    ax.axhline(0, color="#999999", lw=1, ls="--")
+    ax.errorbar(xs, ys, yerr=es, marker="o", capsize=4, lw=1.8,
+                color="#548235")
+    _annotate(ax, xs, ys, cs, ns)
+    ax.set_xlabel("minimum weight an accepted client can be reduced to "
+                  "(both floors)")
+    ax.set_ylabel(f"accuracy vs weighting OFF  ({QUOTE_EP})")
+    # The title must NOT imply that raising the floor is what removes the
+    # harm. It reads that way on this panel alone, and that reading is
+    # wrong: raising the floor also lowers the overall distortion, so this
+    # ladder is consistent with either explanation. The cross-sweep pair
+    # settles it the other way -- strength 0.50 and floor 0.50 have the SAME
+    # minimum weight 0.50, but 1.75x the distortion for the floor arm, and
+    # only the floor arm is harmed. See fig_tracks.
+    ax.set_title("Floor: harm falls as the minimum weight rises\n"
+                 "but raising the floor also lowers the distortion, so this "
+                 "panel alone\ncannot say which one matters -- see "
+                 "tracks.png", fontsize=9)
+    ax.set_xlim(-0.02, 1.16)
+    fig.tight_layout()
+    f = out / "floor.png"
+    fig.savefig(f, dpi=150); plt.close(fig)
+    return f
+
+
+def fig_tracks(plt, b, off, out):
+    """Harm against the two candidate explanations, arms from BOTH sweeps.
+
+    The panel that actually separates them. Each arm is a point; the left
+    axis plots harm against how far the weighting moves the client shares
+    (distortion), the right against the smallest weight any accepted client
+    can keep.
+
+    The pair to look at is strength 0.50 and floor 0.50. Both allow a
+    minimum weight of exactly 0.50 -- nothing is crushed toward zero in
+    either -- but the floor arm distorts 1.75x more, and only the floor arm
+    is harmed. That rules out "harm comes from near-total silencing".
+    """
+    OFF = b / "sweep_a10_notwagg"
+    pts = []
+    # CROSS_ARMS is imported, not re-listed: an earlier version duplicated
+    # the seven arms here with different labels, which is exactly how a
+    # figure drifts away from the table it illustrates.
+    for lab, st, fl, pf, name in CROSS_ARMS:
+        pth = b / name
+        if not pth.exists():
+            continue
+        m, _hw, _c = effect(off, load_seeds(pth), QUOTE_EP)
+        pts.append((lab, min_attainable_weight(st, fl, pf),
+                    perturbation_tvd(OFF, st, 0.6, 1.5, floor=fl), m))
+    if len(pts) < 3:
+        return None
+    fig, axes = plt.subplots(1, 2, figsize=(10.8, 4.6), sharey=True)
+    seen = set()
+    for ax, idx, xlab in ((axes[0], 2, "distortion the weighting applies (TVD)"),
+                          (axes[1], 1, "minimum weight an accepted client keeps")):
+        ax.axhline(0, color="#999999", lw=1, ls="--")
+        for lab, mw, tv, m in pts:
+            x = tv if idx == 2 else mw
+            fam = "strength sweep" if lab.startswith("strength") else "floor sweep"
+            col = "#1f4e79" if fam == "strength sweep" else "#548235"
+            ax.scatter([x], [m], color=col, s=44, zorder=3,
+                       label=fam if fam not in seen else None)
+            seen.add(fam)
+            ax.annotate(lab.replace("strength ", "str ").replace("floor ", "flr "),
+                        (x, m), textcoords="offset points", xytext=(6, -3),
+                        fontsize=8, color="#444444")
+        ax.set_xlabel(xlab)
+    axes[0].set_ylabel(f"accuracy vs weighting OFF  ({QUOTE_EP})")
+    axes[0].legend(fontsize=8, loc="lower left")
+    pair = {q[0]: q for q in pts}
+    sub = ""
+    if "strength 0.50" in pair and "floor 0.50" in pair:
+        a, c = pair["strength 0.50"], pair["floor 0.50"]
+        sub = (f"\nright panel: str 0.50 and flr 0.50 sit at the SAME minimum "
+               f"weight 0.50, yet differ by {abs(c[3] - a[3]):.4f} "
+               f"(paired t=-4.96, 4/4 endpoints)")
+    # Not "harm tracks the distortion": on the LEFT panel str 1.00 and
+    # flr 0.05 sit at the same x and still differ by 0.0019, and the two
+    # families form separate bands rather than one curve. The honest claim
+    # is the negative one, which the right panel and the paired test carry.
+    fig.suptitle("Being pushed toward zero is NOT what causes the harm" + sub,
+                 fontsize=10)
+    fig.tight_layout(rect=(0, 0, 1, 0.93))
+    f = out / "tracks.png"
+    fig.savefig(f, dpi=150); plt.close(fig)
+    return f
+
+
 def fig_trajectory(plt, b, out):
     offs = series(b / "sweep_a10_notwagg")
     ons = series(b / "sweep_a10_twagg")
@@ -330,6 +447,8 @@ def main():
 
     made = []
     for fn in (lambda: fig_dose(plt, args.base, off, args.out),
+               lambda: fig_floor(plt, args.base, off, args.out),
+               lambda: fig_tracks(plt, args.base, off, args.out),
                lambda: fig_schedule(plt, args.base, off, args.out),
                lambda: fig_trajectory(plt, args.base, args.out),
                lambda: fig_weight_curve(plt, args.out)):
