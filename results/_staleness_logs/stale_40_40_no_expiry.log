@@ -199,3 +199,378 @@ tavs_skip  seed=1  (rounds=40, skip_target=0.00)
 2026-11-12 21:44:24,571 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
 2026-11-12 21:44:24,754 - src.tavs_v2.tavs_esp_strategy - INFO - Round 11 Detection: 5 Inliers, 1 Outliers
 2026-11-12 21:44:24,754 - src.tavs_v2.tavs_esp_strategy - INFO - Round 11 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (11, 2.0717405931205506, {'accuracy': 0.2616, 'correct': 2616, 'total': 10000}, 98.036687008)
+2026-11-12 21:44:30,031 - flwr - INFO - fit progress: (11, 2.0717405931205506, {'accuracy': 0.2616, 'correct': 2616, 'total': 10000}, 98.036687008)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:44:30,032 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:44:30,032 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 12]
+2026-11-12 21:44:30,032 - flwr - INFO - [ROUND 12]
+2026-11-12 21:44:30,034 - src.tavs_v2.tavs_esp_strategy - INFO - Round 12 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:44:30,035 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:32,903 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:33,092 - src.tavs_v2.tavs_esp_strategy - INFO - Round 12 Detection: 2 Inliers, 4 Outliers
+2026-11-12 21:44:33,092 - src.tavs_v2.tavs_esp_strategy - INFO - Round 12 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (12, 1.9910402685214, {'accuracy': 0.286, 'correct': 2860, 'total': 10000}, 106.690071891)
+2026-11-12 21:44:38,685 - flwr - INFO - fit progress: (12, 1.9910402685214, {'accuracy': 0.286, 'correct': 2860, 'total': 10000}, 106.690071891)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:44:38,685 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:44:38,685 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 13]
+2026-11-12 21:44:38,685 - flwr - INFO - [ROUND 13]
+2026-11-12 21:44:38,689 - src.tavs_v2.tavs_esp_strategy - INFO - Round 13 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:44:38,689 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:41,453 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:41,667 - src.tavs_v2.tavs_esp_strategy - INFO - Round 13 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:44:41,668 - src.tavs_v2.tavs_esp_strategy - INFO - Round 13 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (13, 1.9879205674882148, {'accuracy': 0.2629, 'correct': 2629, 'total': 10000}, 114.964372698)
+2026-11-12 21:44:46,959 - flwr - INFO - fit progress: (13, 1.9879205674882148, {'accuracy': 0.2629, 'correct': 2629, 'total': 10000}, 114.964372698)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:44:46,959 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:44:46,959 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 14]
+2026-11-12 21:44:46,959 - flwr - INFO - [ROUND 14]
+2026-11-12 21:44:46,962 - src.tavs_v2.tavs_esp_strategy - INFO - Round 14 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:44:46,962 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:49,751 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:49,940 - src.tavs_v2.tavs_esp_strategy - INFO - Round 14 Detection: 6 Inliers, 0 Outliers
+2026-11-12 21:44:49,940 - src.tavs_v2.tavs_esp_strategy - INFO - Round 14 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (14, 2.0489746521992287, {'accuracy': 0.2376, 'correct': 2376, 'total': 10000}, 123.04659209099998)
+2026-11-12 21:44:55,041 - flwr - INFO - fit progress: (14, 2.0489746521992287, {'accuracy': 0.2376, 'correct': 2376, 'total': 10000}, 123.04659209099998)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:44:55,042 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:44:55,042 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 15]
+2026-11-12 21:44:55,042 - flwr - INFO - [ROUND 15]
+2026-11-12 21:44:55,045 - src.tavs_v2.tavs_esp_strategy - INFO - Round 15 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:44:55,045 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:57,671 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:44:57,860 - src.tavs_v2.tavs_esp_strategy - INFO - Round 15 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:44:57,860 - src.tavs_v2.tavs_esp_strategy - INFO - Round 15 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (15, 1.9879640143388395, {'accuracy': 0.2422, 'correct': 2422, 'total': 10000}, 131.34372194499997)
+2026-11-12 21:45:03,338 - flwr - INFO - fit progress: (15, 1.9879640143388395, {'accuracy': 0.2422, 'correct': 2422, 'total': 10000}, 131.34372194499997)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:03,339 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:03,339 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 16]
+2026-11-12 21:45:03,339 - flwr - INFO - [ROUND 16]
+2026-11-12 21:45:03,343 - src.tavs_v2.tavs_esp_strategy - INFO - Round 16 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:03,343 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:05,872 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:06,058 - src.tavs_v2.tavs_esp_strategy - INFO - Round 16 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:45:06,058 - src.tavs_v2.tavs_esp_strategy - INFO - Round 16 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (16, 1.9623368355878599, {'accuracy': 0.2845, 'correct': 2845, 'total': 10000}, 139.12222596700002)
+2026-11-12 21:45:11,117 - flwr - INFO - fit progress: (16, 1.9623368355878599, {'accuracy': 0.2845, 'correct': 2845, 'total': 10000}, 139.12222596700002)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:11,117 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:11,117 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 17]
+2026-11-12 21:45:11,117 - flwr - INFO - [ROUND 17]
+2026-11-12 21:45:11,120 - src.tavs_v2.tavs_esp_strategy - INFO - Round 17 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:11,120 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:13,931 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:14,118 - src.tavs_v2.tavs_esp_strategy - INFO - Round 17 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:45:14,118 - src.tavs_v2.tavs_esp_strategy - INFO - Round 17 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (17, 1.9048298771973629, {'accuracy': 0.3184, 'correct': 3184, 'total': 10000}, 147.306143125)
+2026-11-12 21:45:19,301 - flwr - INFO - fit progress: (17, 1.9048298771973629, {'accuracy': 0.3184, 'correct': 3184, 'total': 10000}, 147.306143125)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:19,301 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:19,301 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 18]
+2026-11-12 21:45:19,301 - flwr - INFO - [ROUND 18]
+2026-11-12 21:45:19,304 - src.tavs_v2.tavs_esp_strategy - INFO - Round 18 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:19,305 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:21,738 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:21,908 - src.tavs_v2.tavs_esp_strategy - INFO - Round 18 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:45:21,908 - src.tavs_v2.tavs_esp_strategy - INFO - Round 18 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (18, 1.9635638332670662, {'accuracy': 0.2939, 'correct': 2939, 'total': 10000}, 154.64833780599997)
+2026-11-12 21:45:26,643 - flwr - INFO - fit progress: (18, 1.9635638332670662, {'accuracy': 0.2939, 'correct': 2939, 'total': 10000}, 154.64833780599997)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:26,643 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:26,643 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 19]
+2026-11-12 21:45:26,643 - flwr - INFO - [ROUND 19]
+2026-11-12 21:45:26,646 - src.tavs_v2.tavs_esp_strategy - INFO - Round 19 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:26,647 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:29,455 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:29,625 - src.tavs_v2.tavs_esp_strategy - INFO - Round 19 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:45:29,625 - src.tavs_v2.tavs_esp_strategy - INFO - Round 19 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (19, 1.867343361969966, {'accuracy': 0.3112, 'correct': 3112, 'total': 10000}, 162.688719036)
+2026-11-12 21:45:34,683 - flwr - INFO - fit progress: (19, 1.867343361969966, {'accuracy': 0.3112, 'correct': 3112, 'total': 10000}, 162.688719036)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:34,684 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:34,684 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 20]
+2026-11-12 21:45:34,684 - flwr - INFO - [ROUND 20]
+2026-11-12 21:45:34,687 - src.tavs_v2.tavs_esp_strategy - INFO - Round 20 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:34,687 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:37,132 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:37,316 - src.tavs_v2.tavs_esp_strategy - INFO - Round 20 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:45:37,316 - src.tavs_v2.tavs_esp_strategy - INFO - Round 20 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (20, 1.9264959772680974, {'accuracy': 0.2814, 'correct': 2814, 'total': 10000}, 170.925792399)
+2026-11-12 21:45:42,921 - flwr - INFO - fit progress: (20, 1.9264959772680974, {'accuracy': 0.2814, 'correct': 2814, 'total': 10000}, 170.925792399)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:42,921 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:42,921 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 21]
+2026-11-12 21:45:42,921 - flwr - INFO - [ROUND 21]
+2026-11-12 21:45:42,924 - src.tavs_v2.tavs_esp_strategy - INFO - Round 21 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:42,924 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:45,649 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:45,841 - src.tavs_v2.tavs_esp_strategy - INFO - Round 21 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:45:45,841 - src.tavs_v2.tavs_esp_strategy - INFO - Round 21 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (21, 1.90190076524285, {'accuracy': 0.2944, 'correct': 2944, 'total': 10000}, 179.24368656000001)
+2026-11-12 21:45:51,238 - flwr - INFO - fit progress: (21, 1.90190076524285, {'accuracy': 0.2944, 'correct': 2944, 'total': 10000}, 179.24368656000001)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:51,239 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:51,239 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 22]
+2026-11-12 21:45:51,239 - flwr - INFO - [ROUND 22]
+2026-11-12 21:45:51,242 - src.tavs_v2.tavs_esp_strategy - INFO - Round 22 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:51,242 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:54,057 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:45:54,238 - src.tavs_v2.tavs_esp_strategy - INFO - Round 22 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:45:54,238 - src.tavs_v2.tavs_esp_strategy - INFO - Round 22 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (22, 1.8626159596595036, {'accuracy': 0.3144, 'correct': 3144, 'total': 10000}, 187.53573585200002)
+2026-11-12 21:45:59,531 - flwr - INFO - fit progress: (22, 1.8626159596595036, {'accuracy': 0.3144, 'correct': 3144, 'total': 10000}, 187.53573585200002)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:45:59,531 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:45:59,531 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 23]
+2026-11-12 21:45:59,531 - flwr - INFO - [ROUND 23]
+2026-11-12 21:45:59,534 - src.tavs_v2.tavs_esp_strategy - INFO - Round 23 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:45:59,534 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:01,961 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:02,167 - src.tavs_v2.tavs_esp_strategy - INFO - Round 23 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:46:02,167 - src.tavs_v2.tavs_esp_strategy - INFO - Round 23 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (23, 1.8762355868224125, {'accuracy': 0.3042, 'correct': 3042, 'total': 10000}, 195.757160694)
+2026-11-12 21:46:07,752 - flwr - INFO - fit progress: (23, 1.8762355868224125, {'accuracy': 0.3042, 'correct': 3042, 'total': 10000}, 195.757160694)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:46:07,752 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:46:07,752 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 24]
+2026-11-12 21:46:07,752 - flwr - INFO - [ROUND 24]
+2026-11-12 21:46:07,756 - src.tavs_v2.tavs_esp_strategy - INFO - Round 24 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:46:07,757 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:10,810 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:10,997 - src.tavs_v2.tavs_esp_strategy - INFO - Round 24 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:46:10,997 - src.tavs_v2.tavs_esp_strategy - INFO - Round 24 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (24, 1.8505113428565347, {'accuracy': 0.3189, 'correct': 3189, 'total': 10000}, 204.26217006500002)
+2026-11-12 21:46:16,257 - flwr - INFO - fit progress: (24, 1.8505113428565347, {'accuracy': 0.3189, 'correct': 3189, 'total': 10000}, 204.26217006500002)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:46:16,257 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:46:16,257 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 25]
+2026-11-12 21:46:16,257 - flwr - INFO - [ROUND 25]
+2026-11-12 21:46:16,260 - src.tavs_v2.tavs_esp_strategy - INFO - Round 25 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:46:16,260 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:18,905 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:19,086 - src.tavs_v2.tavs_esp_strategy - INFO - Round 25 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:46:19,086 - src.tavs_v2.tavs_esp_strategy - INFO - Round 25 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (25, 1.8338863545921957, {'accuracy': 0.3342, 'correct': 3342, 'total': 10000}, 212.76642836999997)
+2026-11-12 21:46:24,761 - flwr - INFO - fit progress: (25, 1.8338863545921957, {'accuracy': 0.3342, 'correct': 3342, 'total': 10000}, 212.76642836999997)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:46:24,761 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:46:24,761 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 26]
+2026-11-12 21:46:24,761 - flwr - INFO - [ROUND 26]
+2026-11-12 21:46:24,765 - src.tavs_v2.tavs_esp_strategy - INFO - Round 26 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:46:24,765 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:27,508 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:27,724 - src.tavs_v2.tavs_esp_strategy - INFO - Round 26 Detection: 4 Inliers, 3 Outliers
+2026-11-12 21:46:27,725 - src.tavs_v2.tavs_esp_strategy - INFO - Round 26 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (26, 1.8077345684075812, {'accuracy': 0.3487, 'correct': 3487, 'total': 10000}, 221.581290282)
+2026-11-12 21:46:33,576 - flwr - INFO - fit progress: (26, 1.8077345684075812, {'accuracy': 0.3487, 'correct': 3487, 'total': 10000}, 221.581290282)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:46:33,576 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:46:33,576 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 27]
+2026-11-12 21:46:33,576 - flwr - INFO - [ROUND 27]
+2026-11-12 21:46:33,580 - src.tavs_v2.tavs_esp_strategy - INFO - Round 27 Scheduling: 7 Verified (2 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:46:33,580 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:36,791 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:36,979 - src.tavs_v2.tavs_esp_strategy - INFO - Round 27 Detection: 5 Inliers, 2 Outliers
+2026-11-12 21:46:36,979 - src.tavs_v2.tavs_esp_strategy - INFO - Round 27 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (27, 1.8459532632949247, {'accuracy': 0.3177, 'correct': 3177, 'total': 10000}, 230.490980632)
+2026-11-12 21:46:42,486 - flwr - INFO - fit progress: (27, 1.8459532632949247, {'accuracy': 0.3177, 'correct': 3177, 'total': 10000}, 230.490980632)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:46:42,486 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:46:42,486 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 28]
+2026-11-12 21:46:42,486 - flwr - INFO - [ROUND 28]
+2026-11-12 21:46:42,489 - src.tavs_v2.tavs_esp_strategy - INFO - Round 28 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:46:42,489 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:45,111 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:45,299 - src.tavs_v2.tavs_esp_strategy - INFO - Round 28 Detection: 5 Inliers, 2 Outliers
+2026-11-12 21:46:45,299 - src.tavs_v2.tavs_esp_strategy - INFO - Round 28 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (28, 1.7716349515185994, {'accuracy': 0.3282, 'correct': 3282, 'total': 10000}, 238.709910997)
+2026-11-12 21:46:50,705 - flwr - INFO - fit progress: (28, 1.7716349515185994, {'accuracy': 0.3282, 'correct': 3282, 'total': 10000}, 238.709910997)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:46:50,705 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:46:50,705 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 29]
+2026-11-12 21:46:50,705 - flwr - INFO - [ROUND 29]
+2026-11-12 21:46:50,708 - src.tavs_v2.tavs_esp_strategy - INFO - Round 29 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:46:50,708 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:53,594 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:46:53,781 - src.tavs_v2.tavs_esp_strategy - INFO - Round 29 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:46:53,782 - src.tavs_v2.tavs_esp_strategy - INFO - Round 29 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (29, 1.765839498513823, {'accuracy': 0.3473, 'correct': 3473, 'total': 10000}, 246.787611298)
+2026-11-12 21:46:58,782 - flwr - INFO - fit progress: (29, 1.765839498513823, {'accuracy': 0.3473, 'correct': 3473, 'total': 10000}, 246.787611298)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:46:58,783 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:46:58,783 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 30]
+2026-11-12 21:46:58,783 - flwr - INFO - [ROUND 30]
+2026-11-12 21:46:58,786 - src.tavs_v2.tavs_esp_strategy - INFO - Round 30 Scheduling: 7 Verified (2 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:46:58,786 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:01,214 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:01,373 - src.tavs_v2.tavs_esp_strategy - INFO - Round 30 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:47:01,373 - src.tavs_v2.tavs_esp_strategy - INFO - Round 30 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (30, 1.845640020006022, {'accuracy': 0.3303, 'correct': 3303, 'total': 10000}, 254.712542901)
+2026-11-12 21:47:06,707 - flwr - INFO - fit progress: (30, 1.845640020006022, {'accuracy': 0.3303, 'correct': 3303, 'total': 10000}, 254.712542901)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:47:06,708 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:47:06,708 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 31]
+2026-11-12 21:47:06,708 - flwr - INFO - [ROUND 31]
+2026-11-12 21:47:06,712 - src.tavs_v2.tavs_esp_strategy - INFO - Round 31 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:47:06,712 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:09,228 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:09,418 - src.tavs_v2.tavs_esp_strategy - INFO - Round 31 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:47:09,418 - src.tavs_v2.tavs_esp_strategy - INFO - Round 31 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (31, 1.7488574450183068, {'accuracy': 0.3562, 'correct': 3562, 'total': 10000}, 262.787849632)
+2026-11-12 21:47:14,783 - flwr - INFO - fit progress: (31, 1.7488574450183068, {'accuracy': 0.3562, 'correct': 3562, 'total': 10000}, 262.787849632)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:47:14,783 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:47:14,783 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 32]
+2026-11-12 21:47:14,783 - flwr - INFO - [ROUND 32]
+2026-11-12 21:47:14,786 - src.tavs_v2.tavs_esp_strategy - INFO - Round 32 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:47:14,786 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:18,022 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:18,217 - src.tavs_v2.tavs_esp_strategy - INFO - Round 32 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:47:18,217 - src.tavs_v2.tavs_esp_strategy - INFO - Round 32 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (32, 1.7571217459478197, {'accuracy': 0.3447, 'correct': 3447, 'total': 10000}, 271.437056714)
+2026-11-12 21:47:23,432 - flwr - INFO - fit progress: (32, 1.7571217459478197, {'accuracy': 0.3447, 'correct': 3447, 'total': 10000}, 271.437056714)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:47:23,432 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:47:23,432 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 33]
+2026-11-12 21:47:23,432 - flwr - INFO - [ROUND 33]
+2026-11-12 21:47:23,435 - src.tavs_v2.tavs_esp_strategy - INFO - Round 33 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:47:23,435 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:26,055 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:26,249 - src.tavs_v2.tavs_esp_strategy - INFO - Round 33 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:47:26,250 - src.tavs_v2.tavs_esp_strategy - INFO - Round 33 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (33, 1.6726129191696264, {'accuracy': 0.381, 'correct': 3810, 'total': 10000}, 279.963498509)
+2026-11-12 21:47:31,958 - flwr - INFO - fit progress: (33, 1.6726129191696264, {'accuracy': 0.381, 'correct': 3810, 'total': 10000}, 279.963498509)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:47:31,959 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:47:31,959 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 34]
+2026-11-12 21:47:31,959 - flwr - INFO - [ROUND 34]
+2026-11-12 21:47:31,962 - src.tavs_v2.tavs_esp_strategy - INFO - Round 34 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:47:31,963 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:34,981 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:35,169 - src.tavs_v2.tavs_esp_strategy - INFO - Round 34 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:47:35,170 - src.tavs_v2.tavs_esp_strategy - INFO - Round 34 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (34, 1.705309304462117, {'accuracy': 0.366, 'correct': 3660, 'total': 10000}, 288.707513925)
+2026-11-12 21:47:40,702 - flwr - INFO - fit progress: (34, 1.705309304462117, {'accuracy': 0.366, 'correct': 3660, 'total': 10000}, 288.707513925)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:47:40,702 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:47:40,703 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 35]
+2026-11-12 21:47:40,703 - flwr - INFO - [ROUND 35]
+2026-11-12 21:47:40,706 - src.tavs_v2.tavs_esp_strategy - INFO - Round 35 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:47:40,706 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:43,262 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:43,446 - src.tavs_v2.tavs_esp_strategy - INFO - Round 35 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:47:43,447 - src.tavs_v2.tavs_esp_strategy - INFO - Round 35 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (35, 1.7313619776136557, {'accuracy': 0.351, 'correct': 3510, 'total': 10000}, 297.16432609599997)
+2026-11-12 21:47:49,159 - flwr - INFO - fit progress: (35, 1.7313619776136557, {'accuracy': 0.351, 'correct': 3510, 'total': 10000}, 297.16432609599997)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:47:49,159 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:47:49,160 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 36]
+2026-11-12 21:47:49,160 - flwr - INFO - [ROUND 36]
+2026-11-12 21:47:49,164 - src.tavs_v2.tavs_esp_strategy - INFO - Round 36 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:47:49,164 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:51,777 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:47:51,973 - src.tavs_v2.tavs_esp_strategy - INFO - Round 36 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:47:51,973 - src.tavs_v2.tavs_esp_strategy - INFO - Round 36 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
