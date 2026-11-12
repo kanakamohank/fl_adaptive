@@ -574,3 +574,1077 @@ tavs_skip  seed=1  (rounds=40, skip_target=0.00)
 2026-11-12 21:47:51,777 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
 2026-11-12 21:47:51,973 - src.tavs_v2.tavs_esp_strategy - INFO - Round 36 Detection: 7 Inliers, 0 Outliers
 2026-11-12 21:47:51,973 - src.tavs_v2.tavs_esp_strategy - INFO - Round 36 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (36, 1.6762987534711316, {'accuracy': 0.3743, 'correct': 3743, 'total': 10000}, 305.680598376)
+2026-11-12 21:47:57,675 - flwr - INFO - fit progress: (36, 1.6762987534711316, {'accuracy': 0.3743, 'correct': 3743, 'total': 10000}, 305.680598376)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:47:57,676 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:47:57,676 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 37]
+2026-11-12 21:47:57,676 - flwr - INFO - [ROUND 37]
+2026-11-12 21:47:57,680 - src.tavs_v2.tavs_esp_strategy - INFO - Round 37 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:47:57,680 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:00,816 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:00,998 - src.tavs_v2.tavs_esp_strategy - INFO - Round 37 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:48:00,998 - src.tavs_v2.tavs_esp_strategy - INFO - Round 37 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (37, 1.6644403547238393, {'accuracy': 0.3952, 'correct': 3952, 'total': 10000}, 314.37222729399997)
+2026-11-12 21:48:06,367 - flwr - INFO - fit progress: (37, 1.6644403547238393, {'accuracy': 0.3952, 'correct': 3952, 'total': 10000}, 314.37222729399997)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:48:06,367 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:48:06,367 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 38]
+2026-11-12 21:48:06,367 - flwr - INFO - [ROUND 38]
+2026-11-12 21:48:06,370 - src.tavs_v2.tavs_esp_strategy - INFO - Round 38 Scheduling: 7 Verified (2 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:48:06,370 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:08,923 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:09,123 - src.tavs_v2.tavs_esp_strategy - INFO - Round 38 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:48:09,123 - src.tavs_v2.tavs_esp_strategy - INFO - Round 38 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (38, 1.7325037664668574, {'accuracy': 0.3591, 'correct': 3591, 'total': 10000}, 322.339831742)
+2026-11-12 21:48:14,335 - flwr - INFO - fit progress: (38, 1.7325037664668574, {'accuracy': 0.3591, 'correct': 3591, 'total': 10000}, 322.339831742)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:48:14,335 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:48:14,335 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 39]
+2026-11-12 21:48:14,335 - flwr - INFO - [ROUND 39]
+2026-11-12 21:48:14,338 - src.tavs_v2.tavs_esp_strategy - INFO - Round 39 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:48:14,338 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:17,164 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:17,336 - src.tavs_v2.tavs_esp_strategy - INFO - Round 39 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:48:17,336 - src.tavs_v2.tavs_esp_strategy - INFO - Round 39 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (39, 1.7634263084192945, {'accuracy': 0.3468, 'correct': 3468, 'total': 10000}, 330.841125045)
+2026-11-12 21:48:22,836 - flwr - INFO - fit progress: (39, 1.7634263084192945, {'accuracy': 0.3468, 'correct': 3468, 'total': 10000}, 330.841125045)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:48:22,836 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:48:22,836 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 40]
+2026-11-12 21:48:22,836 - flwr - INFO - [ROUND 40]
+2026-11-12 21:48:22,840 - src.tavs_v2.tavs_esp_strategy - INFO - Round 40 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:48:22,840 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:25,467 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:25,653 - src.tavs_v2.tavs_esp_strategy - INFO - Round 40 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:48:25,653 - src.tavs_v2.tavs_esp_strategy - INFO - Round 40 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (40, 1.727319621736077, {'accuracy': 0.3674, 'correct': 3674, 'total': 10000}, 339.195549138)
+2026-11-12 21:48:31,190 - flwr - INFO - fit progress: (40, 1.727319621736077, {'accuracy': 0.3674, 'correct': 3674, 'total': 10000}, 339.195549138)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:48:31,191 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:48:31,191 - flwr - INFO - 
+[92mINFO [0m:      [SUMMARY]
+2026-11-12 21:48:31,191 - flwr - INFO - [SUMMARY]
+[92mINFO [0m:      Run finished 40 round(s) in 339.20s
+2026-11-12 21:48:31,191 - flwr - INFO - Run finished 40 round(s) in 339.20s
+[92mINFO [0m:      	History (loss, centralized):
+2026-11-12 21:48:31,192 - flwr - INFO - 	History (loss, centralized):
+[92mINFO [0m:      		round 0: 2.30381089866541
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 0: 2.30381089866541
+[92mINFO [0m:      		round 1: 2.306741582360237
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 1: 2.306741582360237
+[92mINFO [0m:      		round 2: 2.3039479043073716
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 2: 2.3039479043073716
+[92mINFO [0m:      		round 3: 2.2829305168929372
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 3: 2.2829305168929372
+[92mINFO [0m:      		round 4: 2.2146357305490287
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 4: 2.2146357305490287
+[92mINFO [0m:      		round 5: 2.168895233208966
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 5: 2.168895233208966
+[92mINFO [0m:      		round 6: 2.1249341569888363
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 6: 2.1249341569888363
+[92mINFO [0m:      		round 7: 2.1103324442152767
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 7: 2.1103324442152767
+[92mINFO [0m:      		round 8: 2.113253528904763
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 8: 2.113253528904763
+[92mINFO [0m:      		round 9: 2.0438081937231076
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 9: 2.0438081937231076
+[92mINFO [0m:      		round 10: 2.0711021582791758
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 10: 2.0711021582791758
+[92mINFO [0m:      		round 11: 2.0717405931205506
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 11: 2.0717405931205506
+[92mINFO [0m:      		round 12: 1.9910402685214
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 12: 1.9910402685214
+[92mINFO [0m:      		round 13: 1.9879205674882148
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 13: 1.9879205674882148
+[92mINFO [0m:      		round 14: 2.0489746521992287
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 14: 2.0489746521992287
+[92mINFO [0m:      		round 15: 1.9879640143388395
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 15: 1.9879640143388395
+[92mINFO [0m:      		round 16: 1.9623368355878599
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 16: 1.9623368355878599
+[92mINFO [0m:      		round 17: 1.9048298771973629
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 17: 1.9048298771973629
+[92mINFO [0m:      		round 18: 1.9635638332670662
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 18: 1.9635638332670662
+[92mINFO [0m:      		round 19: 1.867343361969966
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 19: 1.867343361969966
+[92mINFO [0m:      		round 20: 1.9264959772680974
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 20: 1.9264959772680974
+[92mINFO [0m:      		round 21: 1.90190076524285
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 21: 1.90190076524285
+[92mINFO [0m:      		round 22: 1.8626159596595036
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 22: 1.8626159596595036
+[92mINFO [0m:      		round 23: 1.8762355868224125
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 23: 1.8762355868224125
+[92mINFO [0m:      		round 24: 1.8505113428565347
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 24: 1.8505113428565347
+[92mINFO [0m:      		round 25: 1.8338863545921957
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 25: 1.8338863545921957
+[92mINFO [0m:      		round 26: 1.8077345684075812
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 26: 1.8077345684075812
+[92mINFO [0m:      		round 27: 1.8459532632949247
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 27: 1.8459532632949247
+[92mINFO [0m:      		round 28: 1.7716349515185994
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 28: 1.7716349515185994
+[92mINFO [0m:      		round 29: 1.765839498513823
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 29: 1.765839498513823
+[92mINFO [0m:      		round 30: 1.845640020006022
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 30: 1.845640020006022
+[92mINFO [0m:      		round 31: 1.7488574450183068
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 31: 1.7488574450183068
+[92mINFO [0m:      		round 32: 1.7571217459478197
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 32: 1.7571217459478197
+[92mINFO [0m:      		round 33: 1.6726129191696264
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 33: 1.6726129191696264
+[92mINFO [0m:      		round 34: 1.705309304462117
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 34: 1.705309304462117
+[92mINFO [0m:      		round 35: 1.7313619776136557
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 35: 1.7313619776136557
+[92mINFO [0m:      		round 36: 1.6762987534711316
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 36: 1.6762987534711316
+[92mINFO [0m:      		round 37: 1.6644403547238393
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 37: 1.6644403547238393
+[92mINFO [0m:      		round 38: 1.7325037664668574
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 38: 1.7325037664668574
+[92mINFO [0m:      		round 39: 1.7634263084192945
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 39: 1.7634263084192945
+[92mINFO [0m:      		round 40: 1.727319621736077
+2026-11-12 21:48:31,193 - flwr - INFO - 		round 40: 1.727319621736077
+[92mINFO [0m:      	History (metrics, distributed, fit):
+2026-11-12 21:48:31,193 - flwr - INFO - 	History (metrics, distributed, fit):
+[92mINFO [0m:      	{'inliers': [(1, 10),
+2026-11-12 21:48:31,193 - flwr - INFO - 	{'inliers': [(1, 10),
+[92mINFO [0m:      	             (2, 9),
+2026-11-12 21:48:31,193 - flwr - INFO - 	             (2, 9),
+[92mINFO [0m:      	             (3, 7),
+2026-11-12 21:48:31,193 - flwr - INFO - 	             (3, 7),
+[92mINFO [0m:      	             (4, 5),
+2026-11-12 21:48:31,193 - flwr - INFO - 	             (4, 5),
+[92mINFO [0m:      	             (5, 4),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (5, 4),
+[92mINFO [0m:      	             (6, 5),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (6, 5),
+[92mINFO [0m:      	             (7, 4),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (7, 4),
+[92mINFO [0m:      	             (8, 4),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (8, 4),
+[92mINFO [0m:      	             (9, 3),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (9, 3),
+[92mINFO [0m:      	             (10, 4),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (10, 4),
+[92mINFO [0m:      	             (11, 5),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (11, 5),
+[92mINFO [0m:      	             (12, 2),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (12, 2),
+[92mINFO [0m:      	             (13, 6),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (13, 6),
+[92mINFO [0m:      	             (14, 6),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (14, 6),
+[92mINFO [0m:      	             (15, 6),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (15, 6),
+[92mINFO [0m:      	             (16, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (16, 7),
+[92mINFO [0m:      	             (17, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (17, 7),
+[92mINFO [0m:      	             (18, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (18, 7),
+[92mINFO [0m:      	             (19, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (19, 7),
+[92mINFO [0m:      	             (20, 6),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (20, 6),
+[92mINFO [0m:      	             (21, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (21, 7),
+[92mINFO [0m:      	             (22, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (22, 7),
+[92mINFO [0m:      	             (23, 6),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (23, 6),
+[92mINFO [0m:      	             (24, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (24, 7),
+[92mINFO [0m:      	             (25, 6),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (25, 6),
+[92mINFO [0m:      	             (26, 4),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (26, 4),
+[92mINFO [0m:      	             (27, 5),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (27, 5),
+[92mINFO [0m:      	             (28, 5),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (28, 5),
+[92mINFO [0m:      	             (29, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (29, 7),
+[92mINFO [0m:      	             (30, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (30, 7),
+[92mINFO [0m:      	             (31, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (31, 7),
+[92mINFO [0m:      	             (32, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (32, 7),
+[92mINFO [0m:      	             (33, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (33, 7),
+[92mINFO [0m:      	             (34, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (34, 7),
+[92mINFO [0m:      	             (35, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (35, 7),
+[92mINFO [0m:      	             (36, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (36, 7),
+[92mINFO [0m:      	             (37, 6),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (37, 6),
+[92mINFO [0m:      	             (38, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (38, 7),
+[92mINFO [0m:      	             (39, 7),
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (39, 7),
+[92mINFO [0m:      	             (40, 7)],
+2026-11-12 21:48:31,194 - flwr - INFO - 	             (40, 7)],
+[92mINFO [0m:      	 'outliers': [(1, 0),
+2026-11-12 21:48:31,194 - flwr - INFO - 	 'outliers': [(1, 0),
+[92mINFO [0m:      	              (2, 1),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (2, 1),
+[92mINFO [0m:      	              (3, 1),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (3, 1),
+[92mINFO [0m:      	              (4, 2),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (4, 2),
+[92mINFO [0m:      	              (5, 2),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (5, 2),
+[92mINFO [0m:      	              (6, 0),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (6, 0),
+[92mINFO [0m:      	              (7, 2),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (7, 2),
+[92mINFO [0m:      	              (8, 1),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (8, 1),
+[92mINFO [0m:      	              (9, 2),
+2026-11-12 21:48:31,194 - flwr - INFO - 	              (9, 2),
+[92mINFO [0m:      	              (10, 2),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (10, 2),
+[92mINFO [0m:      	              (11, 1),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (11, 1),
+[92mINFO [0m:      	              (12, 4),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (12, 4),
+[92mINFO [0m:      	              (13, 1),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (13, 1),
+[92mINFO [0m:      	              (14, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (14, 0),
+[92mINFO [0m:      	              (15, 1),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (15, 1),
+[92mINFO [0m:      	              (16, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (16, 0),
+[92mINFO [0m:      	              (17, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (17, 0),
+[92mINFO [0m:      	              (18, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (18, 0),
+[92mINFO [0m:      	              (19, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (19, 0),
+[92mINFO [0m:      	              (20, 1),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (20, 1),
+[92mINFO [0m:      	              (21, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (21, 0),
+[92mINFO [0m:      	              (22, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (22, 0),
+[92mINFO [0m:      	              (23, 1),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (23, 1),
+[92mINFO [0m:      	              (24, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (24, 0),
+[92mINFO [0m:      	              (25, 1),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (25, 1),
+[92mINFO [0m:      	              (26, 3),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (26, 3),
+[92mINFO [0m:      	              (27, 2),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (27, 2),
+[92mINFO [0m:      	              (28, 2),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (28, 2),
+[92mINFO [0m:      	              (29, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (29, 0),
+[92mINFO [0m:      	              (30, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (30, 0),
+[92mINFO [0m:      	              (31, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (31, 0),
+[92mINFO [0m:      	              (32, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (32, 0),
+[92mINFO [0m:      	              (33, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (33, 0),
+[92mINFO [0m:      	              (34, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (34, 0),
+[92mINFO [0m:      	              (35, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (35, 0),
+[92mINFO [0m:      	              (36, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (36, 0),
+[92mINFO [0m:      	              (37, 1),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (37, 1),
+[92mINFO [0m:      	              (38, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (38, 0),
+[92mINFO [0m:      	              (39, 0),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (39, 0),
+[92mINFO [0m:      	              (40, 0)]}
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (40, 0)]}
+[92mINFO [0m:      	History (metrics, centralized):
+2026-11-12 21:48:31,195 - flwr - INFO - 	History (metrics, centralized):
+[92mINFO [0m:      	{'accuracy': [(0, 0.111),
+2026-11-12 21:48:31,195 - flwr - INFO - 	{'accuracy': [(0, 0.111),
+[92mINFO [0m:      	              (1, 0.0965),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (1, 0.0965),
+[92mINFO [0m:      	              (2, 0.1381),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (2, 0.1381),
+[92mINFO [0m:      	              (3, 0.1691),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (3, 0.1691),
+[92mINFO [0m:      	              (4, 0.1804),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (4, 0.1804),
+[92mINFO [0m:      	              (5, 0.2303),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (5, 0.2303),
+[92mINFO [0m:      	              (6, 0.2404),
+2026-11-12 21:48:31,195 - flwr - INFO - 	              (6, 0.2404),
+[92mINFO [0m:      	              (7, 0.2361),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (7, 0.2361),
+[92mINFO [0m:      	              (8, 0.2164),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (8, 0.2164),
+[92mINFO [0m:      	              (9, 0.2648),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (9, 0.2648),
+[92mINFO [0m:      	              (10, 0.2312),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (10, 0.2312),
+[92mINFO [0m:      	              (11, 0.2616),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (11, 0.2616),
+[92mINFO [0m:      	              (12, 0.286),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (12, 0.286),
+[92mINFO [0m:      	              (13, 0.2629),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (13, 0.2629),
+[92mINFO [0m:      	              (14, 0.2376),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (14, 0.2376),
+[92mINFO [0m:      	              (15, 0.2422),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (15, 0.2422),
+[92mINFO [0m:      	              (16, 0.2845),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (16, 0.2845),
+[92mINFO [0m:      	              (17, 0.3184),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (17, 0.3184),
+[92mINFO [0m:      	              (18, 0.2939),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (18, 0.2939),
+[92mINFO [0m:      	              (19, 0.3112),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (19, 0.3112),
+[92mINFO [0m:      	              (20, 0.2814),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (20, 0.2814),
+[92mINFO [0m:      	              (21, 0.2944),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (21, 0.2944),
+[92mINFO [0m:      	              (22, 0.3144),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (22, 0.3144),
+[92mINFO [0m:      	              (23, 0.3042),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (23, 0.3042),
+[92mINFO [0m:      	              (24, 0.3189),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (24, 0.3189),
+[92mINFO [0m:      	              (25, 0.3342),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (25, 0.3342),
+[92mINFO [0m:      	              (26, 0.3487),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (26, 0.3487),
+[92mINFO [0m:      	              (27, 0.3177),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (27, 0.3177),
+[92mINFO [0m:      	              (28, 0.3282),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (28, 0.3282),
+[92mINFO [0m:      	              (29, 0.3473),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (29, 0.3473),
+[92mINFO [0m:      	              (30, 0.3303),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (30, 0.3303),
+[92mINFO [0m:      	              (31, 0.3562),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (31, 0.3562),
+[92mINFO [0m:      	              (32, 0.3447),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (32, 0.3447),
+[92mINFO [0m:      	              (33, 0.381),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (33, 0.381),
+[92mINFO [0m:      	              (34, 0.366),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (34, 0.366),
+[92mINFO [0m:      	              (35, 0.351),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (35, 0.351),
+[92mINFO [0m:      	              (36, 0.3743),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (36, 0.3743),
+[92mINFO [0m:      	              (37, 0.3952),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (37, 0.3952),
+[92mINFO [0m:      	              (38, 0.3591),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (38, 0.3591),
+[92mINFO [0m:      	              (39, 0.3468),
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (39, 0.3468),
+[92mINFO [0m:      	              (40, 0.3674)],
+2026-11-12 21:48:31,196 - flwr - INFO - 	              (40, 0.3674)],
+[92mINFO [0m:      	 'correct': [(0, 1110),
+2026-11-12 21:48:31,196 - flwr - INFO - 	 'correct': [(0, 1110),
+[92mINFO [0m:      	             (1, 965),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (1, 965),
+[92mINFO [0m:      	             (2, 1381),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (2, 1381),
+[92mINFO [0m:      	             (3, 1691),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (3, 1691),
+[92mINFO [0m:      	             (4, 1804),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (4, 1804),
+[92mINFO [0m:      	             (5, 2303),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (5, 2303),
+[92mINFO [0m:      	             (6, 2404),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (6, 2404),
+[92mINFO [0m:      	             (7, 2361),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (7, 2361),
+[92mINFO [0m:      	             (8, 2164),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (8, 2164),
+[92mINFO [0m:      	             (9, 2648),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (9, 2648),
+[92mINFO [0m:      	             (10, 2312),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (10, 2312),
+[92mINFO [0m:      	             (11, 2616),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (11, 2616),
+[92mINFO [0m:      	             (12, 2860),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (12, 2860),
+[92mINFO [0m:      	             (13, 2629),
+2026-11-12 21:48:31,196 - flwr - INFO - 	             (13, 2629),
+[92mINFO [0m:      	             (14, 2376),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (14, 2376),
+[92mINFO [0m:      	             (15, 2422),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (15, 2422),
+[92mINFO [0m:      	             (16, 2845),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (16, 2845),
+[92mINFO [0m:      	             (17, 3184),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (17, 3184),
+[92mINFO [0m:      	             (18, 2939),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (18, 2939),
+[92mINFO [0m:      	             (19, 3112),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (19, 3112),
+[92mINFO [0m:      	             (20, 2814),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (20, 2814),
+[92mINFO [0m:      	             (21, 2944),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (21, 2944),
+[92mINFO [0m:      	             (22, 3144),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (22, 3144),
+[92mINFO [0m:      	             (23, 3042),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (23, 3042),
+[92mINFO [0m:      	             (24, 3189),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (24, 3189),
+[92mINFO [0m:      	             (25, 3342),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (25, 3342),
+[92mINFO [0m:      	             (26, 3487),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (26, 3487),
+[92mINFO [0m:      	             (27, 3177),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (27, 3177),
+[92mINFO [0m:      	             (28, 3282),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (28, 3282),
+[92mINFO [0m:      	             (29, 3473),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (29, 3473),
+[92mINFO [0m:      	             (30, 3303),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (30, 3303),
+[92mINFO [0m:      	             (31, 3562),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (31, 3562),
+[92mINFO [0m:      	             (32, 3447),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (32, 3447),
+[92mINFO [0m:      	             (33, 3810),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (33, 3810),
+[92mINFO [0m:      	             (34, 3660),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (34, 3660),
+[92mINFO [0m:      	             (35, 3510),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (35, 3510),
+[92mINFO [0m:      	             (36, 3743),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (36, 3743),
+[92mINFO [0m:      	             (37, 3952),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (37, 3952),
+[92mINFO [0m:      	             (38, 3591),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (38, 3591),
+[92mINFO [0m:      	             (39, 3468),
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (39, 3468),
+[92mINFO [0m:      	             (40, 3674)],
+2026-11-12 21:48:31,197 - flwr - INFO - 	             (40, 3674)],
+[92mINFO [0m:      	 'total': [(0, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	 'total': [(0, 10000),
+[92mINFO [0m:      	           (1, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (1, 10000),
+[92mINFO [0m:      	           (2, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (2, 10000),
+[92mINFO [0m:      	           (3, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (3, 10000),
+[92mINFO [0m:      	           (4, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (4, 10000),
+[92mINFO [0m:      	           (5, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (5, 10000),
+[92mINFO [0m:      	           (6, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (6, 10000),
+[92mINFO [0m:      	           (7, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (7, 10000),
+[92mINFO [0m:      	           (8, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (8, 10000),
+[92mINFO [0m:      	           (9, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (9, 10000),
+[92mINFO [0m:      	           (10, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (10, 10000),
+[92mINFO [0m:      	           (11, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (11, 10000),
+[92mINFO [0m:      	           (12, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (12, 10000),
+[92mINFO [0m:      	           (13, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (13, 10000),
+[92mINFO [0m:      	           (14, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (14, 10000),
+[92mINFO [0m:      	           (15, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (15, 10000),
+[92mINFO [0m:      	           (16, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (16, 10000),
+[92mINFO [0m:      	           (17, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (17, 10000),
+[92mINFO [0m:      	           (18, 10000),
+2026-11-12 21:48:31,197 - flwr - INFO - 	           (18, 10000),
+[92mINFO [0m:      	           (19, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (19, 10000),
+[92mINFO [0m:      	           (20, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (20, 10000),
+[92mINFO [0m:      	           (21, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (21, 10000),
+[92mINFO [0m:      	           (22, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (22, 10000),
+[92mINFO [0m:      	           (23, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (23, 10000),
+[92mINFO [0m:      	           (24, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (24, 10000),
+[92mINFO [0m:      	           (25, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (25, 10000),
+[92mINFO [0m:      	           (26, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (26, 10000),
+[92mINFO [0m:      	           (27, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (27, 10000),
+[92mINFO [0m:      	           (28, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (28, 10000),
+[92mINFO [0m:      	           (29, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (29, 10000),
+[92mINFO [0m:      	           (30, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (30, 10000),
+[92mINFO [0m:      	           (31, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (31, 10000),
+[92mINFO [0m:      	           (32, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (32, 10000),
+[92mINFO [0m:      	           (33, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (33, 10000),
+[92mINFO [0m:      	           (34, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (34, 10000),
+[92mINFO [0m:      	           (35, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (35, 10000),
+[92mINFO [0m:      	           (36, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (36, 10000),
+[92mINFO [0m:      	           (37, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (37, 10000),
+[92mINFO [0m:      	           (38, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (38, 10000),
+[92mINFO [0m:      	           (39, 10000),
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (39, 10000),
+[92mINFO [0m:      	           (40, 10000)]}
+2026-11-12 21:48:31,198 - flwr - INFO - 	           (40, 10000)]}
+[92mINFO [0m:      
+2026-11-12 21:48:31,198 - flwr - INFO - 
+2026-11-12 21:48:31,202 - flwr - DEBUG - ServerApp finished running.
+2026-11-12 21:48:31,202 - flwr - DEBUG - ServerApp finished running.
+2026-11-12 21:48:31,202 - flwr - DEBUG - Triggered stop event for Simulation Runtime.
+2026-11-12 21:48:31,748 - flwr - DEBUG - Terminated 4 actors
+[36m(ClientAppActor pid=487)[0m [93mWARNING [0m:   Manually terminating ClientAppActor
+[36m(ClientAppActor pid=489)[0m [93mWARNING [0m:   Manually terminating ClientAppActor[32m [repeated 3x across cluster] (Ray deduplicates logs by default. Set RAY_DEDUP_LOGS=0 to disable log deduplication, or see https://docs.ray.io/en/master/ray-observability/user-guides/configure-logging.html#log-deduplication for more options.)[0m
+2026-11-12 21:48:33,730 - flwr - DEBUG - Terminated RayBackend
+2026-11-12 21:48:33,731 - flwr - DEBUG - Stopping Simulation Runtime now.
+[preflight] trust_signal=pretrain_loss_var rescale=[0.60,1.50](inverted) midpoint_rescaled=0.50 projected_trust_after_pilot=0.486 theta_low=0.30
+
+======================================================================
+tavs_skip  seed=2  (rounds=40, skip_target=0.00)
+======================================================================
+2026-11-12 21:48:35,910 - src.tavs_v2.end_to_end_pipeline - INFO - Label noise injected: 20/50 clients at rate 1.00 [type=cifar10n (worst)] (client ids: [2, 3, 8, 9, 10, 13, 14, 16]...)
+2026-11-12 21:48:35,911 - src.tavs_v2.end_to_end_pipeline - INFO - log_oracle_signals=True (trust_signal='pretrain_loss_var'): split each client's dataset 90/10 train/val for local noise-detection signal
+2026-11-12 21:48:35,917 - src.tavs_v2.end_to_end_pipeline - INFO - Server strategy: TavsEspStrategy
+2026-11-12 21:48:35,917 - src.tavs_v2.end_to_end_pipeline - INFO - Promotion feasible from round 2 of 40
+[93mWARNING [0m:   DEPRECATED FEATURE: The `run_simulation` function is deprecated and will be removed in a future version of Flower. Please use `flwr run` in the CLI instead to run your simulation. Refer to the Flower Tutorials for more details: https://flower.ai/docs/framework/tutorial-quickstart-pytorch.html
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2026-11-12 21:48:35,917 - flwr - WARNING - DEPRECATED FEATURE: The `run_simulation` function is deprecated and will be removed in a future version of Flower. Please use `flwr run` in the CLI instead to run your simulation. Refer to the Flower Tutorials for more details: https://flower.ai/docs/framework/tutorial-quickstart-pytorch.html
+
+            This is a deprecated feature. It will be removed
+            entirely in future versions of Flower.
+        
+2026-11-12 21:48:35,918 - flwr - DEBUG - backend_config: {'client_resources': {'num_cpus': 1, 'num_gpus': 0}, 'init_args': {'ignore_reinit_error': True, 'include_dashboard': False}}
+2026-11-12 21:48:35,918 - flwr - DEBUG - Pre-registering run with id 3564554174939830054
+2026-11-12 21:48:35,918 - flwr - DEBUG - Using InMemoryObjectStore
+2026-11-12 21:48:35,918 - flwr - DEBUG - Using InMemoryLinkState
+[92mINFO [0m:      Starting Flower ServerApp, config: num_rounds=40, no round_timeout
+2026-11-12 21:48:35,919 - flwr - INFO - Starting Flower ServerApp, config: num_rounds=40, no round_timeout
+[92mINFO [0m:      
+2026-11-12 21:48:35,920 - flwr - INFO - 
+[92mINFO [0m:      [INIT]
+2026-11-12 21:48:35,920 - flwr - INFO - [INIT]
+2026-11-12 21:48:35,922 - flwr - DEBUG - Registered 50 nodes
+2026-11-12 21:48:35,923 - flwr - DEBUG - Initialising: RayBackend
+2026-11-12 21:48:35,923 - flwr - DEBUG - Backend config: {'client_resources': {'num_cpus': 1, 'num_gpus': 0}, 'init_args': {'ignore_reinit_error': True, 'include_dashboard': False, 'logging_level': 'WARNING', 'log_to_driver': True}, 'actor': {'tensorflow': 0}}
+[92mINFO [0m:      Using initial global parameters provided by strategy
+2026-11-12 21:48:35,952 - flwr - INFO - Using initial global parameters provided by strategy
+[92mINFO [0m:      Starting evaluation of initial global parameters
+2026-11-12 21:48:35,952 - flwr - INFO - Starting evaluation of initial global parameters
+2026-11-12 21:48:38,422 - flwr - DEBUG - Constructed ActorPool with: 4 actors
+[92mINFO [0m:      initial parameters (loss, other metrics): 2.3032544539992217, {'accuracy': 0.1147, 'correct': 1147, 'total': 10000}
+2026-11-12 21:48:42,584 - flwr - INFO - initial parameters (loss, other metrics): 2.3032544539992217, {'accuracy': 0.1147, 'correct': 1147, 'total': 10000}
+[92mINFO [0m:      
+2026-11-12 21:48:42,584 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 1]
+2026-11-12 21:48:42,584 - flwr - INFO - [ROUND 1]
+2026-11-12 21:48:54,968 - src.tavs_v2.tavs_esp_strategy - INFO - Round 1 Scheduling: 10 Verified (0 of them decoys), 0 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:48:54,968 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:59,408 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:48:59,630 - src.tavs_v2.tavs_esp_strategy - INFO - Round 1 Detection: 10 Inliers, 0 Outliers
+2026-11-12 21:48:59,630 - src.tavs_v2.tavs_esp_strategy - INFO - Round 1 trust_signal='pretrain_loss_var': overrode 10/10 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (1, 2.3103783115459855, {'accuracy': 0.1, 'correct': 1000, 'total': 10000}, 22.08403197299998)
+2026-11-12 21:49:04,668 - flwr - INFO - fit progress: (1, 2.3103783115459855, {'accuracy': 0.1, 'correct': 1000, 'total': 10000}, 22.08403197299998)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:49:04,669 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:49:04,669 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 2]
+2026-11-12 21:49:04,669 - flwr - INFO - [ROUND 2]
+2026-11-12 21:49:04,673 - src.tavs_v2.tavs_esp_strategy - INFO - Round 2 Scheduling: 10 Verified (0 of them decoys), 0 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:49:04,673 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:07,720 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:07,924 - src.tavs_v2.tavs_esp_strategy - INFO - Round 2 Detection: 8 Inliers, 2 Outliers
+2026-11-12 21:49:07,924 - src.tavs_v2.tavs_esp_strategy - INFO - Round 2 trust_signal='pretrain_loss_var': overrode 10/10 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (2, 2.2747282116276444, {'accuracy': 0.113, 'correct': 1130, 'total': 10000}, 30.434577572999956)
+2026-11-12 21:49:13,019 - flwr - INFO - fit progress: (2, 2.2747282116276444, {'accuracy': 0.113, 'correct': 1130, 'total': 10000}, 30.434577572999956)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:49:13,019 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:49:13,019 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 3]
+2026-11-12 21:49:13,019 - flwr - INFO - [ROUND 3]
+2026-11-12 21:49:13,023 - src.tavs_v2.tavs_esp_strategy - INFO - Round 3 Scheduling: 9 Verified (0 of them decoys), 1 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:49:13,023 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:15,650 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:15,818 - src.tavs_v2.tavs_esp_strategy - INFO - Round 3 Detection: 8 Inliers, 1 Outliers
+2026-11-12 21:49:15,818 - src.tavs_v2.tavs_esp_strategy - INFO - Round 3 trust_signal='pretrain_loss_var': overrode 9/9 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (3, 2.2812716171240353, {'accuracy': 0.1472, 'correct': 1472, 'total': 10000}, 37.90436620699995)
+2026-11-12 21:49:20,489 - flwr - INFO - fit progress: (3, 2.2812716171240353, {'accuracy': 0.1472, 'correct': 1472, 'total': 10000}, 37.90436620699995)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:49:20,489 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:49:20,489 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 4]
+2026-11-12 21:49:20,489 - flwr - INFO - [ROUND 4]
+2026-11-12 21:49:20,492 - src.tavs_v2.tavs_esp_strategy - INFO - Round 4 Scheduling: 8 Verified (0 of them decoys), 2 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:49:20,492 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:23,488 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:23,671 - src.tavs_v2.tavs_esp_strategy - INFO - Round 4 Detection: 6 Inliers, 2 Outliers
+2026-11-12 21:49:23,671 - src.tavs_v2.tavs_esp_strategy - INFO - Round 4 trust_signal='pretrain_loss_var': overrode 8/8 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (4, 2.2063349553733875, {'accuracy': 0.1746, 'correct': 1746, 'total': 10000}, 46.23562553499994)
+2026-11-12 21:49:28,820 - flwr - INFO - fit progress: (4, 2.2063349553733875, {'accuracy': 0.1746, 'correct': 1746, 'total': 10000}, 46.23562553499994)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:49:28,820 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:49:28,820 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 5]
+2026-11-12 21:49:28,820 - flwr - INFO - [ROUND 5]
+2026-11-12 21:49:28,824 - src.tavs_v2.tavs_esp_strategy - INFO - Round 5 Scheduling: 4 Verified (0 of them decoys), 6 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:49:28,824 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:31,646 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:31,860 - src.tavs_v2.tavs_esp_strategy - INFO - Round 5 Detection: 1 Inliers, 3 Outliers
+2026-11-12 21:49:31,860 - src.tavs_v2.tavs_esp_strategy - INFO - Round 5 trust_signal='pretrain_loss_var': overrode 4/4 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (5, 2.20412020470686, {'accuracy': 0.2152, 'correct': 2152, 'total': 10000}, 54.93532090300005)
+2026-11-12 21:49:37,519 - flwr - INFO - fit progress: (5, 2.20412020470686, {'accuracy': 0.2152, 'correct': 2152, 'total': 10000}, 54.93532090300005)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:49:37,520 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:49:37,520 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 6]
+2026-11-12 21:49:37,520 - flwr - INFO - [ROUND 6]
+2026-11-12 21:49:37,523 - src.tavs_v2.tavs_esp_strategy - INFO - Round 6 Scheduling: 5 Verified (0 of them decoys), 5 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:49:37,523 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:40,061 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:40,252 - src.tavs_v2.tavs_esp_strategy - INFO - Round 6 Detection: 1 Inliers, 4 Outliers
+2026-11-12 21:49:40,252 - src.tavs_v2.tavs_esp_strategy - INFO - Round 6 trust_signal='pretrain_loss_var': overrode 5/5 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (6, 2.1265370010570357, {'accuracy': 0.2327, 'correct': 2327, 'total': 10000}, 62.943452054999966)
+2026-11-12 21:49:45,528 - flwr - INFO - fit progress: (6, 2.1265370010570357, {'accuracy': 0.2327, 'correct': 2327, 'total': 10000}, 62.943452054999966)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:49:45,528 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:49:45,528 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 7]
+2026-11-12 21:49:45,528 - flwr - INFO - [ROUND 7]
+2026-11-12 21:49:45,531 - src.tavs_v2.tavs_esp_strategy - INFO - Round 7 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:49:45,532 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:48,263 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:48,465 - src.tavs_v2.tavs_esp_strategy - INFO - Round 7 Detection: 2 Inliers, 4 Outliers
+2026-11-12 21:49:48,465 - src.tavs_v2.tavs_esp_strategy - INFO - Round 7 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (7, 2.101409032845953, {'accuracy': 0.2286, 'correct': 2286, 'total': 10000}, 71.147358166)
+2026-11-12 21:49:53,732 - flwr - INFO - fit progress: (7, 2.101409032845953, {'accuracy': 0.2286, 'correct': 2286, 'total': 10000}, 71.147358166)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:49:53,732 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:49:53,732 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 8]
+2026-11-12 21:49:53,732 - flwr - INFO - [ROUND 8]
+2026-11-12 21:49:53,736 - src.tavs_v2.tavs_esp_strategy - INFO - Round 8 Scheduling: 5 Verified (0 of them decoys), 5 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:49:53,736 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:56,566 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:49:56,741 - src.tavs_v2.tavs_esp_strategy - INFO - Round 8 Detection: 4 Inliers, 1 Outliers
+2026-11-12 21:49:56,741 - src.tavs_v2.tavs_esp_strategy - INFO - Round 8 trust_signal='pretrain_loss_var': overrode 5/5 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (8, 2.106169478149171, {'accuracy': 0.1947, 'correct': 1947, 'total': 10000}, 79.26475049700002)
+2026-11-12 21:50:01,849 - flwr - INFO - fit progress: (8, 2.106169478149171, {'accuracy': 0.1947, 'correct': 1947, 'total': 10000}, 79.26475049700002)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:50:01,849 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:50:01,849 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 9]
+2026-11-12 21:50:01,849 - flwr - INFO - [ROUND 9]
+2026-11-12 21:50:01,854 - src.tavs_v2.tavs_esp_strategy - INFO - Round 9 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:50:01,854 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:04,627 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:04,814 - src.tavs_v2.tavs_esp_strategy - INFO - Round 9 Detection: 5 Inliers, 1 Outliers
+2026-11-12 21:50:04,814 - src.tavs_v2.tavs_esp_strategy - INFO - Round 9 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (9, 2.0732201216327155, {'accuracy': 0.2381, 'correct': 2381, 'total': 10000}, 87.65795470700004)
+2026-11-12 21:50:10,242 - flwr - INFO - fit progress: (9, 2.0732201216327155, {'accuracy': 0.2381, 'correct': 2381, 'total': 10000}, 87.65795470700004)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:50:10,242 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:50:10,242 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 10]
+2026-11-12 21:50:10,242 - flwr - INFO - [ROUND 10]
+2026-11-12 21:50:10,246 - src.tavs_v2.tavs_esp_strategy - INFO - Round 10 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:50:10,246 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:13,066 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:13,258 - src.tavs_v2.tavs_esp_strategy - INFO - Round 10 Detection: 5 Inliers, 1 Outliers
+2026-11-12 21:50:13,258 - src.tavs_v2.tavs_esp_strategy - INFO - Round 10 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (10, 2.0619555901569924, {'accuracy': 0.2317, 'correct': 2317, 'total': 10000}, 95.83214571300005)
+2026-11-12 21:50:18,416 - flwr - INFO - fit progress: (10, 2.0619555901569924, {'accuracy': 0.2317, 'correct': 2317, 'total': 10000}, 95.83214571300005)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:50:18,417 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:50:18,417 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 11]
+2026-11-12 21:50:18,417 - flwr - INFO - [ROUND 11]
+2026-11-12 21:50:18,420 - src.tavs_v2.tavs_esp_strategy - INFO - Round 11 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:50:18,420 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:20,959 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:21,158 - src.tavs_v2.tavs_esp_strategy - INFO - Round 11 Detection: 5 Inliers, 1 Outliers
+2026-11-12 21:50:21,158 - src.tavs_v2.tavs_esp_strategy - INFO - Round 11 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (11, 2.0774136029990617, {'accuracy': 0.2439, 'correct': 2439, 'total': 10000}, 103.91908475900004)
+2026-11-12 21:50:26,503 - flwr - INFO - fit progress: (11, 2.0774136029990617, {'accuracy': 0.2439, 'correct': 2439, 'total': 10000}, 103.91908475900004)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:50:26,504 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:50:26,504 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 12]
+2026-11-12 21:50:26,504 - flwr - INFO - [ROUND 12]
+2026-11-12 21:50:26,508 - src.tavs_v2.tavs_esp_strategy - INFO - Round 12 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:50:26,508 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:29,417 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:29,631 - src.tavs_v2.tavs_esp_strategy - INFO - Round 12 Detection: 3 Inliers, 3 Outliers
+2026-11-12 21:50:29,631 - src.tavs_v2.tavs_esp_strategy - INFO - Round 12 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (12, 2.102857645150203, {'accuracy': 0.2232, 'correct': 2232, 'total': 10000}, 111.988896178)
+2026-11-12 21:50:34,573 - flwr - INFO - fit progress: (12, 2.102857645150203, {'accuracy': 0.2232, 'correct': 2232, 'total': 10000}, 111.988896178)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:50:34,573 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:50:34,573 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 13]
+2026-11-12 21:50:34,573 - flwr - INFO - [ROUND 13]
+2026-11-12 21:50:34,577 - src.tavs_v2.tavs_esp_strategy - INFO - Round 13 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:50:34,577 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:37,197 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:37,364 - src.tavs_v2.tavs_esp_strategy - INFO - Round 13 Detection: 3 Inliers, 3 Outliers
+2026-11-12 21:50:37,364 - src.tavs_v2.tavs_esp_strategy - INFO - Round 13 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (13, 2.022131375446441, {'accuracy': 0.2576, 'correct': 2576, 'total': 10000}, 120.25366925799995)
+2026-11-12 21:50:42,838 - flwr - INFO - fit progress: (13, 2.022131375446441, {'accuracy': 0.2576, 'correct': 2576, 'total': 10000}, 120.25366925799995)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:50:42,838 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:50:42,838 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 14]
+2026-11-12 21:50:42,838 - flwr - INFO - [ROUND 14]
+2026-11-12 21:50:42,841 - src.tavs_v2.tavs_esp_strategy - INFO - Round 14 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:50:42,841 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:45,966 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:46,145 - src.tavs_v2.tavs_esp_strategy - INFO - Round 14 Detection: 4 Inliers, 2 Outliers
+2026-11-12 21:50:46,145 - src.tavs_v2.tavs_esp_strategy - INFO - Round 14 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (14, 2.040854095653364, {'accuracy': 0.2336, 'correct': 2336, 'total': 10000}, 129.13251930699994)
+2026-11-12 21:50:51,717 - flwr - INFO - fit progress: (14, 2.040854095653364, {'accuracy': 0.2336, 'correct': 2336, 'total': 10000}, 129.13251930699994)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:50:51,717 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:50:51,717 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 15]
+2026-11-12 21:50:51,717 - flwr - INFO - [ROUND 15]
+2026-11-12 21:50:51,720 - src.tavs_v2.tavs_esp_strategy - INFO - Round 15 Scheduling: 6 Verified (0 of them decoys), 4 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:50:51,720 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:54,581 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:50:54,766 - src.tavs_v2.tavs_esp_strategy - INFO - Round 15 Detection: 6 Inliers, 0 Outliers
+2026-11-12 21:50:54,766 - src.tavs_v2.tavs_esp_strategy - INFO - Round 15 trust_signal='pretrain_loss_var': overrode 6/6 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (15, 2.0368581387647398, {'accuracy': 0.2456, 'correct': 2456, 'total': 10000}, 137.978010798)
+2026-11-12 21:51:00,562 - flwr - INFO - fit progress: (15, 2.0368581387647398, {'accuracy': 0.2456, 'correct': 2456, 'total': 10000}, 137.978010798)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:00,562 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:00,562 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 16]
+2026-11-12 21:51:00,562 - flwr - INFO - [ROUND 16]
+2026-11-12 21:51:00,566 - src.tavs_v2.tavs_esp_strategy - INFO - Round 16 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:00,566 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:03,189 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:03,391 - src.tavs_v2.tavs_esp_strategy - INFO - Round 16 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:51:03,391 - src.tavs_v2.tavs_esp_strategy - INFO - Round 16 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (16, 2.0019562935373587, {'accuracy': 0.2523, 'correct': 2523, 'total': 10000}, 146.269016642)
+2026-11-12 21:51:08,853 - flwr - INFO - fit progress: (16, 2.0019562935373587, {'accuracy': 0.2523, 'correct': 2523, 'total': 10000}, 146.269016642)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:08,853 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:08,853 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 17]
+2026-11-12 21:51:08,853 - flwr - INFO - [ROUND 17]
+2026-11-12 21:51:08,857 - src.tavs_v2.tavs_esp_strategy - INFO - Round 17 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:08,857 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:12,027 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:12,202 - src.tavs_v2.tavs_esp_strategy - INFO - Round 17 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:51:12,202 - src.tavs_v2.tavs_esp_strategy - INFO - Round 17 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (17, 2.011647733913106, {'accuracy': 0.2595, 'correct': 2595, 'total': 10000}, 155.18694586100003)
+2026-11-12 21:51:17,771 - flwr - INFO - fit progress: (17, 2.011647733913106, {'accuracy': 0.2595, 'correct': 2595, 'total': 10000}, 155.18694586100003)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:17,771 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:17,771 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 18]
+2026-11-12 21:51:17,771 - flwr - INFO - [ROUND 18]
+2026-11-12 21:51:17,776 - src.tavs_v2.tavs_esp_strategy - INFO - Round 18 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:17,776 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:20,624 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:20,824 - src.tavs_v2.tavs_esp_strategy - INFO - Round 18 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:51:20,824 - src.tavs_v2.tavs_esp_strategy - INFO - Round 18 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (18, 1.9648886410294064, {'accuracy': 0.2788, 'correct': 2788, 'total': 10000}, 163.526577009)
+2026-11-12 21:51:26,111 - flwr - INFO - fit progress: (18, 1.9648886410294064, {'accuracy': 0.2788, 'correct': 2788, 'total': 10000}, 163.526577009)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:26,111 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:26,111 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 19]
+2026-11-12 21:51:26,111 - flwr - INFO - [ROUND 19]
+2026-11-12 21:51:26,115 - src.tavs_v2.tavs_esp_strategy - INFO - Round 19 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:26,115 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:28,802 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:28,972 - src.tavs_v2.tavs_esp_strategy - INFO - Round 19 Detection: 5 Inliers, 2 Outliers
+2026-11-12 21:51:28,972 - src.tavs_v2.tavs_esp_strategy - INFO - Round 19 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (19, 1.9892379212531315, {'accuracy': 0.2373, 'correct': 2373, 'total': 10000}, 171.33107253499998)
+2026-11-12 21:51:33,915 - flwr - INFO - fit progress: (19, 1.9892379212531315, {'accuracy': 0.2373, 'correct': 2373, 'total': 10000}, 171.33107253499998)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:33,916 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:33,916 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 20]
+2026-11-12 21:51:33,916 - flwr - INFO - [ROUND 20]
+2026-11-12 21:51:33,920 - src.tavs_v2.tavs_esp_strategy - INFO - Round 20 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:33,920 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:36,340 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:36,541 - src.tavs_v2.tavs_esp_strategy - INFO - Round 20 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:51:36,542 - src.tavs_v2.tavs_esp_strategy - INFO - Round 20 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (20, 1.8775516178957217, {'accuracy': 0.3103, 'correct': 3103, 'total': 10000}, 179.08536545599998)
+2026-11-12 21:51:41,670 - flwr - INFO - fit progress: (20, 1.8775516178957217, {'accuracy': 0.3103, 'correct': 3103, 'total': 10000}, 179.08536545599998)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:41,670 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:41,670 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 21]
+2026-11-12 21:51:41,670 - flwr - INFO - [ROUND 21]
+2026-11-12 21:51:41,674 - src.tavs_v2.tavs_esp_strategy - INFO - Round 21 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:41,674 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:44,120 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:44,307 - src.tavs_v2.tavs_esp_strategy - INFO - Round 21 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:51:44,307 - src.tavs_v2.tavs_esp_strategy - INFO - Round 21 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (21, 1.897374547211228, {'accuracy': 0.3134, 'correct': 3134, 'total': 10000}, 187.085754177)
+2026-11-12 21:51:49,670 - flwr - INFO - fit progress: (21, 1.897374547211228, {'accuracy': 0.3134, 'correct': 3134, 'total': 10000}, 187.085754177)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:49,670 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:49,670 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 22]
+2026-11-12 21:51:49,670 - flwr - INFO - [ROUND 22]
+2026-11-12 21:51:49,674 - src.tavs_v2.tavs_esp_strategy - INFO - Round 22 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:49,674 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:52,494 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:51:52,683 - src.tavs_v2.tavs_esp_strategy - INFO - Round 22 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:51:52,683 - src.tavs_v2.tavs_esp_strategy - INFO - Round 22 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (22, 1.8544895800815266, {'accuracy': 0.3431, 'correct': 3431, 'total': 10000}, 195.47782954499996)
+2026-11-12 21:51:58,062 - flwr - INFO - fit progress: (22, 1.8544895800815266, {'accuracy': 0.3431, 'correct': 3431, 'total': 10000}, 195.47782954499996)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:51:58,062 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:51:58,062 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 23]
+2026-11-12 21:51:58,062 - flwr - INFO - [ROUND 23]
+2026-11-12 21:51:58,068 - src.tavs_v2.tavs_esp_strategy - INFO - Round 23 Scheduling: 7 Verified (2 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:51:58,068 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:00,799 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:00,980 - src.tavs_v2.tavs_esp_strategy - INFO - Round 23 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:52:00,980 - src.tavs_v2.tavs_esp_strategy - INFO - Round 23 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (23, 1.8645677467819992, {'accuracy': 0.3241, 'correct': 3241, 'total': 10000}, 203.70646129499994)
+2026-11-12 21:52:06,291 - flwr - INFO - fit progress: (23, 1.8645677467819992, {'accuracy': 0.3241, 'correct': 3241, 'total': 10000}, 203.70646129499994)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:52:06,291 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:52:06,291 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 24]
+2026-11-12 21:52:06,291 - flwr - INFO - [ROUND 24]
+2026-11-12 21:52:06,295 - src.tavs_v2.tavs_esp_strategy - INFO - Round 24 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:52:06,295 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:09,511 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:09,695 - src.tavs_v2.tavs_esp_strategy - INFO - Round 24 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:52:09,695 - src.tavs_v2.tavs_esp_strategy - INFO - Round 24 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (24, 1.8589117132174742, {'accuracy': 0.3336, 'correct': 3336, 'total': 10000}, 212.39303615300003)
+2026-11-12 21:52:14,977 - flwr - INFO - fit progress: (24, 1.8589117132174742, {'accuracy': 0.3336, 'correct': 3336, 'total': 10000}, 212.39303615300003)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:52:14,978 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:52:14,978 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 25]
+2026-11-12 21:52:14,978 - flwr - INFO - [ROUND 25]
+2026-11-12 21:52:14,982 - src.tavs_v2.tavs_esp_strategy - INFO - Round 25 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:52:14,982 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:18,017 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:18,198 - src.tavs_v2.tavs_esp_strategy - INFO - Round 25 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:52:18,198 - src.tavs_v2.tavs_esp_strategy - INFO - Round 25 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (25, 1.8479080549470939, {'accuracy': 0.3388, 'correct': 3388, 'total': 10000}, 220.70785255500004)
+2026-11-12 21:52:23,292 - flwr - INFO - fit progress: (25, 1.8479080549470939, {'accuracy': 0.3388, 'correct': 3388, 'total': 10000}, 220.70785255500004)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:52:23,292 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:52:23,292 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 26]
+2026-11-12 21:52:23,292 - flwr - INFO - [ROUND 26]
+2026-11-12 21:52:23,295 - src.tavs_v2.tavs_esp_strategy - INFO - Round 26 Scheduling: 7 Verified (0 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:52:23,295 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:26,014 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:26,197 - src.tavs_v2.tavs_esp_strategy - INFO - Round 26 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:52:26,198 - src.tavs_v2.tavs_esp_strategy - INFO - Round 26 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (26, 1.849562578899845, {'accuracy': 0.2955, 'correct': 2955, 'total': 10000}, 229.03984850200004)
+2026-11-12 21:52:31,624 - flwr - INFO - fit progress: (26, 1.849562578899845, {'accuracy': 0.2955, 'correct': 2955, 'total': 10000}, 229.03984850200004)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:52:31,624 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:52:31,624 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 27]
+2026-11-12 21:52:31,624 - flwr - INFO - [ROUND 27]
+2026-11-12 21:52:31,630 - src.tavs_v2.tavs_esp_strategy - INFO - Round 27 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:52:31,630 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:34,701 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:34,931 - src.tavs_v2.tavs_esp_strategy - INFO - Round 27 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:52:34,931 - src.tavs_v2.tavs_esp_strategy - INFO - Round 27 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (27, 1.824652984643438, {'accuracy': 0.3466, 'correct': 3466, 'total': 10000}, 237.71054937500003)
+2026-11-12 21:52:40,295 - flwr - INFO - fit progress: (27, 1.824652984643438, {'accuracy': 0.3466, 'correct': 3466, 'total': 10000}, 237.71054937500003)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:52:40,295 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:52:40,295 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 28]
+2026-11-12 21:52:40,295 - flwr - INFO - [ROUND 28]
+2026-11-12 21:52:40,298 - src.tavs_v2.tavs_esp_strategy - INFO - Round 28 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:52:40,298 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:42,935 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:43,115 - src.tavs_v2.tavs_esp_strategy - INFO - Round 28 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:52:43,116 - src.tavs_v2.tavs_esp_strategy - INFO - Round 28 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (28, 1.7979356528847081, {'accuracy': 0.3552, 'correct': 3552, 'total': 10000}, 245.88218630699998)
+2026-11-12 21:52:48,466 - flwr - INFO - fit progress: (28, 1.7979356528847081, {'accuracy': 0.3552, 'correct': 3552, 'total': 10000}, 245.88218630699998)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:52:48,467 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:52:48,467 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 29]
+2026-11-12 21:52:48,467 - flwr - INFO - [ROUND 29]
+2026-11-12 21:52:48,470 - src.tavs_v2.tavs_esp_strategy - INFO - Round 29 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:52:48,470 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:51,456 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:51,649 - src.tavs_v2.tavs_esp_strategy - INFO - Round 29 Detection: 6 Inliers, 1 Outliers
+2026-11-12 21:52:51,649 - src.tavs_v2.tavs_esp_strategy - INFO - Round 29 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (29, 1.7540928102602624, {'accuracy': 0.3729, 'correct': 3729, 'total': 10000}, 254.14944454099998)
+2026-11-12 21:52:56,734 - flwr - INFO - fit progress: (29, 1.7540928102602624, {'accuracy': 0.3729, 'correct': 3729, 'total': 10000}, 254.14944454099998)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:52:56,734 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:52:56,734 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 30]
+2026-11-12 21:52:56,734 - flwr - INFO - [ROUND 30]
+2026-11-12 21:52:56,737 - src.tavs_v2.tavs_esp_strategy - INFO - Round 30 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:52:56,737 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:59,087 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:52:59,252 - src.tavs_v2.tavs_esp_strategy - INFO - Round 30 Detection: 5 Inliers, 2 Outliers
+2026-11-12 21:52:59,252 - src.tavs_v2.tavs_esp_strategy - INFO - Round 30 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])
+[92mINFO [0m:      fit progress: (30, 1.8352507147819372, {'accuracy': 0.3217, 'correct': 3217, 'total': 10000}, 262.020830587)
+2026-11-12 21:53:04,605 - flwr - INFO - fit progress: (30, 1.8352507147819372, {'accuracy': 0.3217, 'correct': 3217, 'total': 10000}, 262.020830587)
+[92mINFO [0m:      configure_evaluate: no clients selected, skipping evaluation
+2026-11-12 21:53:04,605 - flwr - INFO - configure_evaluate: no clients selected, skipping evaluation
+[92mINFO [0m:      
+2026-11-12 21:53:04,605 - flwr - INFO - 
+[92mINFO [0m:      [ROUND 31]
+2026-11-12 21:53:04,605 - flwr - INFO - [ROUND 31]
+2026-11-12 21:53:04,610 - src.tavs_v2.tavs_esp_strategy - INFO - Round 31 Scheduling: 7 Verified (1 of them decoys), 3 Promoted
+[92mINFO [0m:      configure_fit: strategy sampled 10 clients (out of 50)
+2026-11-12 21:53:04,610 - flwr - INFO - configure_fit: strategy sampled 10 clients (out of 50)
+[92mINFO [0m:      aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:53:07,045 - flwr - INFO - aggregate_fit: received 10 results and 0 failures
+2026-11-12 21:53:07,219 - src.tavs_v2.tavs_esp_strategy - INFO - Round 31 Detection: 7 Inliers, 0 Outliers
+2026-11-12 21:53:07,220 - src.tavs_v2.tavs_esp_strategy - INFO - Round 31 trust_signal='pretrain_loss_var': overrode 7/7 verified clients' behavior_score from BVD to inverted pretrain variance (rescale: [0.60, 1.50] -> trust [1, 0])

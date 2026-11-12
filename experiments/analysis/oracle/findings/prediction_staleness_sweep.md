@@ -80,3 +80,55 @@ it was conclusive.
 
 Neither cap can move the ceiling alone, so the informative follow-up is
 raising `gamma_budget` **and** the staleness caps together.
+
+---
+
+## Outcome of the first (and only) completed seed: the prediction's DIRECTION held, its MECHANISM did not
+
+The container was stopped before the sweep finished, but seed 1 of the
+no-expiry arm completed. Measured against the same seed of the 4/10
+baseline:
+
+| caps | skip rate | accuracy (last10) |
+|---|---|---|
+| 4 / 10 | 30.8% | 0.3684 |
+| 40 / 40 (no expiry) | 31.2% | 0.3642 |
+
+**+0.5 points.** Removing the staleness expiry entirely barely moved the
+skip rate -- less even than the "few points" predicted.
+
+The predicted mechanism was that the weight budget would take over. It did
+not:
+
+| caps | mean gamma | % of rounds at the cap | clients below theta_high |
+|---|---|---|---|
+| 4 / 10 | 0.262 | 0% | 5.7 of 10 |
+| 40 / 40 | 0.264 | 0% | 5.8 of 10 |
+
+Gamma is unchanged and never binds. This is **falsifier #2** as written
+above: *"a skip rate essentially unchanged from 32%, with gamma still not
+binding ... would mean neither cap was the limiter and the real constraint
+is something else again -- most likely trust never reaching theta_high."*
+
+That is what the last column shows: about 5.8 of every 10 sampled clients
+sit below theta_high = 0.7 and are not eligible for promotion at all,
+regardless of either cap.
+
+**So the limiter is trust eligibility, not the staleness cap and not the
+weight budget.** The knob worth sweeping next is theta_high, or the trust
+dynamics that feed it (alpha_trust, k_trust, and the behaviour score itself,
+which under IID scores roughly half of all clients at 0).
+
+**n = 1.** Every effect in this project has needed 10 seeds before it was
+conclusive, and the two accuracy figures above differ by 0.0042, which is
+well inside this setup's round-to-round jitter of ~0.022. Treat this as a
+strong hint about the skip rate -- a structural count, far less noisy than
+accuracy -- and as no evidence at all about the accuracy column.
+
+The run that produced it was computed in the cloud container, not on the
+machine every other result in this project came from. It was deleted rather
+than kept: --skip-completed would have silently reused it and made a
+10-seed mean out of 1 container seed and 9 Mac seeds. This project already
+retracted a finding caused by two batches differing systematically on the
+SAME machine; mixing machines is strictly worse. The numbers above are the
+record.
