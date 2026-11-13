@@ -23,6 +23,8 @@
     "arms": "tavs_skip",
     "trust_weighting_start_round": 1,
     "trust_weight_strength": 1.0,
+    "s_max_appearances": 4,
+    "s_max_rounds": 10,
     "trust_weight_floor": 1.0,
     "alpha_trust": 0.7,
     "initial_trust": 0.25,
@@ -99,7 +101,7 @@
       "total_verified": 273,
       "total_promoted": 127,
       "observed_skip_rate": 0.3175,
-      "elapsed_seconds": 350.6033067703247,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -170,7 +172,8 @@
           0.9003301994147919,
           0.9007913659264978
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -224,7 +227,7 @@
       "total_verified": 277,
       "total_promoted": 123,
       "observed_skip_rate": 0.3075,
-      "elapsed_seconds": 360.39580607414246,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -295,7 +298,8 @@
           0.91176325,
           0.91176325
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -349,7 +353,7 @@
       "total_verified": 268,
       "total_promoted": 132,
       "observed_skip_rate": 0.33,
-      "elapsed_seconds": 359.7340211868286,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -420,7 +424,8 @@
           0.91176325,
           0.91176325
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -474,7 +479,7 @@
       "total_verified": 269,
       "total_promoted": 131,
       "observed_skip_rate": 0.3275,
-      "elapsed_seconds": 360.0913598537445,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -545,7 +550,8 @@
           0.91176325,
           0.938234275
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -599,7 +605,7 @@
       "total_verified": 274,
       "total_promoted": 126,
       "observed_skip_rate": 0.315,
-      "elapsed_seconds": 340.17811703681946,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -670,7 +676,8 @@
           0.91176325,
           0.91176325
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -724,7 +731,7 @@
       "total_verified": 270,
       "total_promoted": 130,
       "observed_skip_rate": 0.325,
-      "elapsed_seconds": 367.74344301223755,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -795,7 +802,8 @@
           0.91176325,
           0.938234275
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -849,7 +857,7 @@
       "total_verified": 272,
       "total_promoted": 128,
       "observed_skip_rate": 0.32,
-      "elapsed_seconds": 345.1631202697754,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -920,7 +928,8 @@
           0.8862086441948254,
           0.91176325
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -974,7 +983,7 @@
       "total_verified": 271,
       "total_promoted": 129,
       "observed_skip_rate": 0.3225,
-      "elapsed_seconds": 359.0417001247406,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -1045,7 +1054,8 @@
           0.91176325,
           0.91176325
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -1099,7 +1109,7 @@
       "total_verified": 267,
       "total_promoted": 133,
       "observed_skip_rate": 0.3325,
-      "elapsed_seconds": 338.3186900615692,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -1170,7 +1180,8 @@
           0.91176325,
           0.9512377850453785
         ]
-      }
+      },
+      "cached": true
     },
     {
       "arm": "tavs_skip",
@@ -1224,7 +1235,7 @@
       "total_verified": 273,
       "total_promoted": 127,
       "observed_skip_rate": 0.3175,
-      "elapsed_seconds": 348.15409207344055,
+      "elapsed_seconds": 0.0,
       "noise_diagnostic": {
         "noise_injected": true,
         "n_noisy": 20,
@@ -1295,7 +1306,8 @@
           0.91176325,
           0.91176325
         ]
-      }
+      },
+      "cached": true
     }
   ]
 }
