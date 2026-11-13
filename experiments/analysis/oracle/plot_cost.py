@@ -8,13 +8,29 @@ carry them:
                           point is that TAVS sits level with verify-everything
                           while doing a third less work, and random skipping
                           at the same work does not.
-  fig 2  HEADROOM         what was saved against what an oracle could save.
-                          With error rate p, a scheduler that verified only
-                          the noisy clients would skip (1-p). This panel is
-                          the gap, and the reason the staleness caps matter.
-  fig 3  WHAT BLOCKS IT   per 10-client cohort, how many clients are promoted
-                          versus held back by each constraint, with exact
-                          trust reconstructed from the logs.
+  fig 2  CEILING          what was saved against what the WEIGHT BUDGET
+                          allows. An earlier version of this panel drew the
+                          reference line at "an oracle skips every clean
+                          client" = (1 - p_noisy) = 60%. That line is
+                          unreachable by construction: gamma_budget caps the
+                          share of aggregate weight unverified clients may
+                          hold, which caps the skip share at
+                          g / ((1-g)*p_i + g) ~= 41% at the trust levels these
+                          runs reach. The panel now draws BOTH, because the
+                          gap between them is the finding.
+  fig 3  WHAT BLOCKS IT   per 10-client cohort, how many clients are skipped
+                          versus held back by each constraint, replayed from
+                          the scheduler's own branch order.
+
+                          The previous version of this panel was WRONG. Its
+                          subtitle read "the weight budget binds in under 6%
+                          of rounds and is not shown -- it is not the
+                          limiter", and it omitted the budget entirely. That
+                          6% was measured AFTER the demotion loop, which runs
+                          until gamma <= gamma_budget and so is under the cap
+                          by construction. Pre-demotion gamma is 0.815 and
+                          the budget demotes ~200 of 400 client-rounds per
+                          seed: it is the limiter, by a wide margin.
 
 Everything is read from pilot_results.json (exact counts; total_verified +
 total_promoted == clients_per_round * rounds in every arm) and from
@@ -36,6 +52,9 @@ from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parents[3]))
 from experiments.analysis.oracle.dose_and_schedule import (  # noqa: E402
     ci_halfwidth, paired_t,
+)
+from experiments.analysis.oracle.staleness import (  # noqa: E402
+    load_runs, replay_schedule, tavs_config,
 )
 
 ARM_LABEL = {"full_verify": "verify everything",
@@ -138,163 +157,186 @@ def fig_saved_vs_spent(plt, base, fams, out):
     return f
 
 
-def fig_headroom(plt, base, fams, out, p_noisy=0.4, budget=400):
-    labels, got = [], []
+def budget_ceiling(run):
+    """Max share of a cohort that can skip, given the weight budget.
+
+    gamma = sum_p / (|V| + sum_p) <= g, with each promoted client carrying
+    p_i = sigmoid(c_lambda*(t_eff - 0.5)) and each verified client carrying 1.
+    Solving for the promoted share m/n:
+
+        p*m*(1-g) = g*(n-m)   ->   m/n = g / ((1-g)*p + g)
+
+    Note the direction: a HIGHER p_i (more trusted clients) gives a LOWER
+    ceiling, because each promoted client eats more of the budget. Raising
+    theta_high therefore cannot buy more skipping.
+
+    Returns (ceiling, mean_p_i) from the run's own promoted clients, or None.
+    """
+    tc = tavs_config(run)
+    tbr = run.get("trust_by_round") or {}
+    if not tbr:
+        return None
+    g = tc["gamma_budget"]
+    cl, tau = tc.get("c_lambda", 8.0), tc.get("tau_ramp", 5.0)
+    ra = run["round_assignments"]
+    join = {}
+    for rk in sorted(ra, key=int):
+        for c in (ra[rk].get("sampled") or []):
+            join.setdefault(c, int(rk))
+    ws = []
+    for rk in sorted(ra, key=int):
+        if rk not in tbr:
+            continue
+        r = int(rk)
+        for c in (ra[rk].get("promoted") or []):
+            t = min(tbr[rk].get(c, 0.0),
+                    1.0 - math.exp(-(r - join.get(c, r)) / tau))
+            ws.append(1.0 / (1.0 + math.exp(-cl * (t - 0.5))))
+    if not ws:
+        return None
+    p_i = statistics.mean(ws)
+    return g / ((1.0 - g) * p_i + g), p_i
+
+
+# The ceiling needs each promoted client's weight p_i, which needs
+# trust_by_round. sweep_a10_twagg and the IID family both predate that
+# logging, so the ceiling is measured on a DONOR family that has it and
+# shares the config. stale_a10_sa40_sr40 is sweep_a10_twagg with the
+# staleness caps lifted -- its skip rate is identical to 0.1 points
+# (32.1% both), so its p_i distribution stands in. The IID family has no
+# such donor, so its ceiling is left unmarked rather than guessed.
+CEILING_DONOR = {"sweep_a10_twagg": "stale_a10_sa40_sr40"}
+
+
+def fig_ceiling(plt, base, fams, out, p_noisy=0.4, budget=400):
+    """Achieved saving against BOTH reference lines: the oracle bound that
+    motivated the sweeps, and the ceiling the weight budget actually imposes.
+    """
+    labels, got, ceil, pis = [], [], [], []
     for fam, title in fams:
         rows = pilot_rows(base, fam)
         if "tavs_skip" not in rows:
             continue
-        v = statistics.mean(x["total_verified"] for x in rows["tavs_skip"].values())
+        v = statistics.mean(x["total_verified"]
+                            for x in rows["tavs_skip"].values())
+        donor = CEILING_DONOR.get(fam, fam)
+        bc = ([budget_ceiling(r) for r in load_runs(base / donor).values()]
+              if (base / donor).exists() else [])
+        bc = [x for x in bc if x]
         labels.append(title)
         got.append(budget - v)
+        ceil.append(statistics.mean(c for c, _ in bc) * budget if bc else float("nan"))
+        pis.append(statistics.mean(p for _, p in bc) if bc else float("nan"))
     if not labels:
         return None
     oracle = budget * (1.0 - p_noisy)
-    fig, ax = plt.subplots(figsize=(7.6, 4.2))
-    y = range(len(labels))
-    ax.barh(list(y), got, color="#548235", label="skipped by TAVS")
-    # max(0, ...) so an arm that ever skipped MORE than the oracle bound
-    # cannot draw a negative-width bar with a negative "unclaimed" label.
-    ax.barh(list(y), [max(0.0, oracle - g) for g in got], left=got,
-            color="#d9d9d9", label="left on the table")
+    fig, ax = plt.subplots(figsize=(8.8, 4.4))
+    y = list(range(len(labels)))
+    ax.barh(y, got, color="#548235", label="skipped by TAVS")
+    for i, (gv, cv) in enumerate(zip(got, ceil)):
+        if not math.isnan(cv) and cv > gv:
+            ax.barh([i], [cv - gv], left=[gv], color="#ffd966",
+                    label="reachable under the budget" if i == 0 else None)
+        if not math.isnan(cv) and oracle > cv:
+            ax.barh([i], [oracle - cv], left=[cv], color="#d9d9d9",
+                    label="blocked BY the budget" if i == 0 else None)
     ax.axvline(oracle, color="#c0504d", lw=1.6, ls="--")
-    # Above the top bar, not beside it: at the bottom it sat under the
-    # legend and both were unreadable.
-    ax.annotate(f"an oracle skipping every clean client: {oracle:.0f}",
-                (oracle, len(labels) - 0.35), fontsize=8, color="#c0504d",
+    ax.annotate(f"oracle: skip every clean client ({oracle:.0f})",
+                (oracle - 4, len(labels) - 0.38), fontsize=8, color="#c0504d",
                 ha="right", va="bottom")
-    ax.set_ylim(-0.6, len(labels) - 0.05)
-    for i, g in enumerate(got):
-        ax.annotate(f"{g:.0f}  ({g / budget:.0%})", (g / 2, i), ha="center",
+    for i, (gv, cv, pv) in enumerate(zip(got, ceil, pis)):
+        ax.annotate(f"{gv:.0f}  ({gv / budget:.0%})", (gv / 2, i), ha="center",
                     va="center", fontsize=9, color="white")
-        gap = max(0.0, oracle - g)
-        if gap > 1:
-            ax.annotate(f"+{gap:.0f} unclaimed", (g + gap / 2, i),
-                        ha="center", va="center", fontsize=8, color="#444444")
-    ax.set_yticks(list(y))
+        if math.isnan(cv):
+            ax.annotate("budget ceiling not measurable\n(no trust log for "
+                        "this family)", (gv + 6, i), fontsize=7.5,
+                        color="#888888", va="center")
+            continue
+        ax.plot([cv, cv], [i - 0.34, i + 0.34], color="#7f6000", lw=2.0)
+        ax.annotate(f"budget ceiling {cv / budget:.0%}\n(mean p_i={pv:.2f})",
+                    (cv + 3, i), fontsize=8, color="#7f6000", va="center")
+    ax.set_yticks(y)
     ax.set_yticklabels(labels, fontsize=9)
     ax.set_xlabel(f"verifications skipped, of {budget} opportunities")
-    ax.set_title(f"How much of the available saving is captured\n"
-                 f"with {p_noisy:.0%} of clients noisy, a perfect scheduler "
-                 f"could skip the other {1 - p_noisy:.0%}", fontsize=10)
+    ax.set_xlim(0, budget * 0.78)
+    ax.set_title("How much of the saving is captured, and what caps it\n"
+                 "the oracle bound was never reachable: gamma_budget caps "
+                 "the skip share long before it", fontsize=10)
     ax.legend(fontsize=8, loc="lower right", framealpha=0.95)
     fig.tight_layout()
-    f = out / "cost_headroom.png"
+    f = out / "cost_ceiling.png"
     fig.savefig(f, dpi=150)
     plt.close(fig)
     return f
 
 
-def constraint_breakdown(base: Path, fam: str, seeds=None):
-    """Per 10-client cohort: promoted, and who was held back by what.
-
-    Trust is REPLAYED from the logged pretrain_loss_var through the same EMA
-    the scheduler used -- verified to reproduce the recorded final
-    trust to 0.0 error on every replayed client value. The logged trust_evolution
-    cannot be used: its per-client lists have ragged lengths with no recorded
-    start round.
-
-    `seeds` restricts the replay to the same seed set the other two figures
-    use. Without it this globbed every tavs_skip_seed* in the family, which
-    picked up 10 seeds for Dirichlet against 5 for IID while figs 1-2 used
-    5 for both -- three panels presented as one story, averaged over
-    different samples.
-    """
-    acc = {"promoted": [], "below_theta_low": [], "forced_stale": []}
-    for p in sorted(glob.glob(str(base / fam / "**" / "tavs_skip_seed*"
-                                  / "pipeline_results.json"), recursive=True)):
-        if seeds is not None:
-            m = re.search(r"tavs_skip_seed(\d+)", p)
-            if not m or int(m.group(1)) not in seeds:
-                continue
-        d = json.loads(Path(p).read_text())
-        tc = d["config"]["tavs_config"]
-        a, t0 = tc["alpha_trust"], tc["initial_trust"]
-        lo, hi = (tc["pretrain_loss_var_rescale_lo"],
-                  tc["pretrain_loss_var_rescale_hi"])
-        tau, th_lo = tc.get("tau_ramp", 5.0), tc["theta_low"]
-        fts = d["final_trust_state"]
-        osh = fts.get("oracle_signal_history") or {}
-        ra = fts.get("round_assignments") or {}
-        sh = {r["round"]: r for r in (d.get("scheduling_history") or [])}
-        if not (osh and ra):
-            continue
-        join, trust = {}, {}
-        for rk in sorted(ra, key=lambda x: int(x)):
-            for c in ra[rk].get("sampled", []):
-                join.setdefault(c, int(rk))
-        for rk in sorted(ra, key=lambda x: int(x)):
-            r = int(rk)
-            P = set(ra[rk].get("promoted", []))
-            S = set(ra[rk].get("sampled", [])) or set(ra[rk].get("verified", [])) | P
-            if not S:
-                continue
-            def eff(c):
-                return min(trust.get(c, t0),
-                           1.0 - math.exp(-(r - join.get(c, r)) / tau))
-            acc["promoted"].append(len(P))
-            acc["below_theta_low"].append(sum(1 for c in S if eff(c) < th_lo))
-            acc["forced_stale"].append(sh.get(r, {}).get("num_forced_stale", 0))
-            for cid, e in (osh.get(rk) or {}).items():
-                if not e.get("is_verified"):
-                    continue
-                raw = e.get("pretrain_loss_var")
-                if raw is None:
-                    continue
-                b = 1.0 - max(0.0, min(1.0, (float(raw) - lo) / (hi - lo)))
-                trust[cid] = a * trust.get(cid, t0) + (1.0 - a) * b
-    if not acc["promoted"]:
-        return None
-    return {k: statistics.mean(v) for k, v in acc.items()}
+# Families carrying round-keyed trust logs. The branch replay needs
+# trust_by_round, which only runs made after that logging fix have:
+# sweep_a10_twagg and the IID family both predate it and return None, which
+# is why this panel takes its own family list rather than the shared `fams`.
+# stale_a10_sa40_sr40 is sweep_a10_twagg's config with the staleness caps
+# lifted -- the arm where the caps provably never fire, so what remains is
+# every OTHER constraint, which is exactly what this panel is about.
+BLOCK_FAMS = [("stale_a10_sa40_sr40",
+               "Dirichlet 1.0, staleness caps lifted"),
+              ("stale_a10_sa08_sr20",
+               "Dirichlet 1.0, caps doubled (8/20)")]
 
 
 def fig_what_blocks(plt, base, fams, out):
+    """Where each client-round goes, from the scheduler's own branch order.
+
+    Unlike the version this replaces, these categories ARE a partition:
+    every sampled client-round lands in exactly one, so the bars sum to the
+    cohort size and can be stacked honestly.
+    """
+    fams = [(f, t) for f, t in BLOCK_FAMS if (base / f).exists()]
     rows, labels = [], []
     for fam, title in fams:
-        # Same seeds as figs 1-2, so all three panels describe one sample.
-        pr = pilot_rows(base, fam)
-        seeds = set(pr.get("tavs_skip", {})) or None
-        b = constraint_breakdown(base, fam, seeds=seeds)
-        if b:
-            rows.append(b)
-            labels.append(title)
+        gs = [g for g in (replay_schedule(r)
+                          for r in load_runs(base / fam).values()) if g]
+        if not gs:
+            continue
+        n = len(gs)
+        tot = sum(g["sampled"] for g in gs) / n
+        rows.append({k: sum(g[k] for g in gs) / n / tot * 10.0
+                     for k in ("replay_promoted", "demoted_by_budget",
+                               "stale", "tier1", "decoy")})
+        labels.append(title)
     if not rows:
         return None
-    fig, ax = plt.subplots(figsize=(8.4, 4.4))
-    keys = [("promoted", "#548235", "promoted (skipped)"),
-            ("forced_stale", "#c0504d", "forced back by the staleness cap"),
-            ("below_theta_low", "#7f7f7f", "trust below theta_low, never promotable")]
-    # GROUPED, not stacked. The three categories OVERLAP -- a client can be
-    # both forced back by staleness and below theta_low -- so stacking them
-    # implies a partition that does not exist and overflows the cohort size
-    # (the IID column summed to 10.7 of 10).
-    h = 0.26
-    for j, (k, col, lab) in enumerate(keys):
-        offs = [i + (1 - j) * h for i in range(len(rows))]
+    fig, ax = plt.subplots(figsize=(8.8, 4.0))
+    keys = [("replay_promoted", "#548235", "skipped"),
+            ("demoted_by_budget", "#c0504d",
+             "demoted by the weight budget"),
+            ("stale", "#f4b183", "forced back by the staleness cap"),
+            ("tier1", "#7f7f7f", "Tier 1: trust below theta_low"),
+            ("decoy", "#8faadc", "drawn as a decoy")]
+    left = [0.0] * len(rows)
+    for k, col, lab in keys:
         vals = [r[k] for r in rows]
-        ax.barh(offs, vals, height=h, color=col, label=lab)
-        for off, v in zip(offs, vals):
-            ax.annotate(f"{v:.1f}", (v + 0.08, off), va="center", fontsize=8,
-                        color="#333333")
-    ax.axvline(10, color="#999999", lw=1.0, ls=":")
-    ax.set_ylim(-0.55, len(rows) - 0.30)
-    ax.annotate("cohort size 10", (10, len(rows) - 0.52), fontsize=8,
-                color="#666666", ha="right", va="bottom")
+        ax.barh(range(len(rows)), vals, left=left, color=col, label=lab,
+                height=0.5)
+        for i, (v, l0) in enumerate(zip(vals, left)):
+            if v > 0.35:
+                ax.annotate(f"{v:.1f}", (l0 + v / 2, i), ha="center",
+                            va="center", fontsize=8,
+                            color="white" if col != "#f4b183" else "#333333")
+        left = [a + b for a, b in zip(left, vals)]
     ax.set_yticks(list(range(len(labels))))
     ax.set_yticklabels(labels, fontsize=9)
-    ax.set_xlabel("clients per 10-client cohort (categories OVERLAP -- not a "
-                  "partition)")
-    ax.set_xlim(0, 11.5)
+    ax.set_xlabel("clients per 10-client cohort (a partition: these sum to 10)")
+    ax.set_xlim(0, 10.4)
     ax.set_title("What stops more being skipped\n"
-                 "the weight budget binds in under 6% of rounds and is not "
-                 "shown -- it is not the limiter", fontsize=10)
-    ax.legend(fontsize=8, loc="lower right", framealpha=0.95)
+                 "the weight budget, not trust and not the staleness cap",
+                 fontsize=10)
+    ax.legend(fontsize=8, loc="upper center", bbox_to_anchor=(0.5, -0.22),
+              ncol=3, framealpha=0.95)
     fig.tight_layout()
     f = out / "cost_what_blocks.png"
-    fig.savefig(f, dpi=150)
+    fig.savefig(f, dpi=150, bbox_inches="tight")
     plt.close(fig)
     return f
-
 
 def self_test():
     # arm_stats: paired delta direction and the exact-accounting invariant.
@@ -313,10 +355,29 @@ def self_test():
     assert math.isnan(arm_stats({"tavs_skip": rows["tavs_skip"]}, "tavs_skip")[2])
     # A missing arm returns None rather than inventing a point.
     assert arm_stats(rows, "nonexistent") is None
-    # Headroom arithmetic: with p=0.4 of 400, an oracle skips 240.
-    assert abs(400 * (1 - 0.4) - 240) < 1e-9
-    print("✓ self-test passed: arm_stats pairing/sign/missing-arm, headroom "
-          "arithmetic")
+    # The budget ceiling, hand-checked. gamma = p*m/((n-m)+p*m) <= g
+    # rearranges to m/n = g / ((1-g)*p + g). Verify the formula by running
+    # the constraint forward from the share it predicts.
+    def ceiling(g, p):
+        return g / ((1.0 - g) * p + g)
+    for g, p in ((0.35, 0.982), (0.35, 0.774), (0.35, 0.50), (0.20, 0.90)):
+        m = ceiling(g, p)                      # promoted share, n = 1
+        gamma = p * m / ((1.0 - m) + p * m)    # feed it back in
+        assert abs(gamma - g) < 1e-12, (g, p, m, gamma)
+    # Direction, which is the counterintuitive part and the reason this is
+    # pinned: MORE trusted clients give a LOWER ceiling, because each
+    # promoted client consumes more of the weight budget. If this ever
+    # inverts, "raise theta_high to skip more" starts looking correct.
+    assert ceiling(0.35, 0.982) < ceiling(0.35, 0.774) < ceiling(0.35, 0.50)
+    # And the measured figures: at p_i = 0.774 the ceiling is 41%, which is
+    # far below the (1 - p_noisy) = 60% oracle bound the sweeps assumed.
+    assert abs(ceiling(0.35, 0.774) - 0.4103) < 5e-4, ceiling(0.35, 0.774)
+    assert ceiling(0.35, 0.774) < (1 - 0.4), (
+        "the oracle bound must sit ABOVE the budget ceiling, or fig_ceiling's "
+        "two reference lines are the wrong way round"
+    )
+    print("✓ self-test passed: arm_stats pairing/sign/missing-arm, "
+          "budget-ceiling formula + direction")
     return True
 
 
@@ -341,7 +402,7 @@ def main():
         return 1
 
     made = [f for f in (fig_saved_vs_spent(plt, args.base, fams, args.out),
-                        fig_headroom(plt, args.base, fams, args.out),
+                        fig_ceiling(plt, args.base, fams, args.out),
                         fig_what_blocks(plt, args.base, fams, args.out)) if f]
     for f in made:
         print(f"wrote {f}")
