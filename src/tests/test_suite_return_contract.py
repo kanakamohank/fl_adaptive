@@ -23,8 +23,15 @@ ROOT = Path(__file__).resolve().parents[2]
 # Every suite whose main() aggregates with all([...]). Found by grepping
 # "all([" across src/tests: these three. test_tavs_flower_client.py was
 # missing from the first version and is vulnerable to the identical bug.
+# Every suite whose main() aggregates with all([...]), where one test
+# function missing its `return True` silently reports the whole file as
+# FAILED while each printed check passes. That is the exact defect this
+# guard was written for, after it cost a debugging session on
+# test_end_to_end_pipeline.py.
 SUITES = ["test_end_to_end_pipeline.py", "test_tavs_esp_strategy.py",
-          "test_tavs_flower_client.py"]
+          "test_tavs_flower_client.py",
+          "test_trust_by_round_logging.py",
+          "test_staleness_analysis.py"]
 
 
 _NESTED = (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)
