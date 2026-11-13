@@ -26,8 +26,7 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from experiments.analysis.oracle.staleness import (  # noqa: E402
-    _paired, cap_authority, distinct_clients, gamma_trace, load_runs, rates,
-    replay_gates, tavs_config,
+    _paired, distinct_clients, load_runs, rates, replay_schedule, tavs_config,
 )
 
 TC = {
@@ -111,174 +110,287 @@ def test_forced_stale_net_subtracts_the_first_appearance_floor():
     return True
 
 
-def test_gate_attribution_order_and_streak_gate():
-    """Defect 3: a client over the trust bar and past the ramp can still be
-    blocked by clean_streak, and that must be attributed to the streak, not
-    silently to 'other'.
+def test_tier2_is_promoted_not_blocked():
+    """THE CORRECTION THIS FILE EXISTS FOR.
 
-    Fixture: client 'a' joins at round 1 and is verified cleanly in rounds
-    1-3 (score 1.0, since pretrain_loss_var 0.6 sits at the window floor), so
-    its streak reaches 3 after round 3. Its logged trust is 0.9 throughout,
-    over theta_high, so the trust bar never blocks it.
+    schedule_verifications' Phase 1 ends with `else: P.add(cid)` -- Tier 2.
+    So a client with theta_low <= t_eff < theta_high, or with t_eff over
+    theta_high but a short streak, is SKIPPED, not blocked.
 
-    Every sampled-but-not-promoted round is attributed, verified rounds
-    included -- the breakdown is over non-promoted client-rounds, and a
-    verified client is by definition not promoted. The ramp is
-    1-exp(-(r-1)/5): 0.000, 0.181, 0.330, 0.451 at rounds 1-4, all below
-    theta_high=0.7, so rounds 1-4 are ALL ramp-blocked. By round 9 the ramp
-    is 0.798 and the streak is 3, so nothing blocks it and it falls to
-    'other'. Getting this fixture wrong the first time (expecting ramp=1) is
-    exactly why the arithmetic is spelled out here.
+    An earlier attribution used the Tier-3 condition
+    (t_eff >= theta_high AND streak >= k_trust) as the condition for being
+    skipped and reported everything failing it as "blocked", producing two
+    headline gates -- "trust bar blocks 140 client-rounds, streak blocks 81"
+    -- that were really counting Tier-2 clients the scheduler was skipping
+    happily. This test pins the branch that was missed.
+
+    Round 1 verifies a, b, c (never verified, so stale -> V, streak -> 1).
+    Round 10 has the ramp at 1 - exp(-9/5) = 0.835, so it no longer binds,
+    and trust is a=0.2 (Tier 1), b=0.60 and c=0.65 (both Tier 2: over
+    theta_low, under theta_high).
     """
-    osh = {str(r): {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}
-           for r in (1, 2, 3)}
-    rounds = {
-        "1": {"sampled": ["a"], "verified": ["a"]},
-        "2": {"sampled": ["a"], "verified": ["a"]},
-        "3": {"sampled": ["a"], "verified": ["a"]},
-        "4": {"sampled": ["a"]},                       # ramp still < 0.7
-        "9": {"sampled": ["a"]},                       # ramp 0.798, streak 3
-    }
-    trust = {rk: {"a": 0.9} for rk in rounds}
-    g = replay_gates(_run(rounds, trust, osh=osh))
-    assert g["verifications"] == 3, g
-    assert g["streak_reset"] == 0, "score 1.0 never resets the streak"
-    assert g["left_at_k"] == 1, (
-        "only the THIRD clean check leaves the client at streak >= 3; "
-        f"counting resets alone would miss that: {g}"
+    osh = {"1": {c: {"is_verified": True, "pretrain_loss_var": 0.6}
+                 for c in "abc"}}
+    rounds = {"1": {"sampled": list("abc"), "verified": list("abc")},
+              "10": {"sampled": list("abc"), "promoted": ["c"]}}
+    trust = {"1": {c: 0.5 for c in "abc"},
+             "10": {"a": 0.2, "b": 0.60, "c": 0.65}}
+    g = replay_schedule(_run(rounds, trust, osh=osh))
+    assert g["stale"] == 3, f"round 1: all three never verified: {g}"
+    assert g["tier1"] == 1, f"only 'a' is under theta_low: {g}"
+    assert g["tier2_tentative"] == 2, (
+        f"b and c are Tier 2 and MUST be tentatively promoted, not "
+        f"blocked -- this is the branch the old attribution missed: {g}"
     )
-    assert g["sampled"] == 5, g
-    assert g["ramp"] == 4, f"rounds 1-4 are all ramp-blocked: {g}"
-    assert g["other"] == 1, f"round 9 clears every gate: {g}"
-    assert g["trust_bar"] == 0, "logged trust is 0.9, over the bar"
-    assert g["streak"] == 0, (
-        "the streak gate is only reached once the ramp is cleared, which "
-        "happens first at round 9, by which point the streak is already 3"
-    )
-    print("✓ gate attribution separates trust bar / ramp / streak / other")
+    assert g["tier3_promoted"] == 0, "streak is 1, under k_trust=3"
+    print("✓ Tier 2 clients are promoted, not counted as blocked")
     return True
 
 
-def test_streak_blocks_a_client_that_clears_trust_and_ramp():
-    """The finding this guards: clean_streak is a SECOND eligibility gate,
-    and it blocks client-rounds the trust bar does not.
+def test_budget_demotes_lowest_trust_first_and_gamma_pre_exceeds_cap():
+    """Phase 2, hand-computed, and the reason gamma must be read BEFORE it.
 
-    Client 'b' joins at round 1, is verified ONCE with a clean score (streak
-    = 1), then is sampled again at round 20. Its logged trust is 0.9, over
-    theta_high, and the ramp is 1-exp(-19/5) = 0.978, well past it. The only
-    thing left is the streak, at 1 against k_trust=3.
+    Continuing the fixture above at round 10: V = {a} (Tier 1), tentative
+    P = {b, c}. With c_lambda = 8,
+        p(0.60) = sigmoid(0.8) = 0.690000
+        p(0.65) = sigmoid(1.2) = 0.768525
+    so sum_p = 1.458525 and gamma_pre = 1.458525 / (1 + 1.458525) = 0.59326
+    -- far above the 0.35 budget. The loop demotes the LOWEST-trust client,
+    b, leaving sum_p = 0.768525 and |V| = 2, so
+    gamma_post = 0.768525 / 2.768525 = 0.27759 <= 0.35 and it stops.
+
+    gamma_post sits comfortably under the cap while the budget was biting
+    hard. Reading only gamma_post is what made an earlier version of the
+    analysis report "the budget does not bind": it was reading the
+    constraint's own output, which the loop guarantees is under the cap.
     """
-    osh = {"1": {"b": {"is_verified": True, "pretrain_loss_var": 0.6}}}
-    rounds = {"1": {"sampled": ["b"], "verified": ["b"]},
-              "20": {"sampled": ["b"]}}
-    g = replay_gates(_run(rounds, {"1": {"b": 0.9}, "20": {"b": 0.9}},
-                          osh=osh))
-    assert g["streak"] == 1, f"round 20 must be streak-blocked: {g}"
-    assert g["trust_bar"] == 0 and g["other"] == 0, g
-    assert g["ramp"] == 1, "round 1 itself is ramp-blocked (ramp = 0 there)"
-    print("✓ clean_streak blocks a client that clears both trust and ramp")
+    import math as _m
+    osh = {"1": {c: {"is_verified": True, "pretrain_loss_var": 0.6}
+                 for c in "abc"}}
+    rounds = {"1": {"sampled": list("abc"), "verified": list("abc")},
+              "10": {"sampled": list("abc"), "promoted": ["c"]}}
+    trust = {"1": {c: 0.5 for c in "abc"},
+             "10": {"a": 0.2, "b": 0.60, "c": 0.65}}
+    g = replay_schedule(_run(rounds, trust, osh=osh))
+    pb = 1.0 / (1.0 + _m.exp(-8 * 0.10))
+    pc = 1.0 / (1.0 + _m.exp(-8 * 0.15))
+    pre = (pb + pc) / (1 + pb + pc)
+    post = pc / (2 + pc)
+    assert g["demoted_by_budget"] == 1, f"exactly b is demoted: {g}"
+    assert g["replay_promoted"] == 1, f"only c survives: {g}"
+    # Round 1 promotes nobody, so sum_p = 0 and its gamma is a structural 0
+    # -- a round where the budget CANNOT bind. It must be excluded from the
+    # mean, not averaged in: including it halved the figure here, and on the
+    # real sweep pulled 0.816 down to 0.775.
+    assert g["rounds_empty_pool"] == 1, f"round 1 has an empty pool: {g}"
+    assert abs(g["gamma_pre"] - pre) < 1e-9, (g["gamma_pre"], pre)
+    assert abs(g["gamma_pre_max"] - pre) < 1e-9, (g["gamma_pre_max"], pre)
+    assert abs(g["gamma_post"] - post) < 1e-9, (g["gamma_post"], post)
+    assert g["rounds_over_budget"] == 1, (
+        f"round 10's pre-demotion gamma 0.593 exceeds the 0.35 budget: {g}"
+    )
+    assert g["gamma_pre_max"] > TC["gamma_budget"] > post, (
+        "the budget bit hard (pre 0.593) yet gamma_post (0.278) sits under "
+        "the cap -- reading only the post value hides the constraint"
+    )
+    assert g["set_match"] == 2, (
+        f"both rounds must match the log: round 1 promotes nobody (empty "
+        f"set both sides) and round 10 promotes exactly {{'c'}}: {g}"
+    )
+    print("✓ the budget demotes lowest-trust first; gamma_pre exceeds the cap")
+    return True
+
+
+def test_stale_outranks_tier_and_decoy_is_separated():
+    """Branch order: is_stale is checked BEFORE any tier, and a Tier-3 client
+    drawn as a decoy goes to V while an undrawn one is promoted.
+
+    'd' is sampled at rounds 1-4 and again at round 20. Its last
+    verification is round 4, so at round 20 it is 16 rounds stale against
+    s_max_rounds = 10 -- staleness outranks its trust of 0.95 and its
+    streak of 3. Separately, at round 8 'e' has a streak of 4, is not stale,
+    and is over theta_high, and is logged as a decoy, so it must land in the
+    decoy column rather than Tier 3.
+
+    Round 8 and not round 5: the ramp is 1 - exp(-(r-1)/5), which is 0.551
+    at round 5 -- under theta_high, so the client would be Tier 2 and the
+    decoy branch would never be reached. At round 8 the ramp is 0.753 and
+    t_eff = min(0.95, 0.753) clears the bar. Getting this wrong is why the
+    ramp arithmetic is written out in every fixture here.
+    """
+    osh = {str(r): {c: {"is_verified": True, "pretrain_loss_var": 0.6}
+                    for c in "de"} for r in (1, 2, 3, 4)}
+    base = {str(r): {"sampled": list("de"), "verified": list("de")}
+            for r in (1, 2, 3, 4)}
+
+    stale_rounds = dict(base)
+    stale_rounds["20"] = {"sampled": ["d"]}
+    trust = {rk: {"d": 0.95, "e": 0.95} for rk in stale_rounds}
+    g = replay_schedule(_run(stale_rounds, trust, osh=osh))
+    assert g["stale"] >= 1, f"round 20 must be stale for 'd': {g}"
+
+    decoy_rounds = dict(base)
+    decoy_rounds["8"] = {"sampled": ["e"], "verified": ["e"], "decoy": ["e"]}
+    trust5 = {rk: {"d": 0.95, "e": 0.95} for rk in decoy_rounds}
+    g5 = replay_schedule(_run(decoy_rounds, trust5, osh=osh))
+    assert g5["decoy"] == 1, (
+        f"a Tier-3 client drawn as a decoy belongs in the decoy column, "
+        f"not Tier 3: {g5}"
+    )
+    print("✓ stale outranks tier; a Tier-3 decoy is counted separately")
     return True
 
 
 def test_streak_resets_on_low_score_and_on_detection():
     """The two reset paths must be counted separately, because which one
-    dominates is the finding: a score at or below 0.8 resets the streak even
-    when the detector is happy."""
-    # raw 1.4 -> score 1-(1.4-0.6)/0.9 = 0.111 <= 0.8, so a score reset.
+    dominates is a finding: a score at or below 0.8 resets the streak even
+    when the detector is happy. raw 1.4 gives
+    1 - (1.4-0.6)/0.9 = 0.111 <= 0.8, so that is a score reset."""
     osh = {"1": {"a": {"is_verified": True, "pretrain_loss_var": 1.4},
                  "b": {"is_verified": True, "pretrain_loss_var": 0.6}}}
     rounds = {"1": {"sampled": ["a", "b"], "verified": ["a", "b"]}}
-    g = replay_gates(_run(rounds, {"1": {"a": 0.9, "b": 0.9}}, osh=osh,
-                          detected={"1": ["b"]}))
+    g = replay_schedule(_run(rounds, {"1": {"a": 0.9, "b": 0.9}}, osh=osh,
+                             detected={"1": ["b"]}))
     assert g["verifications"] == 2, g
     assert g["reset_by_score"] == 1, f"a resets on score: {g}"
     assert g["reset_by_detector"] == 1, f"b resets on detection: {g}"
-    assert g["streak_reset"] == 2, g
+    assert g["streak_reset"] == 2 and g["left_at_k"] == 0, g
     print("✓ score resets and detector resets are counted separately")
     return True
 
 
-def test_replay_gates_returns_none_without_round_keyed_trust():
-    """The baseline predates the trust_by_round fix. The replay must say so
-    rather than silently reporting zeros, which would have put a row of 0.0
-    in the table and read as 'nothing blocks promotion'."""
-    osh = {"1": {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}}
-    assert replay_gates(_run({"1": {"sampled": ["a"]}}, {}, osh=osh)) is None
-    print("✓ replay_gates returns None when trust_by_round is empty")
-    return True
+def test_replay_refuses_a_run_without_the_logs_it_needs():
+    """Either log missing must give None, not plausible counts.
 
-
-def test_replay_needs_oracle_signals_or_it_invents_the_streak():
-    """REVIEW FINDING 1, the worst of them. Without oracle_signal_history
-    there is no behaviour score, so no streak can be replayed. Left
-    unguarded, every streak stayed at 0 and every client-round that cleared
-    the trust bar and ramp was blamed on the streak gate -- and the
-    "reset on X% of verifications" line that would have shown 0 verifications
-    is skipped by its own guard, so nothing warned.
-
-    TEST 3's headline number IS the streak count, so this is the difference
-    between a measurement and a number invented from a missing file. Both
-    replays must refuse.
+    With no trust_by_round there is no round-keyed trust (the baseline run
+    predates that fix). With no oracle_signal_history there is no behaviour
+    score, so every streak stays 0 -- which silently pushes Tier-3 clients
+    down into Tier 2 and misreports the decoy and budget columns.
     """
-    rounds = {str(r): {"sampled": ["a"], "verified": ["a"]} for r in (1, 2, 3)}
-    rounds["20"] = {"sampled": ["a"]}
-    trust = {rk: {"a": 0.9} for rk in rounds}
-    osh = {str(r): {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}
-           for r in (1, 2, 3)}
-
-    # With signals: streak reaches 3, so round 20 clears every gate.
-    g = replay_gates(_run(rounds, trust, osh=osh))
-    assert g["other"] == 1 and g["streak"] == 0, g
-
-    # Without them: must refuse, not report {ramp:3, streak:1}.
-    assert replay_gates(_run(rounds, trust, osh={})) is None, (
-        "replay_gates must refuse a run with no oracle signals"
+    osh = {"1": {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}}
+    rounds = {"1": {"sampled": ["a"], "verified": ["a"]}}
+    assert replay_schedule(_run(rounds, {}, osh=osh)) is None, (
+        "must refuse a run with no trust_by_round"
     )
-    assert cap_authority(_run(rounds, trust, osh={})) is None, (
-        "cap_authority replays the same streak and must refuse too -- with "
-        "every streak stuck at 0 it reports the cap as 100% redundant"
+    assert replay_schedule(_run(rounds, {"1": {"a": 0.9}}, osh={})) is None, (
+        "must refuse a run with no oracle signals"
     )
-    print("✓ both replays refuse a run with no oracle signals")
+    assert replay_schedule(_run(rounds, {"1": {"a": 0.9}}, osh=osh)) is not None
+    print("✓ the replay refuses a run missing either log it needs")
     return True
 
 
 def test_streak_advances_through_a_round_missing_from_trust_by_round():
-    """REVIEW FINDING 2. trust_by_round holds only rounds that produced
-    round_analytics -- test_trust_by_round_logging pins that a round can be
-    absent. The attribution needs trust and must skip such a round, but the
-    STREAK replay must not: skipping it drops that round's verifications and
-    leaves every later streak one short.
+    """trust_by_round holds only rounds that produced round_analytics --
+    test_trust_by_round_logging pins that a round can be absent. The
+    attribution needs trust and must skip such a round, but the STREAK
+    replay must not: skipping it drops that round's verifications and leaves
+    every later streak one short.
 
-    Fixture: 'a' verified cleanly in rounds 1-3, sampled at round 20. With
-    all three trust entries the streak is 3 and round 20 falls to 'other'.
-    Drop ONLY round 2's trust entry: round 2's verification must still count,
-    so round 20 must still be 'other'. Before the fix it flipped to
-    'streak'.
+    'a' is verified cleanly in rounds 1-4. Dropping round 2's trust entry
+    must not change the verification count or where the streak ends up.
     """
     osh = {str(r): {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}
-           for r in (1, 2, 3)}
-    rounds = {str(r): {"sampled": ["a"], "verified": ["a"]} for r in (1, 2, 3)}
-    rounds["20"] = {"sampled": ["a"]}
+           for r in (1, 2, 3, 4)}
+    rounds = {str(r): {"sampled": ["a"], "verified": ["a"]}
+              for r in (1, 2, 3, 4)}
     full = {rk: {"a": 0.9} for rk in rounds}
     partial = {rk: v for rk, v in full.items() if rk != "2"}
-
-    g_all = replay_gates(_run(rounds, full, osh=osh))
-    g_gap = replay_gates(_run(rounds, partial, osh=osh))
-    assert g_all["other"] == 1 and g_all["streak"] == 0, g_all
-    assert g_gap["verifications"] == 3, (
+    g_all = replay_schedule(_run(rounds, full, osh=osh))
+    g_gap = replay_schedule(_run(rounds, partial, osh=osh))
+    assert g_all["verifications"] == 4, g_all
+    assert g_gap["verifications"] == 4, (
         f"round 2's verification must still advance the streak: {g_gap}"
     )
-    assert g_gap["other"] == 1 and g_gap["streak"] == 0, (
-        f"round 20 must stay 'other'; the streak desynced: {g_gap}"
+    assert g_gap["left_at_k"] == g_all["left_at_k"], (
+        f"the streak desynced across the gap: {g_gap} vs {g_all}"
     )
     assert g_gap["skipped_no_trust"] == 1, (
         f"the untrusted round must be recorded, not silently dropped: {g_gap}"
     )
-    assert g_gap["sampled"] == g_all["sampled"] - 1, (
-        "the skipped round is excluded from attribution (no trust to "
-        f"attribute with) but only that one: {g_gap}"
-    )
+    assert g_gap["rounds"] == g_all["rounds"] - 1, g_gap
     print("✓ a round missing from trust_by_round still advances the streak")
+    return True
+
+
+def test_bootstrap_off_moves_first_appearances_from_stale_to_tier1():
+    """REVIEW FINDING 1. is_stale() reports a never-verified client as stale
+    only when bootstrap_verify_new_clients is True. With that ablation flag
+    off it returns False -- its own comment says a never-verified client
+    trivially passes the s_max caps -- so the client reaches the tier
+    branches and lands in Tier 1, because initial_trust 0.25 is under
+    theta_low 0.3.
+
+    Hardcoding the bootstrap put those client-rounds in the stale column and
+    made rates() subtract a floor that was not there, giving a NEGATIVE
+    forced-stale rate (-0.500 against a raw rate of 0.000).
+    """
+    osh = {"1": {c: {"is_verified": True, "pretrain_loss_var": 0.6}
+                 for c in "ab"}}
+    rounds = {"1": {"sampled": ["a", "b"], "verified": ["a", "b"]},
+              "2": {"sampled": ["a", "b"], "verified": ["a"],
+                    "promoted": ["b"]}}
+    trust = {"1": {"a": 0.2, "b": 0.2}, "2": {"a": 0.2, "b": 0.2}}
+
+    # Round 1: both clients are first appearances. Round 2: both have been
+    # verified so they are no longer stale, and trust 0.2 < theta_low 0.3
+    # puts them in Tier 1 either way -- so only the ROUND-1 pair moves
+    # between columns when the flag changes.
+    on = replay_schedule(_run(rounds, trust, osh=osh))
+    assert on["stale"] == 2 and on["tier1"] == 2, (
+        f"bootstrap ON: round 1 stale, round 2 Tier 1: {on}"
+    )
+
+    tc_off = dict(TC, bootstrap_verify_new_clients=False)
+    off = replay_schedule(_run(rounds, trust, osh=osh, tc=tc_off))
+    assert off["stale"] == 0, (
+        f"with the bootstrap OFF, a never-verified client is NOT stale: {off}"
+    )
+    assert off["tier1"] == 4, (
+        f"all four client-rounds fall through to Tier 1 instead "
+        f"(trust 0.2 < theta_low 0.3): {off}"
+    )
+    assert off["stale"] + off["tier1"] == on["stale"] + on["tier1"], (
+        "the flag moves client-rounds between the two columns; it must not "
+        "create or destroy any"
+    )
+
+    # And the floor rates() subtracts must follow the same flag.
+    r_on = rates(_run(rounds, trust, osh=osh))
+    r_off = rates(_run(rounds, trust, osh=osh, tc=tc_off))
+    assert r_on["bootstrap"] is True and r_off["bootstrap"] is False
+    assert r_off["forced_stale_net"] >= 0.0, (
+        f"no floor exists with the bootstrap off, so nothing may be "
+        f"subtracted; a negative rate is nonsense: {r_off}"
+    )
+    print("✓ the bootstrap flag moves first appearances stale -> tier1")
+    return True
+
+
+def test_logged_decoy_wins_over_a_replayed_tier():
+    """REVIEW FINDING 4. The decoy draw is ground truth from the log; the
+    replayed tier is a reconstruction. Testing the tier first meant a client
+    the scheduler really drew as a decoy, but whose replayed streak fell one
+    short, was counted as Tier 2 AND put into the tentative pool -- reported
+    as skipped when reality had verified it.
+
+    Fixture: 'a' is logged as a decoy at round 8 but has a streak of only 1
+    (one clean verification, at round 1), so the Tier-3 test fails. It must
+    still land in the decoy column and stay out of the pool.
+    """
+    osh = {"1": {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}}
+    rounds = {"1": {"sampled": ["a"], "verified": ["a"]},
+              "8": {"sampled": ["a"], "verified": ["a"], "decoy": ["a"]}}
+    trust = {"1": {"a": 0.9}, "8": {"a": 0.9}}
+    g = replay_schedule(_run(rounds, trust, osh=osh))
+    assert g["decoy"] == 1, (
+        f"the logged decoy must be read before the replayed tier: {g}"
+    )
+    assert g["tier2_tentative"] == 0, (
+        f"and it must NOT enter the tentative pool: {g}"
+    )
+    assert g["replay_promoted"] == 0, g
+    print("✓ a logged decoy is read before the replayed tier")
     return True
 
 
@@ -294,50 +406,6 @@ def test_rates_returns_none_for_a_run_with_no_cohort():
     assert len(diffs) == 1, f"seed 2 must be dropped, not indexed: {diffs}"
     assert diffs == [0.0], diffs
     print("✓ rates() returns None on an empty run and _paired drops it")
-    return True
-
-
-def test_cap_authority_is_safe_when_no_clock_ever_fires():
-    """REVIEW FINDING 3. A short run where no clock fires returned
-    forced == 0, and TEST 5's `blocked / forced` raised ZeroDivisionError
-    after every other section had already printed."""
-    osh = {"1": {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}}
-    c = cap_authority(_run({"1": {"sampled": ["a"], "verified": ["a"]}},
-                           {"1": {"a": 0.9}}, osh=osh))
-    assert c == {"forced": 0, "blocked": 0, "sampled": 1}, c
-    print("✓ cap_authority reports forced=0 instead of crashing the caller")
-    return True
-
-
-def test_gamma_trace_matches_the_schedulers_own_formula():
-    """Falsifier F2 is conditional on gamma not binding, so the replay has to
-    reproduce the scheduler's definition: gamma = sum_p / (|V| + sum_p) with
-    p_i = sigmoid(c_lambda * (t_eff - 0.5)).
-
-    Hand-computed fixture at round 1: one promoted client at trust 0.9 and
-    two verified. The ramp at r == join is 1 - exp(0) = 0, so t_eff = 0 and
-    p = sigmoid(8 * -0.5) = 1/(1+e^4) = 0.017986. gamma = p / (2 + p).
-    Round 20 repeats it past the ramp: t_eff = 0.9, p = sigmoid(3.2) =
-    0.960834, gamma = p / (2 + p).
-    """
-    import math as _m
-    rounds = {"1": {"promoted": ["a"], "verified": ["b", "c"],
-                    "sampled": ["a", "b", "c"]},
-              "20": {"promoted": ["a"], "verified": ["b", "c"],
-                     "sampled": ["a", "b", "c"]}}
-    trust = {rk: {"a": 0.9, "b": 0.9, "c": 0.9} for rk in rounds}
-    g = gamma_trace(_run(rounds, trust))
-    p1 = 1.0 / (1.0 + _m.exp(4.0))
-    p2 = 1.0 / (1.0 + _m.exp(-3.2))
-    assert len(g) == 2, g
-    assert abs(g[0] - p1 / (2 + p1)) < 1e-12, (g[0], p1 / (2 + p1))
-    assert abs(g[1] - p2 / (2 + p2)) < 1e-12, (g[1], p2 / (2 + p2))
-    # The ramp must matter: an unramped client contributes almost no weight.
-    assert g[0] < 0.01 < 0.3 < g[1], (
-        "if these collapse, get_effective_trust is not being applied"
-    )
-    assert gamma_trace(_run(rounds, {})) is None
-    print("✓ gamma_trace reproduces the scheduler's budget formula")
     return True
 
 
@@ -361,32 +429,6 @@ def test_load_runs_matches_load_seeds_on_suffixed_dirs():
     return True
 
 
-def test_cap_authority_splits_redundant_from_sole_authority():
-    """The counterfactual: a client-round the 4/10 cap would force, where the
-    trust-or-streak gate blocks it anyway, is redundant -- not authority.
-
-    Client 'a' is sampled every round 1..12 and never verified after round 1,
-    so by round 11 it is 10 rounds past its last verification and the
-    s_max_rounds=10 clock fires. Its trust is 0.9 (over the bar) and the ramp
-    is past 0.7 by then, but its streak is 1, below k_trust=3 -- so the gate
-    blocks it anyway and the cap is redundant.
-    """
-    osh = {"1": {"a": {"is_verified": True, "pretrain_loss_var": 0.6}}}
-    rounds = {str(r): {"sampled": ["a"], **({"verified": ["a"]} if r == 1
-                                            else {"promoted": ["a"]})}
-              for r in range(1, 13)}
-    c = cap_authority(_run(rounds, {str(r): {"a": 0.9} for r in range(1, 13)},
-                           osh=osh))
-    assert c["sampled"] == 12, c
-    assert c["forced"] > 0, "the 4/10 clocks must fire somewhere"
-    assert c["blocked"] == c["forced"], (
-        f"streak is 1 < k_trust=3 throughout, so every forced round is "
-        f"redundant: {c}"
-    )
-    print(f"✓ cap_authority marks all {c['forced']} forced rounds redundant")
-    return True
-
-
 def test_load_runs_rejects_a_duplicate_seed(tmp=None):
     """Two config subdirectories under one family is how a rerun silently
     swaps half a series. load_runs must raise, matching load_seeds."""
@@ -405,27 +447,25 @@ def test_load_runs_rejects_a_duplicate_seed(tmp=None):
             return True
     raise AssertionError("load_runs accepted two configs for one seed")
 
-
 def main():
     ok = [
         test_tavs_config_is_read_from_the_nested_block(),
         test_distinct_clients_counts_the_forced_stale_floor(),
         test_forced_stale_net_subtracts_the_first_appearance_floor(),
-        test_gate_attribution_order_and_streak_gate(),
-        test_streak_blocks_a_client_that_clears_trust_and_ramp(),
+        test_tier2_is_promoted_not_blocked(),
+        test_budget_demotes_lowest_trust_first_and_gamma_pre_exceeds_cap(),
+        test_stale_outranks_tier_and_decoy_is_separated(),
         test_streak_resets_on_low_score_and_on_detection(),
-        test_replay_gates_returns_none_without_round_keyed_trust(),
-        test_replay_needs_oracle_signals_or_it_invents_the_streak(),
+        test_replay_refuses_a_run_without_the_logs_it_needs(),
         test_streak_advances_through_a_round_missing_from_trust_by_round(),
+        test_bootstrap_off_moves_first_appearances_from_stale_to_tier1(),
+        test_logged_decoy_wins_over_a_replayed_tier(),
         test_rates_returns_none_for_a_run_with_no_cohort(),
-        test_cap_authority_is_safe_when_no_clock_ever_fires(),
-        test_gamma_trace_matches_the_schedulers_own_formula(),
         test_load_runs_matches_load_seeds_on_suffixed_dirs(),
-        test_cap_authority_splits_redundant_from_sole_authority(),
         test_load_runs_rejects_a_duplicate_seed(),
     ]
     if all(ok):
-        print("\n🎯 All staleness-analysis tests PASSED!")
+        print("\n\U0001F3AF All staleness-analysis tests PASSED!")
         return True
     return False
 

@@ -30,8 +30,8 @@ WHAT THIS SCRIPT MEASURES, AND WHY EACH PIECE
           each blocked client-round is attributed to one cause.
   TEST 4  accuracy on all four endpoints with CIs and a batch-split check,
           because "no difference" without a CI is not a result.
-  TEST 5  how much authority the cap had that nothing else had. A
-          counterfactual, and labelled as one.
+  TEST 5  WHY the null: the budget absorbs what the cap releases, as a
+          bookkeeping identity across the arms.
 
 CAVEAT CARRIED FROM THE SWEEP SCRIPT: byzantine_fraction is 0 in every run
 here. The staleness cap is an anti-drift / anti-Sybil guard. Costing nothing
@@ -117,10 +117,18 @@ def distinct_clients(run):
 def rates(run):
     """Per-client-round rates for one run.
 
-    forced_stale_net subtracts the first-appearance floor (one per distinct
-    client), so it is the rate at which the CAP itself fired. It can be
-    slightly negative only if a client is sampled without being counted
-    stale on its first appearance, which the scheduler does not do.
+    forced_stale_net subtracts the first-appearance floor, so it is the rate
+    at which the CAP itself fired rather than the rate at which anything was
+    stale.
+
+    THE FLOOR EXISTS ONLY WHEN THE BOOTSTRAP IS ON. is_stale() reports a
+    never-verified client as stale only when bootstrap_verify_new_clients is
+    True; with the ablation flag off it returns False and the client falls
+    through to the tier branches instead (landing in Tier 1, since
+    initial_trust 0.25 is under theta_low 0.3). Subtracting a floor that is
+    not there made forced_stale_net negative -- measured at -0.500 on a
+    bootstrap-off fixture whose raw rate was 0.000 -- so the floor is now
+    conditional on the flag.
 
     Returns None -- not {} -- for a run with no cohort, because every caller
     indexes the result by key. Returning {} turned one truncated run into a
@@ -132,52 +140,77 @@ def rates(run):
     if not cohort:
         return None
     fs = sum(r["num_forced_stale"] for r in h)
+    floor = (distinct_clients(run)
+             if tavs_config(run).get("bootstrap_verify_new_clients", True)
+             else 0)
     return {
         "skip": sum(r["num_promoted"] for r in h) / cohort,
         "verified": sum(r["num_verified"] for r in h) / cohort,
         "forced_stale_raw": fs / cohort,
-        "forced_stale_net": (fs - distinct_clients(run)) / cohort,
+        "forced_stale_net": (fs - floor) / cohort,
+        "bootstrap": bool(
+            tavs_config(run).get("bootstrap_verify_new_clients", True)),
     }
 
 
-def replay_gates(run):
-    """Attribute every non-promoted sampled client-round to what blocked it.
+def replay_schedule(run):
+    """Replay schedule_verifications -- BOTH phases -- and attribute every
+    sampled client-round to the branch that actually decided it.
 
-    Tier 3 needs t_eff >= theta_high AND clean_streak >= k_trust.
-      t_eff        = min(raw trust, 1 - exp(-(r - join)/tau_ramp))
-      clean_streak resets when the detector flags the client OR the behaviour
-                   score is <= 0.8, else increments; only on verification.
+    WHY THIS REPLACED AN EARLIER, WRONG ATTRIBUTION
+    A first version treated `t_eff >= theta_high AND clean_streak >= k_trust`
+    as the condition for being skipped, and reported everything failing it as
+    "blocked". That is the Tier THREE condition, not the condition for
+    skipping. The scheduler's Phase 1 is:
 
-    Trust comes from the round-keyed log (trust_by_round), not the ragged
-    trust_evolution lists, whose round alignment is unrecoverable. The streak
-    is replayed from oracle_signal_history + byzantine_detection_history
-    because the scheduler does not persist it.
+        if is_stale(c)            -> V      (hard expiry; never-verified too)
+        elif t_eff < theta_low    -> V      (Tier 1)
+        elif t_eff >= theta_high and streak >= k_trust:
+                                     V if the decoy roll hits else P   (Tier 3)
+        else                      -> P      (Tier 2, TENTATIVE)
 
-    Returns per-seed counts, or None when the run cannot support the replay:
+    Tier 2 is the final `else` and it PROMOTES. So a client under
+    theta_high, or with a short streak, is Tier 2 and gets skipped anyway --
+    it is not blocked at all. The old table's two headline "gates" (trust bar
+    140 client-rounds, streak 81) were counting Tier-2 clients that the
+    scheduler was happily skipping. This file's own
+    test_trust_by_round_logging docstring already said Tier 2 is tentatively
+    promoted; the attribution contradicted it.
+
+    Phase 2 is then the weight budget: sort the tentative P by ascending
+    effective trust and demote the lowest until
+    gamma = sum_p / (|V| + sum_p) <= gamma_budget.
+
+    FIDELITY. The replay reconstructs trust from the round-keyed log but
+    replays the streak and both staleness clocks, so it is close but not
+    exact: it reproduces the promoted COUNT to within ~2% while matching the
+    exact promoted SET in about a quarter of rounds. Counts are what the
+    attribution reports; `set_match` is returned so that limit stays visible
+    rather than implied.
+
+    Returns per-seed counts, or None when either log the replay needs is
+    absent (see the notes on trust_by_round and oracle_signal_history below).
       - trust_by_round empty: the run predates the logging fix (the baseline
-        does), so no round-keyed trust exists;
-      - oracle_signal_history empty: the run was trained without
-        --log-oracle-signals, so no behaviour score exists to advance the
-        streak. This case MUST return None rather than counts. Left
-        unguarded, every streak stayed at 0 and so every client-round that
-        cleared the trust bar and the ramp was blamed on the streak gate --
-        silently, since the "reset on X% of verifications" line is skipped by
-        its own zero-verification guard. On a 4-client-round fixture the
-        breakdown went from {ramp:3, other:1} to {ramp:3, streak:1}. TEST 3's
-        headline number is the streak count, so that was a number
-        manufactured from a missing file.
+        does), so no round-keyed trust exists.
+      - oracle_signal_history empty: no behaviour score exists, so no streak
+        can be replayed. Left unguarded every streak stays 0, which silently
+        pushes Tier-3 clients down into Tier 2 and misreports the decoy and
+        budget columns.
     """
     tc = tavs_config(run)
     tbr = run.get("trust_by_round") or {}
-    osh_raw = (run.get("final_trust_state") or {}).get(
+    osh = (run.get("final_trust_state") or {}).get(
         "oracle_signal_history") or {}
-    if not tbr or not osh_raw:
+    if not tbr or not osh:
         return None
     lo, hi = (tc["pretrain_loss_var_rescale_lo"],
               tc["pretrain_loss_var_rescale_hi"])
-    th, k, tau = tc["theta_high"], tc["k_trust"], tc.get("tau_ramp", 5.0)
+    th_lo, th_hi = tc["theta_low"], tc["theta_high"]
+    k, tau = tc["k_trust"], tc.get("tau_ramp", 5.0)
+    sa, sr = tc["s_max_appearances"], tc["s_max_rounds"]
+    cl, budget = tc.get("c_lambda", 8.0), tc["gamma_budget"]
+    bootstrap = tc.get("bootstrap_verify_new_clients", True)
     ra = run["round_assignments"]
-    osh = (run["final_trust_state"].get("oracle_signal_history") or {})
     det = {str(x["round"]): set(x.get("detected") or [])
            for x in (run.get("byzantine_detection_history") or [])}
 
@@ -186,184 +219,126 @@ def replay_gates(run):
         for c in (ra[rk].get("sampled") or []):
             join.setdefault(c, int(rk))
 
-    out = {"sampled": 0, "promoted": 0, "trust_bar": 0, "ramp": 0,
-           "streak": 0, "decoy": 0, "other": 0,
+    def posterior(t):
+        return 1.0 / (1.0 + math.exp(-cl * (t - 0.5)))
+
+    out = {"sampled": 0, "rounds": 0, "logged_promoted": 0,
+           "stale": 0, "tier1": 0, "decoy": 0, "tier2_tentative": 0,
+           "tier3_promoted": 0, "demoted_by_budget": 0, "replay_promoted": 0,
            "verifications": 0, "streak_reset": 0, "reset_by_score": 0,
-           "reset_by_detector": 0, "skipped_no_trust": 0,
-           "left_at_k": 0}
-    streak = {}
-    for rk in sorted(ra, key=int):
-        r, cats = int(rk), ra[rk]
-        sampled = cats.get("sampled") or []
-        prom = set(cats.get("promoted") or [])
-        decoy = set(cats.get("decoy") or [])
-        ver = set(cats.get("verified") or [])
-        # ATTRIBUTE only where trust was logged, but ADVANCE the streak
-        # always. A round present in round_assignments and absent from
-        # trust_by_round is a real case -- trust_by_round holds only rounds
-        # that produced round_analytics, which test_trust_by_round_logging
-        # pins explicitly. Skipping the whole round, as this loop first did,
-        # dropped that round's verifications from the replay and left every
-        # later streak one short: in a fixture with 'a' verified in rounds
-        # 1-3 and sampled at round 20, dropping round 2's trust entry flipped
-        # round 20 from 'other' to 'streak'. The skipped round is still
-        # excluded from the attribution counts, since there is no trust to
-        # attribute it with -- out["skipped_no_trust"] records how many.
-        if rk in tbr:
-            out["sampled"] += len(sampled)
-            out["promoted"] += len(prom)
-            for c in sampled:
-                if c in prom:
-                    continue
-                raw = tbr[rk].get(c, 0.0)
-                cap = 1.0 - math.exp(-(r - join.get(c, r)) / tau)
-                if raw < th:
-                    out["trust_bar"] += 1
-                elif min(raw, cap) < th:
-                    out["ramp"] += 1
-                elif streak.get(c, 0) < k:
-                    out["streak"] += 1
-                elif c in decoy:
-                    out["decoy"] += 1
-                else:
-                    out["other"] += 1
-        else:
-            out["skipped_no_trust"] += 1
-        # advance the streak on this round's verifications -- unconditionally
-        for c in ver:
-            e = (osh.get(rk) or {}).get(c) or {}
-            v = e.get("pretrain_loss_var")
-            if v is None:
-                continue
-            b = 1.0 - max(0.0, min(1.0, (float(v) - lo) / (hi - lo)))
-            out["verifications"] += 1
-            flagged = c in det.get(rk, set())
-            if flagged or b <= SCORE_STREAK_CUTOFF:
-                streak[c] = 0
-                out["streak_reset"] += 1
-                out["reset_by_detector" if flagged else "reset_by_score"] += 1
-            else:
-                streak[c] = streak.get(c, 0) + 1
-            # Does this check leave the client actually skippable? Counting
-            # resets alone understates the gate: a client can be reset, climb
-            # back to 1, be reset again, and never stand at k.
-            if streak.get(c, 0) >= k:
-                out["left_at_k"] += 1
-    return out
-
-
-def cap_authority(run):
-    """COUNTERFACTUAL: of the client-rounds the 4/10 cap would have forced to
-    verify, how many were blocked by the trust-or-streak gate anyway?
-
-    Replays the 4/10 clocks over a no-expiry run's REALIZED schedule. That is
-    not the same as having run 4/10 -- the schedule would have diverged -- so
-    the "freed" figure is an upper bound on the cap's unique authority, not a
-    prediction of the skip rate. Reported as such.
-
-    Returns None unless BOTH logs the replay needs are present, for the same
-    reason replay_gates does: with no oracle signals every streak stays 0, so
-    every forced client-round looks gate-blocked and the cap looks entirely
-    redundant -- the conclusion, manufactured from a missing file.
-    """
-    tc = tavs_config(run)
-    tbr = run.get("trust_by_round") or {}
-    osh_raw = (run.get("final_trust_state") or {}).get(
-        "oracle_signal_history") or {}
-    if not tbr or not osh_raw:
-        return None
-    lo, hi = (tc["pretrain_loss_var_rescale_lo"],
-              tc["pretrain_loss_var_rescale_hi"])
-    th, k, tau = tc["theta_high"], tc["k_trust"], tc.get("tau_ramp", 5.0)
-    ra = run["round_assignments"]
-    osh = (run["final_trust_state"].get("oracle_signal_history") or {})
-    det = {str(x["round"]): set(x.get("detected") or [])
-           for x in (run.get("byzantine_detection_history") or [])}
-    join = {}
-    for rk in sorted(ra, key=int):
-        for c in (ra[rk].get("sampled") or []):
-            join.setdefault(c, int(rk))
-
+           "reset_by_detector": 0, "left_at_k": 0,
+           "set_match": 0, "skipped_no_trust": 0,
+           "rounds_over_budget": 0, "rounds_empty_pool": 0}
+    gamma_pre, gamma_post = [], []
     streak, app, lastv = {}, {}, {}
-    forced = blocked = sampled = 0
     for rk in sorted(ra, key=int):
         r, cats = int(rk), ra[rk]
         S = cats.get("sampled") or []
-        sampled += len(S)
-        for c in S:
-            would_force = (app.get(c, 0) >= 4
-                           or (r - lastv.get(c, join.get(c, r))) >= 10)
-            if not would_force:
-                continue
-            forced += 1
-            raw = tbr.get(rk, {}).get(c, 0.0)
-            eff = min(raw, 1.0 - math.exp(-(r - join.get(c, r)) / tau))
-            if eff < th or streak.get(c, 0) < k:
-                blocked += 1
+        logged_P = set(cats.get("promoted") or [])
         ver = set(cats.get("verified") or [])
-        prom = set(cats.get("promoted") or [])
+        decoy = set(cats.get("decoy") or [])
+        if rk not in tbr:
+            out["skipped_no_trust"] += 1
+        else:
+            out["rounds"] += 1
+            out["sampled"] += len(S)
+            out["logged_promoted"] += len(logged_P)
+            # ---- PHASE 1 ----
+            V, P, eff = set(), set(), {}
+            for c in S:
+                t = min(tbr[rk].get(c, 0.0),
+                        1.0 - math.exp(-(r - join.get(c, r)) / tau))
+                eff[c] = t
+                never = c not in lastv
+                # The never-verified case is stale only under the bootstrap;
+                # with the ablation flag off, is_stale falls through to the
+                # s_max checks, which a never-verified client trivially
+                # passes, so it reaches the tier branches instead.
+                if ((never and bootstrap)
+                        or (not never and (app.get(c, 0) >= sa
+                                           or (r - lastv[c]) >= sr))):
+                    V.add(c)
+                    out["stale"] += 1
+                elif t < th_lo:
+                    V.add(c)
+                    out["tier1"] += 1
+                elif c in decoy:
+                    # Read the LOGGED decoy set before the tier test. The
+                    # decoy draw is ground truth; the replayed tier is not.
+                    # Testing tier first meant a client the scheduler really
+                    # drew as a decoy, but whose replayed streak fell one
+                    # short, was counted as Tier 2 AND entered the tentative
+                    # pool -- reported as skipped when reality verified it.
+                    V.add(c)
+                    out["decoy"] += 1
+                elif t >= th_hi and streak.get(c, 0) >= k:
+                    P.add(c)
+                    out["tier3_promoted"] += 1
+                else:
+                    P.add(c)
+                    out["tier2_tentative"] += 1
+            # ---- PHASE 2: the weight budget ----
+            def gamma_of(Pset, Vset):
+                sp = sum(posterior(eff[c]) for c in Pset)
+                z = len(Vset) + sp
+                return (sp / z) if z > 0 else 0.0
+            # Record gamma_pre only for rounds whose tentative pool is
+            # non-empty. A round with nothing promoted has sum_p = 0, so its
+            # gamma is a structural 0 and the budget cannot bind there;
+            # averaging those in understated the figure (0.775 against 0.816
+            # over 400 rounds, 20 of them empty) and would flip a borderline
+            # verdict the unconservative way on a looser budget.
+            if P:
+                g_pre = gamma_of(P, V)
+                gamma_pre.append(g_pre)
+                if g_pre > budget:
+                    out["rounds_over_budget"] += 1
+            else:
+                out["rounds_empty_pool"] += 1
+            order = sorted(P, key=lambda c: eff[c])
+            while P and gamma_of(P, V) > budget:
+                c = order.pop(0)
+                P.discard(c)
+                V.add(c)
+                out["demoted_by_budget"] += 1
+            if P:
+                gamma_post.append(gamma_of(P, V))
+            out["replay_promoted"] += len(P)
+            if P == logged_P:
+                out["set_match"] += 1
+        # ---- advance trust clocks and the streak, every round ----
         for c in S:
             if c in ver:
                 app[c] = 0
                 lastv[c] = r
                 e = (osh.get(rk) or {}).get(c) or {}
                 v = e.get("pretrain_loss_var")
-                if v is not None:
-                    b = 1.0 - max(0.0, min(1.0, (float(v) - lo) / (hi - lo)))
-                    streak[c] = (0 if (c in det.get(rk, set())
-                                       or b <= SCORE_STREAK_CUTOFF)
-                                 else streak.get(c, 0) + 1)
-            elif c in prom:
+                if v is None:
+                    continue
+                b = 1.0 - max(0.0, min(1.0, (float(v) - lo) / (hi - lo)))
+                out["verifications"] += 1
+                flagged = c in det.get(rk, set())
+                if flagged or b <= SCORE_STREAK_CUTOFF:
+                    streak[c] = 0
+                    out["streak_reset"] += 1
+                    out["reset_by_detector" if flagged
+                        else "reset_by_score"] += 1
+                else:
+                    streak[c] = streak.get(c, 0) + 1
+                if streak.get(c, 0) >= k:
+                    out["left_at_k"] += 1
+            elif c in logged_P:
                 app[c] = app.get(c, 0) + 1
-    return {"forced": forced, "blocked": blocked, "sampled": sampled}
-
+    out["gamma_pre"] = statistics.mean(gamma_pre) if gamma_pre else float("nan")
+    out["gamma_post"] = (statistics.mean(gamma_post) if gamma_post
+                         else float("nan"))
+    out["gamma_pre_max"] = max(gamma_pre) if gamma_pre else float("nan")
+    return out
 
 def mean_rate(runs, key):
     """Mean of one rate over runs, skipping any run rates() cannot measure."""
     vals = [r[key] for r in (rates(x) for x in runs) if r]
     return statistics.mean(vals) if vals else float("nan")
-
-
-def gamma_trace(run):
-    """Realized gamma per round: sum_p / (|V| + sum_p), from logged trust.
-
-    Falsifier F2 is conditional on "gamma still not binding", so the budget
-    has to be measured, not assumed. The scheduler demotes the lowest-trust
-    promoted clients until gamma <= gamma_budget, so a round where the budget
-    bound exits the loop sitting just under the cap. Rounds near the cap are
-    therefore the ones where it plausibly bound; rounds well below it are
-    rounds where the budget had slack it never used.
-
-    Uses the same posterior weight the scheduler uses,
-    sigmoid(c_lambda * (t_eff - 0.5)), on effective trust.
-
-    Returns a list of per-round gammas, or None when trust is not logged.
-    """
-    tc = tavs_config(run)
-    tbr = run.get("trust_by_round") or {}
-    if not tbr:
-        return None
-    cl, tau = tc.get("c_lambda", 8.0), tc.get("tau_ramp", 5.0)
-    ra = run["round_assignments"]
-    join = {}
-    for rk in sorted(ra, key=int):
-        for c in (ra[rk].get("sampled") or []):
-            join.setdefault(c, int(rk))
-    out = []
-    for rk in sorted(ra, key=int):
-        if rk not in tbr:
-            continue
-        r = int(rk)
-        P = ra[rk].get("promoted") or []
-        V = ra[rk].get("verified") or []
-        sp = 0.0
-        for c in P:
-            t = min(tbr[rk].get(c, 0.0),
-                    1.0 - math.exp(-(r - join.get(c, r)) / tau))
-            sp += 1.0 / (1.0 + math.exp(-cl * (t - 0.5)))
-        z = len(V) + sp
-        out.append(sp / z if z > 0 else 0.0)
-    return out
 
 
 def _paired(ref_runs, arm_runs, key):
@@ -454,74 +429,118 @@ def main():
     print(f"  baseline skip rate (caps  4/10) : {sk_ref:.1%}")
     print(f"  no-expiry skip rate (caps 40/40): {sk40:.1%}"
           f"   ({(sk40 - sk_ref) * 100:+.1f} points)")
-    # F2 is conditional on gamma still not binding, so measure it.
+
+    # F2 is conditional on gamma still not binding, so measure it -- BEFORE
+    # the demotion loop. Reading gamma after the loop is circular: the loop
+    # runs until gamma <= gamma_budget, so the post value is <= the cap by
+    # construction no matter how hard the budget bit. An earlier version of
+    # this script measured only the post value, saw 0.268 against a 0.35 cap,
+    # and concluded the budget was slack. It is not: pre-demotion gamma is
+    # 0.775 and the loop demotes about 200 client-rounds per seed.
     budget = tavs_config(next(iter(arms[NO_EXPIRY].values())))["gamma_budget"]
-    print(f"\n  the weight budget (gamma_budget = {budget}):")
-    gamma_slack = True
+    print(f"\n  the weight budget (gamma_budget = {budget}), measured BEFORE")
+    print("  the demotion loop as well as after:")
+    print("  (rounds with an empty tentative pool are excluded: sum_p = 0")
+    print("  makes their gamma a structural 0 where the budget cannot bind)")
+    print(f"    {'arm':<22} {'gamma pre':>10} {'max':>6} {'post':>6} "
+          f"{'over cap':>14} {'demoted/seed':>13}")
+    print("    " + "-" * 76)
+    gamma_binds = False
     for name, runs in arms.items():
-        gs = [g for g in (gamma_trace(r) for r in runs.values()) if g]
-        flat = [x for g in gs for x in g]
-        if not flat:
+        gs = [g for g in (replay_schedule(r) for r in runs.values()) if g]
+        if not gs:
             continue
-        near = sum(1 for x in flat if x > budget - 0.01)
-        print(f"    {name:<24} mean {statistics.mean(flat):.3f}  "
-              f"max {max(flat):.3f}  within 0.01 of the cap in "
-              f"{near}/{len(flat)} rounds ({near / len(flat):.1%})")
-        if near / len(flat) >= 0.20:
-            gamma_slack = False
-    print(f"    -> gamma {'does NOT bind' if gamma_slack else 'DOES bind'}")
+        n = len(gs)
+        pre = statistics.mean(g["gamma_pre"] for g in gs)
+        over = sum(g["rounds_over_budget"] for g in gs)
+        live = sum(g["rounds"] - g["rounds_empty_pool"] for g in gs)
+        print(f"    {name:<22} {pre:>10.3f} "
+              f"{max(g['gamma_pre_max'] for g in gs):>6.3f} "
+              f"{statistics.mean(g['gamma_post'] for g in gs):>6.3f} "
+              f"{over}/{live} ({over / live:.0%})".ljust(0)
+              + f"{sum(g['demoted_by_budget'] for g in gs) / n:>10.1f}")
+        if pre > budget:
+            gamma_binds = True
+    print(f"    -> the budget {'DOES bind' if gamma_binds else 'does NOT bind'}")
     print()
     if sk40 >= 0.50:
         print("  F1 FIRES: the caps WERE the limiter.")
-    elif abs(sk40 - sk_ref) < 0.05 and gamma_slack:
-        print("  F2 FIRES, both clauses: the skip rate is unchanged with the")
-        print("            cap fully removed, AND gamma still does not bind.")
-        print("            NEITHER cap was the limiter. The prediction is")
-        print("            FALSIFIED.")
+    elif abs(sk40 - sk_ref) < 0.05 and not gamma_binds:
+        print("  F2 FIRES, both clauses: skip rate unchanged AND gamma slack.")
     elif abs(sk40 - sk_ref) < 0.05:
-        print("  F2 PARTIAL: skip rate unchanged, but gamma binds -- so the")
-        print("            budget, not trust eligibility, is the next ceiling.")
+        print("  NEITHER falsifier fires as written. F1 needed a skip rate")
+        print("  >= 50%; F2 needed gamma NOT binding. What happened instead:")
+        print("  the caps are not the limiter AND the weight budget is -- the")
+        print("  prediction's second ceiling turns out to be the first one.")
     else:
         print("  PARTIAL: the caps matter but not for the whole gap.")
 
-    section("TEST 3  what actually gates promotion?")
-    print("  Tier 3 needs t_eff >= theta_high AND clean_streak >= k_trust.")
-    print("  Every non-promoted sampled client-round attributed to one cause,")
-    print("  checked in that order. Per seed, out of 400 client-rounds.")
-    print(f"\n  {'arm':<24} {'promoted':>9} {'trust<bar':>10} {'ramp':>6} "
-          f"{'streak':>7} {'decoy':>6} {'other':>6}")
-    print("  " + "-" * 73)
+    section("TEST 3  what actually decides each client-round?")
+    print("  The scheduler's own Phase-1 branch order. Tier 2 is the final")
+    print("  `else` and it PROMOTES, so a client under theta_high or with a")
+    print("  short streak is skipped anyway -- it is NOT blocked. Then Phase 2")
+    print("  demotes from the tentative pool until gamma <= gamma_budget.")
+    _g0 = [g for g in (replay_schedule(r)
+                       for r in arms[NO_EXPIRY].values()) if g]
+    if _g0:
+        print(f"  Per seed, out of "
+              f"{sum(g['sampled'] for g in _g0) / len(_g0):.0f} sampled "
+              f"client-rounds over "
+              f"{sum(g['rounds'] for g in _g0) / len(_g0):.0f} rounds"
+              + (f" ({sum(g['skipped_no_trust'] for g in _g0)} round(s) "
+                 f"excluded for lack of a trust log -- TEST 1's rate spans "
+                 f"ALL rounds, so the two differ)"
+                 if sum(g["skipped_no_trust"] for g in _g0) else "."))
+    print(f"\n  {'arm':<22} {'T3 prom':>8} {'T2 tent':>8} {'stale':>6} "
+          f"{'tier1':>6} {'decoy':>6} {'demoted':>8} {'= skipped':>10}")
+    print("  " + "-" * 80)
     for label, runs in [(REF_LABEL, ref_runs)] + list(arms.items()):
-        gs = [g for g in (replay_gates(r) for r in runs.values()) if g]
+        gs = [g for g in (replay_schedule(r) for r in runs.values()) if g]
         if not gs:
-            print(f"  {label:<24} {'-- no round-keyed trust log (predates the '
-                                  'logging fix)':>46}")
+            print(f"  {label:<22} -- no round-keyed trust log "
+                  f"(predates the logging fix)")
             continue
         n = len(gs)
-        print(f"  {label:<24} "
+        print(f"  {label:<22} "
               + " ".join(f"{sum(g[k] for g in gs) / n:>{w}.1f}"
-                         for k, w in (("promoted", 9), ("trust_bar", 10),
-                                      ("ramp", 6), ("streak", 7),
-                                      ("decoy", 6), ("other", 6))))
-    print("\n  The streak gate: how often is it reset, and by what?")
+                         for k, w in (("tier3_promoted", 8),
+                                      ("tier2_tentative", 8), ("stale", 6),
+                                      ("tier1", 6), ("decoy", 6),
+                                      ("demoted_by_budget", 8),
+                                      ("replay_promoted", 10))))
+    print("\n  Replay fidelity (counts are what the table reports):")
     for label, runs in arms.items():
-        gs = [g for g in (replay_gates(r) for r in runs.values()) if g]
+        gs = [g for g in (replay_schedule(r) for r in runs.values()) if g]
+        if not gs:
+            continue
+        n = len(gs)
+        rp = sum(g["replay_promoted"] for g in gs) / n
+        lp = sum(g["logged_promoted"] for g in gs) / n
+        rounds = sum(g["rounds"] for g in gs)
+        print(f"    {label:<22} replayed {rp:.1f} vs logged {lp:.1f} promoted "
+              f"({abs(rp - lp) / lp:.1%} off); exact set match in "
+              f"{sum(g['set_match'] for g in gs)}/{rounds} rounds")
+    print("\n  The streak gate still matters, but for TIER, not for skipping:")
+    for label, runs in arms.items():
+        gs = [g for g in (replay_schedule(r) for r in runs.values()) if g]
         v = sum(g["verifications"] for g in gs)
         if not v:
             continue
-        print(f"    {label:<24} reset on "
+        print(f"    {label:<22} streak reset on "
               f"{sum(g['streak_reset'] for g in gs) / v:>5.1%} of "
-              f"verifications  "
+              f"verifications "
               f"(score<=0.8 {sum(g['reset_by_score'] for g in gs) / v:.1%}, "
               f"detector {sum(g['reset_by_detector'] for g in gs) / v:.1%})"
-              f"; left standing at streak>=k_trust: "
-              f"{sum(g['left_at_k'] for g in gs) / v:.1%}")
+              f"; left at streak>=k_trust {sum(g['left_at_k'] for g in gs) / v:.1%}")
     tc = tavs_config(next(iter(arms[NO_EXPIRY].values())))
     lo, hi = (tc["pretrain_loss_var_rescale_lo"],
               tc["pretrain_loss_var_rescale_hi"])
     print(f"    a score > {SCORE_STREAK_CUTOFF} needs pretrain_loss_var < "
           f"{lo + (1 - SCORE_STREAK_CUTOFF) * (hi - lo):.3f}  "
           f"(window {lo}-{hi})")
+    print("\n  A short streak demotes a client from Tier 3 to Tier 2. Tier 2")
+    print("  still promotes, so the cost is losing the decoy exemption and")
+    print("  being first in line for budget demotion -- not being blocked.")
     print("\n  Read with care: trust and the streak only update on")
     print("  verification, so a client held below the bar is partly held")
     print("  there BY being skipped. This sizes the gates; it does not")
@@ -545,36 +564,45 @@ def main():
               f"+-{ci_halfwidth(diffs):.4f}   "
               f"seeds1-5 {low:+.4f} / 6-10 {high:+.4f}  agree={verdict}")
 
-    section("TEST 5  how much authority did the cap have? (COUNTERFACTUAL)")
-    cs = [c for c in (cap_authority(r) for r in arms[NO_EXPIRY].values()) if c]
-    if not cs:
-        print("  -- no run supports the replay (needs trust_by_round and")
-        print("     oracle_signal_history); skipped.")
-    elif not sum(c["forced"] for c in cs):
-        # Guarding this is not cosmetic: a short sweep in which no clock ever
-        # fires made `blocked / forced` raise ZeroDivisionError here, after
-        # every gate and test above had already printed, so the script exited
-        # 1 on a traceback instead of reporting its verdict.
-        print("  the replayed 4/10 clocks never fire in these runs, so the")
-        print("  cap has no authority to measure; skipped.")
-    else:
-        n = len(cs)
-        f = sum(c["forced"] for c in cs) / n
-        b = sum(c["blocked"] for c in cs) / n
-        s = sum(c["sampled"] for c in cs) / n
-        print(f"  client-rounds the 4/10 cap would have forced : {f:.1f}/seed")
-        print(f"    blocked by the trust-or-streak gate anyway : {b:.1f}"
-              f"  ({b / f:.1%})  <- the cap was redundant here")
-        print(f"    where the cap had sole authority           : {f - b:.1f}"
-              f"  ({(f - b) / s:.1%} of {s:.0f} client-rounds)")
-        print(f"\n  That {(f - b) / s:.1%} is an UPPER BOUND, and TEST 1 shows")
-        print("  even it did not materialise: the measured skip-rate change is")
-        print("  0.0 points with a CI of +-0.4 points, which excludes it. The")
-        print("  replay runs 4/10 clocks over a no-expiry run's realized")
-        print("  schedule, so it cannot account for decoy draws, the weight")
-        print("  budget, or the feedback by which extra skipping starves the")
-        print("  very trust updates that make a client eligible later.")
-
+    section("TEST 5  WHY the null -- the budget absorbs what the cap releases")
+    print("  If the budget is the binding constraint, relaxing the staleness")
+    print("  cap cannot raise the skip rate: clients the cap stops forcing")
+    print("  into V simply enter the tentative pool, and the demotion loop")
+    print("  sends the surplus straight back. That predicts a specific")
+    print("  bookkeeping identity -- stale falls, tentative promotions and")
+    print("  budget demotions rise by about the same amount, and the number")
+    print("  actually promoted does not move.")
+    print(f"\n  {'arm':<22} {'stale':>7} {'tentative':>10} "
+          f"{'demoted':>8} {'promoted':>9}")
+    print("  " + "-" * 60)
+    rows = []
+    for label, runs in arms.items():
+        gs = [g for g in (replay_schedule(r) for r in runs.values()) if g]
+        if not gs:
+            continue
+        n = len(gs)
+        row = {k: sum(g[k] for g in gs) / n
+               for k in ("stale", "tier2_tentative", "tier3_promoted",
+                         "demoted_by_budget", "replay_promoted")}
+        row["tentative"] = row["tier2_tentative"] + row["tier3_promoted"]
+        rows.append((label, row))
+        print(f"  {label:<22} {row['stale']:>7.1f} {row['tentative']:>10.1f} "
+              f"{row['demoted_by_budget']:>8.1f} "
+              f"{row['replay_promoted']:>9.1f}")
+    if len(rows) >= 2:
+        (_, a), (_, b) = rows[0], rows[-1]
+        d_stale = b["stale"] - a["stale"]
+        d_tent = b["tentative"] - a["tentative"]
+        d_dem = b["demoted_by_budget"] - a["demoted_by_budget"]
+        d_prom = b["replay_promoted"] - a["replay_promoted"]
+        print(f"\n  first arm -> last arm:  stale {d_stale:+.1f}, "
+              f"tentative {d_tent:+.1f}, demoted {d_dem:+.1f}, "
+              f"promoted {d_prom:+.1f}")
+        print(f"  the cap released {-d_stale:.1f} client-rounds; the budget")
+        print(f"  demoted {d_dem:+.1f} more of them, leaving promotion "
+              f"{d_prom:+.1f}.")
+        print("  That is the whole explanation of TEST 1's null, and it is a")
+        print("  structural count rather than a noisy accuracy difference.")
     section("CAVEAT")
     print("  byzantine_fraction = 0 in every run here. The staleness cap is")
     print("  an anti-drift / anti-Sybil guard. Costing nothing WITHOUT an")

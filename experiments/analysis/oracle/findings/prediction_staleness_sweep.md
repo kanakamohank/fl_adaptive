@@ -134,44 +134,45 @@ SAME machine; mixing machines is strictly worse. The numbers above are the
 record.
 
 ---
+# SETTLED at 10 seeds, all three arms (2026-11-13)
 
-# CONFIRMED at 10 seeds, all three arms (2026-11-13)
-
-The full sweep ran on the user's machine. Three arms (8/20, 12/30, 40/40),
-10 seeds each, against `results/sweep_a10_twagg` (caps 4/10) already on
-disk. Reproduce with:
+The full sweep ran on the user's machine: three arms (8/20, 12/30, 40/40),
+10 seeds each, against `results/sweep_a10_twagg` (caps 4/10). Reproduce:
 
     python3 experiments/analysis/oracle/staleness.py
+
+**Correction notice.** A first pass at this analysis reported that the
+limiter was "trust eligibility" -- `theta_high` plus the `clean_streak`
+gate -- and that the weight budget did not bind. Both claims were wrong,
+for two independent reasons, and the section they appeared in has been
+removed rather than amended. The errors are documented at the end of this
+file, because each is a reasoning trap that will recur.
 
 ## The arms are comparable, and the cap really was switched off
 
 Every arm differs from the baseline in exactly two config fields,
-`s_max_appearances` and `s_max_rounds`, and in nothing else. All four
-families have the same 10 seeds in a single config subdirectory.
+`s_max_appearances` and `s_max_rounds`. All four families have the same 10
+seeds in a single config subdirectory.
 
-The cap's own firing rate is logged, so this is measured rather than
-assumed. One subtlety had to be handled first: a client that has NEVER been
-verified is stale by definition, so its first-ever appearance is counted as
-forced-stale at any cap setting. That floor is exactly one event per
-distinct client -- 50 of 400 client-rounds, 12.5% -- and it must be
-subtracted before the number means anything. (A first pass did not subtract
-it, read the residual 12.5% as "the cap is still firing", and wrongly
-declared the whole sweep uninterpretable.)
+The cap's firing rate is logged, so this is measured. One subtlety first: a
+client that has never been verified is stale **by definition**
+(`is_stale` returns True when `last_verified_round` is unset), so its
+first-ever appearance counts as forced-stale at any cap setting. That floor
+is exactly one event per distinct client -- 50 of 400 client-rounds, 12.5%.
 
-| caps | skip | verified | forced-stale (raw) | forced-stale (net of floor) |
+| caps | skip | verified | forced-stale (raw) | net of the floor |
 |---|---|---|---|---|
 | 4 / 10 (baseline) | 32.1% | 67.9% | 27.9% | **15.4%** |
 | 8 / 20 | 32.1% | 67.9% | 13.9% | 1.4% |
 | 12 / 30 | 31.9% | 68.1% | 12.7% | 0.1% |
 | 40 / 40 (no expiry) | 32.1% | 67.9% | 12.5% | **0.0%** |
 
-Clean monotone to zero. At the default the cap forced re-verification on
-15.4% of client-rounds; in the no-expiry arm it never fires at all. The arms
-test what they claim.
+Monotone to zero. At the default the cap forced re-verification on 15.4% of
+client-rounds; in the no-expiry arm it never fires. The arms did their job.
 
 ## The skip rate did not move
 
-Paired per seed, n = 10, significance bar |t| > 2.26:
+Paired per seed, n = 10, bar |t| > 2.26:
 
 | caps | change in skip rate | 95% CI | t | seeds up |
 |---|---|---|---|---|
@@ -179,104 +180,155 @@ Paired per seed, n = 10, significance bar |t| > 2.26:
 | 12 / 30 | −0.2 points | ±0.4 | −1.05 | 2/10 |
 | 40 / 40 | +0.0 points | ±0.4 | +0.00 | 3/10 |
 
-Not a weak effect -- no effect, with a CI tight enough to exclude anything
-above half a point.
+No effect, with a CI tight enough to exclude half a point.
 
-## Both clauses of falsifier #2 fire
+## Neither falsifier fires as written -- and the answer is the budget
 
-F2 required the skip rate to be unchanged **and** gamma to still not bind.
-Gamma is replayed from the logs using the scheduler's own formula,
-`sum_p / (|V| + sum_p)` with `p_i = sigmoid(c_lambda·(t_eff − 0.5))`:
+F1 needed a skip rate >= 50%: it is 32.1%. F2 needed the skip rate
+unchanged **and** gamma not binding. The skip rate is unchanged, but gamma
+binds hard. Measured **before** the demotion loop:
 
-| caps | mean gamma | max | rounds within 0.01 of the 0.35 cap |
-|---|---|---|---|
-| 8 / 20 | 0.269 | 0.349 | 23/400 (5.8%) |
-| 12 / 30 | 0.267 | 0.349 | 14/400 (3.5%) |
-| 40 / 40 | 0.268 | 0.349 | 19/400 (4.8%) |
+| caps | gamma pre | max | post | over the cap | demoted/seed |
+|---|---|---|---|---|---|
+| 8 / 20 | 0.801 | 1.000 | 0.281 | 345/380 (91%) | 196.3 |
+| 12 / 30 | 0.809 | 1.000 | 0.281 | 344/380 (91%) | 199.2 |
+| 40 / 40 | 0.815 | 1.000 | 0.282 | 343/380 (90%) | 200.4 |
 
-Unchanged across arms, and nowhere near the cap. **The prediction in this
-document is falsified: neither staleness cap was the limiter, and the weight
-budget is not the next ceiling either.** The n=1 container result above was
-right.
+Against a `gamma_budget` of 0.35, and exceeding it in **90% of rounds**.
+Rounds whose tentative pool is empty are excluded: `sum_p = 0` makes their
+gamma a structural 0, a round where the budget cannot bind, and averaging
+them in understated the figure (0.775 against 0.815).
 
-## What the limiter actually is -- and the n=1 note was half right
+**The weight budget is the binding limiter.** The prediction's "second
+ceiling" turns out to be the first and only one; the staleness caps never
+got near it.
 
-The n=1 note named trust eligibility. That is the largest single gate but
-NOT the whole story. Tier 3 requires **two** conditions,
-`t_eff >= theta_high` AND `clean_streak >= k_trust`, and the second blocks
-almost as many client-rounds as the first. Per seed, out of 400 sampled
-client-rounds in the no-expiry arm:
+## What actually decides each client-round
 
-| outcome | client-rounds | share |
-|---|---|---|
-| promoted (skipped) | 128.4 | 32.1% |
-| blocked: raw trust < theta_high = 0.7 | 139.6 | 34.9% |
-| blocked: `clean_streak` < k_trust = 3 | 81.0 | 20.3% |
-| blocked: the `tau_ramp` cap on effective trust | 6.3 | 1.6% |
-| eligible but drawn as a decoy | 13.0 | 3.3% |
-| cleared every gate, still not promoted (budget etc.) | 31.7 | 7.9% |
+Phase 1 of `schedule_verifications` is, in order:
 
-The streak gate is the finding this sweep was not looking for. It resets
-whenever the detector flags the client **or** the behaviour score is <= 0.8,
-and under the 0.6-1.5 rescale window a score above 0.8 requires
-`pretrain_loss_var < 0.780`. Measured over the no-expiry arm, the streak is
-reset on **33.5% of all verifications** (19.9% by the score rule, 13.6% by
-the detector), and only **24.4%** of verifications leave a client standing
-at streak >= 3.
+    if is_stale(c)         -> V    (hard expiry; never-verified counts)
+    elif t_eff < theta_low -> V    (Tier 1)
+    elif t_eff >= theta_high and streak >= k_trust:
+                              V if the decoy roll hits else P   (Tier 3)
+    else                   -> P    (Tier 2, TENTATIVE)
 
-That 33.5% is close to the 40% noisy-client fraction, which is the
-reassuring reading: the gate is mostly resetting the clients it exists to
-catch. But it also means a clean client needs three consecutive clean checks
-to become skippable, and the EMA at `alpha_trust = 0.7` has to climb to 0.7
-in parallel. Those two clocks, not the staleness cap, set the 32% ceiling.
+**Tier 2 is the final `else`, and it promotes.** A client under
+`theta_high`, or with a short streak, is skipped anyway. Phase 2 then
+demotes from the tentative pool, lowest effective trust first, until
+`gamma <= gamma_budget`. Per seed, out of 400 sampled client-rounds (40/40
+arm):
 
-Read with care: trust and the streak update ONLY on verification, so a
-client held below either bar is partly held there *by* being skipped. This
-sizes the gates; it does not settle the direction of causation.
+| branch | client-rounds |
+|---|---|
+| Tier 3, promoted | 74.8 |
+| Tier 2, tentatively promoted | 251.2 |
+| stale -> verify (all first appearances) | 50.0 |
+| Tier 1, trust below theta_low = 0.3 | **10.7** |
+| drawn as a decoy | 13.3 |
+| **demoted by the weight budget** | **200.4** |
+| = actually skipped | 125.6 |
 
-## Accuracy: nothing moves, in either direction
+Tier 1 blocks only 10.7 client-rounds. The budget blocks 200.4. That is the
+whole story, and it is the reverse of what the removed section claimed.
 
-Four endpoints, paired, n = 10, against a round-to-round jitter of 0.0239:
+Replay fidelity: the replay reconstructs trust from the round-keyed log but
+replays the streak and both staleness clocks, so it reproduces the promoted
+**count** to within 2.2% (125.6 vs 128.4 logged) while matching the exact
+promoted **set** in 101 of 400 rounds. Counts are what the table reports.
 
-| caps | final | last3 | last5 | last10 | endpoints cleared |
+## Why the null, as a bookkeeping identity
+
+If the budget binds, relaxing the staleness cap *cannot* raise the skip
+rate: clients the cap stops forcing into V enter the tentative pool, and
+the demotion loop sends the surplus straight back. From the 8/20 arm to the
+40/40 arm:
+
+| quantity | change |
+|---|---|
+| stale -> verify | −5.5 |
+| tentatively promoted | +4.6 |
+| demoted by the budget | +4.1 |
+| **actually skipped** | **+0.5** |
+
+The cap released 5.5 client-rounds; the budget reclaimed 4.1 of them. That
+is a structural count, not a noisy accuracy difference, and it explains the
+null in TEST 1 completely.
+
+## The streak gate: real, but it gates TIER, not skipping
+
+`clean_streak` resets whenever the detector flags the client **or** the
+behaviour score is <= 0.8, and under the 0.6-1.5 rescale window a score
+above 0.8 needs `pretrain_loss_var < 0.780`. It is reset on **33.5% of all
+verifications** (19.9% by the score rule, 13.6% by the detector) and only
+24.4% of checks leave a client standing at streak >= 3.
+
+That 33.5% is close to the 40% noisy fraction, which is the reassuring
+reading: the gate mostly resets the clients it exists to catch. But a short
+streak demotes a client from Tier 3 to Tier 2, and **Tier 2 still
+promotes** -- so the cost is losing the decoy exemption and going first in
+line for budget demotion, not being blocked. Calling it a skip-rate gate
+was the error.
+
+## Accuracy: nothing moves
+
+Four endpoints, paired, n = 10, against round-to-round jitter of 0.0239:
+
+| caps | final | last3 | last5 | last10 | cleared |
 |---|---|---|---|---|---|
 | 8 / 20 | −0.0001 | −0.0020 | −0.0019 | −0.0014 | 0/4 |
 | 12 / 30 | +0.0021 | +0.0016 | +0.0008 | +0.0015 | 0/4 |
 | 40 / 40 | +0.0019 | +0.0004 | −0.0009 | +0.0012 | 0/4 |
 
-CIs on the last10 endpoint are ±0.0018 to ±0.0029 -- tight enough to call
-these real nulls rather than underpowered ones. Two of the three arms fail
-the seeds-1-5 / 6-10 batch-agreement check, which is further reason to read
-them as noise around zero rather than as small positive effects.
-
-## How much authority did the cap have? (counterfactual, upper bound)
-
-Replaying the 4/10 clocks over the no-expiry arm's realised schedule: of the
-66.7 client-rounds per seed the cap would have forced to verify, **50.2
-(75.3%) were blocked by the trust-or-streak gate anyway**. The cap had sole
-authority over 16.5 client-rounds, 4.1% of 400.
-
-Even that 4.1% did not materialise -- the measured change is 0.0 points with
-a CI of ±0.4. The replay cannot account for decoy draws, the weight budget,
-or the feedback by which extra skipping starves the very trust updates that
-make a client eligible later. Treat 4.1% as a ceiling on the cap's
-influence, not a prediction.
+CIs on last10 are ±0.0018 to ±0.0029 -- real nulls, not underpowered ones.
+Two of three arms fail the seeds-1-5 / 6-10 batch-agreement check, further
+reason to read these as noise around zero.
 
 ## What this does and does not license
 
 It does **not** license removing the staleness cap. `byzantine_fraction` is
-0 in every run here. The cap exists to stop a client that once earned trust
-from coasting forever unchecked -- an anti-drift / anti-Sybil guard. Finding
-it costs nothing *without* an attacker says nothing about its value *with*
-one. What the sweep does establish is that the cap is not what is holding
-the skip rate at 32%, so relaxing it is not the route to skipping more.
+0 in every run. The cap stops a client that once earned trust from coasting
+unchecked -- an anti-drift / anti-Sybil guard. Costing nothing *without* an
+attacker says nothing about its value *with* one. What the sweep does
+establish is that the cap is not what holds the skip rate at 32%, so
+relaxing it is not the route to skipping more.
 
 ## The next experiment
 
-`theta_high` and `k_trust`, together, since they are the two gates that
-actually bind. `k_trust` is the cheaper and more interesting of the two: it
-is an integer currently at 3, the behaviour-score reset rule at 0.8 is doing
-more work than its one-line justification suggests, and dropping it to 1 or
-2 is a one-field change. `theta_high` is the bigger lever but moves the
-Byzantine-robustness story with it, so it needs an attacker arm to be
-meaningful.
+**`gamma_budget`.** It is the binding constraint, it is a single float, and
+pre-demotion gamma of 0.815 against a 0.35 cap says there is a lot of room.
+Sweep it at 0.45 / 0.55 / 0.70 and the skip rate should move for the first
+time in this project. That is also the experiment with a real safety
+story to tell, because the budget is exactly the knob that bounds how much
+aggregate weight unverified clients may hold -- so it needs a Byzantine arm
+alongside it, not just a clean one.
+
+`theta_low` is the only other gate with any force, and at 10.7 client-rounds
+it has little to give. `theta_high` and `k_trust` move clients between Tier
+2 and Tier 3, which changes decoy exposure and demotion order but not
+eligibility to skip.
+
+## The two errors in the removed section, kept as warnings
+
+**1. Measuring a constraint by its own output.** The first pass computed
+gamma from the *logged* promoted and verified sets -- that is, after the
+demotion loop. The loop runs until `gamma <= gamma_budget`, so the post
+value is under the cap by construction, however hard the budget bit. It
+read 0.268 against a 0.35 cap and concluded "gamma does not bind". The
+pre-demotion value is 0.815, over the cap in 90% of rounds. The lesson: to
+ask whether a constraint binds, measure its input, never its output.
+
+Why gamma lands at 0.268 rather than just under 0.35: the loop demotes in
+ascending trust order, so the last client removed is the highest-trust one
+still in the pool and carries a large posterior weight. The final step
+overshoots well past the cap.
+
+**2. Using the Tier-3 condition as the condition for skipping.** The first
+pass treated `t_eff >= theta_high AND clean_streak >= k_trust` as what a
+client needs to be skipped, and reported everything failing it as
+"blocked": 140 client-rounds on the trust bar, 81 on the streak. Those were
+Tier-2 clients the scheduler was skipping happily. `test_trust_by_round_
+logging.py`'s own docstring already said Tier 2 is tentatively promoted,
+and the attribution contradicted it. The lesson: replay the branch order
+from the source, and check that the replayed outcome reproduces the logged
+one -- which is now reported as `set_match` on every run.
