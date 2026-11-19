@@ -200,6 +200,24 @@ def test_streak_score_cutoff_tag():
     return True
 
 
+def test_model_type_tag():
+    """A different backbone must never share a results directory with the
+    cifar_cnn runs: the numbers are not comparable, and --skip-completed
+    would reuse them. Untagged at cifar_cnn so existing paths survive."""
+    m = _load_pilot_module()
+    base = m._config_tag(_Args())
+    assert m._config_tag(_Args(model_type="cifar_cnn")) == base, (
+        "an explicit cifar_cnn must not change existing directory names"
+    )
+    assert m._config_tag(_Args(model_type=None)) == base, (
+        "a None model_type must fall back to the default, not crash"
+    )
+    tag = m._config_tag(_Args(model_type="resnet18"))
+    assert tag != base and "model-resnet18" in tag, tag
+    print("✓ model-type: untagged at cifar_cnn, model-resnet18 otherwise")
+    return True
+
+
 def main():
     print("🧪 pilot _config_tag Test Suite")
     print("=" * 60)
@@ -208,6 +226,7 @@ def main():
         test_priority_configurations_get_distinct_tags,
         test_partial_noise_config_raises,
         test_streak_score_cutoff_tag,
+        test_model_type_tag,
     ]
     for t in tests:
         assert t() is True

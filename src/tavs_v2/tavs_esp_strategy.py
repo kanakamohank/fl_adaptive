@@ -941,6 +941,25 @@ class TavsEspStrategy(Strategy):
                     client_blocks[block_name] = torch.tensor(flat[offset : offset + size], dtype=torch.float32)
                     offset += size
             else:
+                # Reject a client whose tensor COUNT does not match the
+                # model, the same way the single-array branch above rejects a
+                # wrong total size. Without this the loop below just stopped
+                # early and produced a partial update: the aggregator seeds
+                # its output from the first client's keys, so the missing
+                # blocks vanished silently and aggregate_fit died hundreds of
+                # lines later on `aggregated_blocks[name]` with a KeyError
+                # naming a block and nothing naming the client. That is how
+                # the ResNet-18 switch failed -- clients sent 10 tensors
+                # against 62 blocks -- and it cost four instrumented runs to
+                # find. Fail where the fault is.
+                if len(ndarrays) != len(block_items):
+                    logger.warning(
+                        f"Client {cid} sent {len(ndarrays)} tensors, expected "
+                        f"{len(block_items)} blocks. Dropping. (A model-type "
+                        f"mismatch between server and client looks exactly "
+                        f"like this.)"
+                    )
+                    continue
                 for i, (block_name, size) in enumerate(block_items):
                     if i >= len(ndarrays): break
                     arr = np.asarray(ndarrays[i], dtype=np.float64).flatten()
@@ -952,6 +971,34 @@ class TavsEspStrategy(Strategy):
             parsed[cid] = client_blocks
         return parsed
 
+    @staticmethod
+    def _drop_failed_clients(results, server_round=None):
+        """Split results into (kept, failed_cids) on the `error` metric.
+
+        TAVSFlowerClient.fit() catches every training exception and returns
+        the UNCHANGED incoming parameters with num_examples=0 and an `error`
+        metric. Aggregating that is a silent vote for no-op, and the
+        `max(1, int(num_examples))` below would even restore a crashed client
+        to full aggregation weight. Nothing else reads the error metric, so
+        this is the only place the failure can surface.
+
+        A separate method so it can be tested on its own: an earlier version
+        lived inline and a test that merely grepped aggregate_fit's source
+        for `.get("error")` passed against a mutation that had removed the
+        filtering entirely.
+        """
+        failed = [proxy.cid for proxy, res in results
+                  if (res.metrics or {}).get("error")]
+        if not failed:
+            return results, failed
+        logger.warning(
+            f"Round {server_round}: dropping {len(failed)} client(s) whose "
+            f"training failed: {failed[:5]}"
+        )
+        kept = [(proxy, res) for proxy, res in results
+                if not (res.metrics or {}).get("error")]
+        return kept, failed
+
     def aggregate_fit(self, server_round: int, results: List[Tuple[ClientProxy, FitRes]], failures: List[Union[Tuple[ClientProxy, FitRes], BaseException]]):
         if not results:
             return None, {}
@@ -961,6 +1008,24 @@ class TavsEspStrategy(Strategy):
 
         # Sample counts, for FedAvg-style weighting below. Flower already carries
         # these in FitRes; they were simply never read.
+        # Drop any client whose fit() raised: TAVSFlowerClient's handler
+        # returns the UNCHANGED incoming parameters with num_examples=0, so
+        # without this the server aggregates a crashed client's stale weights
+        # as though they were a real update -- a silent vote for no-op. The
+        # `max(1, ...)` below would even restore it to a full aggregation
+        # weight. The error never surfaced anywhere, which is why the
+        # ResNet-18 failure presented as a KeyError rather than as "every
+        # client failed to train".
+        results, failed = self._drop_failed_clients(results, server_round)
+        if not results:
+            logger.error(
+                f"Round {server_round}: EVERY client failed to train; "
+                f"skipping aggregation rather than inventing an update."
+            )
+            return None, {"all_clients_failed": len(failed)}
+        if failed:
+            all_updates = self._parse_client_updates(results)
+
         num_examples = {proxy.cid: max(1, int(res.num_examples))
                         for proxy, res in results}
         

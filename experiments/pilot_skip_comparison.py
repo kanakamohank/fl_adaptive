@@ -68,6 +68,12 @@ def _config_tag(args) -> str:
     """
     split = getattr(args, "data_split", "dirichlet")
     parts = [f"split-{split}"]
+    # Backbone. Untagged at the historical cifar_cnn so every run already on
+    # disk keeps its path; any other model gets its own directory, because a
+    # different architecture shares nothing meaningful with those results.
+    _model = str(getattr(args, "model_type", "cifar_cnn") or "cifar_cnn")
+    if _model != "cifar_cnn":
+        parts.append(f"model-{_model}")
     if split == "dirichlet":
         parts.append(f"a{args.data_alpha:g}")
 
@@ -411,6 +417,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
         byzantine_fraction=0.0,   # honest only
         tavs_config=tavs_config,
         strategy_class=strategy_class,
+        model_type=str(getattr(args, "model_type", "cifar_cnn") or "cifar_cnn"),
         dataset=getattr(args, "dataset", "cifar10"),
         label_noise_num_classes=int(getattr(args, "label_noise_num_classes", 10)),
         **_pipeline_kwargs,
@@ -824,6 +831,24 @@ def main():
                              "must be raised together to test the expiry at "
                              "all. Doing so does NOT lift the skip rate -- see "
                              "--s-max-appearances.")
+    parser.add_argument("--model-type", default="cifar_cnn",
+                        choices=["cifar_cnn", "resnet18"],
+                        dest="model_type",
+                        help="Backbone. Default cifar_cnn (1.15M params), the "
+                             "model every result on disk used. 'resnet18' is "
+                             "the CIFAR variant (3x3 stride-1 stem, no "
+                             "maxpool) with GroupNorm, 11.17M params, and is "
+                             "what FedCorr, FedGR and FNBench all use for "
+                             "CIFAR-10 -- so it is the setting that makes our "
+                             "accuracies comparable with theirs. GroupNorm "
+                             "rather than BatchNorm is REQUIRED, not "
+                             "stylistic: transport moves weights via "
+                             "zip(model.parameters(), ndarrays) and "
+                             "BatchNorm's running stats are buffers, so they "
+                             "would never reach the server and the evaluated "
+                             "global model would keep its initial statistics "
+                             "all run. Expect roughly 10x the per-round "
+                             "compute of cifar_cnn.")
     parser.add_argument("--streak-score-cutoff", type=float, default=0.8,
                         dest="streak_score_cutoff",
                         help="Behaviour score at or below which a "

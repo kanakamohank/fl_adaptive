@@ -539,6 +539,19 @@ class TAVSESPPipeline:
         # Previously hardcoded to 10 on the strategy, which forced the server
         # to ship 10-class weights even on CIFAR-100 runs.
         strategy_config.num_classes = int(getattr(self.config, "label_noise_num_classes", 10))
+        # Push model_type for exactly the same reason, and it is exactly the
+        # same latent bug one field over. initialize_parameters reads
+        # `getattr(self.config, "model_type", "cifar_cnn")`, but the strategy's
+        # self.config is the TavsEspConfig, which has no model_type field -- so
+        # it silently fell back to the default. That was invisible while every
+        # run used cifar_cnn, and broke the moment one did not: the server
+        # shipped a 10-tensor CIFARCNN as initial parameters while its own
+        # model_blocks held the real model's 62, every client's fit() threw on
+        # the mismatch and hit `except: return parameters`, handing those 10
+        # arrays straight back, and aggregate_fit died on the first block the
+        # CNN does not have (KeyError: 'layer1_1_gn1_weight').
+        strategy_config.model_type = str(getattr(self.config, "model_type",
+                                                 "cifar_cnn"))
         # Cohort sampling must vary with the run seed but stay fixed for a given
         # (seed, round), which is what makes the two arms genuinely paired.
         strategy_config.sampling_seed = self.config.seed
