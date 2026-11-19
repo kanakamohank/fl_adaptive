@@ -322,6 +322,30 @@ class TavsEspConfig:
     # window, not pass-through.
     pretrain_loss_var_rescale_lo: float = 0.5
     pretrain_loss_var_rescale_hi: float = 3.0
+    # Behaviour score at or below which a verification RESETS the clean
+    # streak rather than extending it, gating entry to Tier 3. Previously a
+    # literal 0.8 in algo1_tavs_scheduler.update_trust, which made it the
+    # only threshold in the scheduler with no knob -- while firing on 19.9%
+    # of all verifications.
+    #
+    # It is NOT independent of the two fields above. With a linear rescale,
+    # "score > cutoff" is exactly "raw < t*" for
+    #
+    #     t* = rescale_lo + (1 - streak_score_cutoff) * (hi - lo)
+    #
+    # so the window and the cutoff are two parameterisations of one
+    # threshold. At the pilot's window (0.6, 1.5) and cutoff 0.8, t* = 0.780.
+    # Measured over 2716 verifications of the a=1.0 runs, that keeps 91.2% of
+    # clean client-rounds against 62.8% of noisy ones (+28.4 points).
+    #
+    # Sweeping t* reaches +31.9 at t* = 0.60, but that optimum was found by
+    # maximising separation against ground-truth noisy labels, which the
+    # scheduler cannot see and which the experiment exists to test. Chasing
+    # it is tuning on the test signal for 3.5 points, measured on one
+    # configuration. The shipped 0.780 was not chosen that way and is within
+    # 3.5 points of it. Sweep t*, not one side of it -- and if you do, say
+    # in the writeup that the value was label-tuned.
+    streak_score_cutoff: float = 0.8
     # Oracle-only: config-ids ("honest_XX") of clients the pipeline KNOWS to
     # be clean (did not inject label noise). Pushed by the pipeline before
     # the simulation starts; empty means no oracle info is available and the
@@ -455,6 +479,8 @@ class TavsEspStrategy(Strategy):
             initial_trust=getattr(self.config, 'initial_trust', 0.25),
             bootstrap_verify_new_clients=getattr(
                 self.config, 'bootstrap_verify_new_clients', True),
+            streak_score_cutoff=getattr(
+                self.config, 'streak_score_cutoff', 0.8),
         )
         
         self.projector = EphemeralStructuredProjection(

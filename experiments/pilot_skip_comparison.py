@@ -190,6 +190,11 @@ def _config_tag(args) -> str:
     _sr = int(getattr(args, "s_max_rounds", 10) or 10)
     if _sr != 10:
         parts.append(f"sr{_sr:02d}")
+    # Also outside the twagg block: the streak cutoff gates Tier-3 ENTRY, so
+    # it changes routing whether or not trust is translated into weight.
+    _ssc = float(getattr(args, "streak_score_cutoff", 0.8))
+    if abs(_ssc - 0.8) > 1e-9:
+        parts.append(f"ssc{int(round(_ssc * 100)):03d}")
     return "_".join(parts)
 
 
@@ -296,6 +301,7 @@ def run_one(arm: str, seed: int, args, skip_rate: float):
             getattr(args, "trust_weighting_start_round", 1) or 1),
         trust_weight_strength=float(
             getattr(args, "trust_weight_strength", 1.0)),
+        streak_score_cutoff=float(getattr(args, "streak_score_cutoff", 0.8)),
         s_max_appearances=int(getattr(args, "s_max_appearances", 4) or 4),
         s_max_rounds=int(getattr(args, "s_max_rounds", 10) or 10),
         # One CLI flag sets BOTH floors. Omitted -> the dataclass defaults
@@ -798,13 +804,16 @@ def main():
                              "which a client was SAMPLED but not verified. "
                              "Default 4. Together with --s-max-rounds this is "
                              "the hard expiry on trust: it fires regardless of "
-                             "how trustworthy a client is, and on the runs "
-                             "measured so far it forces 2.8-3.2 verifications "
-                             "per 10-client cohort -- about as many clients as "
-                             "the scheduler manages to skip. Raising it is the "
-                             "main lever on the skip rate; the weight budget "
-                             "(--gamma-budget equivalent) binds in under 6%% of "
-                             "rounds and is not.")
+                             "how trustworthy a client is. SUPERSEDED CLAIM: "
+                             "this help once said raising it was the main "
+                             "lever on the skip rate and that the weight "
+                             "budget was not. The 10-seed sweep disproved "
+                             "both. Lifting both caps to 40/40 so the expiry "
+                             "never fires moves the skip rate by +0.0 points "
+                             "(95%% CI +-0.4). The budget is the limiter: "
+                             "pre-demotion gamma is 0.815 against a 0.35 cap "
+                             "and it demotes ~5 of every 10 sampled clients. "
+                             "See findings/prediction_staleness_sweep.md.")
     parser.add_argument("--s-max-rounds", type=int, default=10,
                         dest="s_max_rounds",
                         help="Force re-verification this many rounds after the "
@@ -812,8 +821,33 @@ def main():
                              "Default 10. The wall-clock half of the staleness "
                              "cap: a rarely-sampled client trips this one long "
                              "before it accumulates appearances, so both caps "
-                             "must be raised together to actually lift the "
-                             "skip rate.")
+                             "must be raised together to test the expiry at "
+                             "all. Doing so does NOT lift the skip rate -- see "
+                             "--s-max-appearances.")
+    parser.add_argument("--streak-score-cutoff", type=float, default=0.8,
+                        dest="streak_score_cutoff",
+                        help="Behaviour score at or below which a "
+                             "verification RESETS the clean streak instead of "
+                             "extending it, gating entry to Tier 3. Default "
+                             "0.8, which until now was a literal in "
+                             "algo1_tavs_scheduler.update_trust -- the only "
+                             "threshold in the scheduler with no knob, while "
+                             "firing on 19.9%% of all verifications. NOT "
+                             "independent of --pretrain-loss-var-rescale: with "
+                             "a linear rescale, 'score > cutoff' is exactly "
+                             "'raw < t*' for t* = lo + (1 - cutoff)*(hi - lo), "
+                             "so the two are one threshold in two "
+                             "parameterisations. At (0.6, 1.5) and 0.8, "
+                             "t* = 0.780, which keeps 91.2%% of clean "
+                             "client-rounds against 62.8%% of noisy ones "
+                             "(+28.4 points). Sweeping t* reaches +31.9 at "
+                             "0.60, but that optimum was found against "
+                             "GROUND-TRUTH noisy labels, so adopting it is "
+                             "tuning on the test signal for 3.5 points, on "
+                             "one configuration. The shipped 0.780 was not "
+                             "chosen that way and is within 3.5 points of it; "
+                             "it needs no change. Sweep t*, not one side, and "
+                             "report any swept value as label-tuned.")
     parser.add_argument("--trust-weight-floor", type=float, default=None,
                         dest="trust_weight_floor",
                         help="Smallest weight multiplier an ACCEPTED client "
