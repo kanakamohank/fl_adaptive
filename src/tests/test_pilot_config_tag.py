@@ -174,6 +174,50 @@ def test_partial_noise_config_raises():
     return True
 
 
+def test_streak_score_cutoff_tag():
+    """The new --streak-score-cutoff must be untagged at its default and
+    tagged otherwise, exactly like the staleness caps.
+
+    Untagged at 0.8 is load-bearing, not cosmetic: every run already on disk
+    used the hardcoded 0.8, and if an explicit 0.8 produced a different
+    directory name those runs would stop matching --skip-completed and the
+    whole corpus would silently re-run under a new path.
+    """
+    m = _load_pilot_module()
+    base = m._config_tag(_Args())
+    # Absent attribute and explicit default must both give the historical tag.
+    assert m._config_tag(_Args(streak_score_cutoff=0.8)) == base, (
+        "an explicit 0.8 must not change the directory name"
+    )
+    # Float noise must not tag either -- 0.1+0.7 != 0.8 exactly in binary.
+    assert m._config_tag(_Args(streak_score_cutoff=0.1 + 0.7)) == base, (
+        "the default check must tolerate float representation error"
+    )
+    for val, suffix in ((0.6, "ssc060"), (0.95, "ssc095"), (0.0, "ssc000")):
+        tag = m._config_tag(_Args(streak_score_cutoff=val))
+        assert tag == f"{base}_{suffix}", (val, tag)
+    print("✓ streak-score-cutoff: untagged at 0.8, tagged as sscNNN otherwise")
+    return True
+
+
+def test_model_type_tag():
+    """A different backbone must never share a results directory with the
+    cifar_cnn runs: the numbers are not comparable, and --skip-completed
+    would reuse them. Untagged at cifar_cnn so existing paths survive."""
+    m = _load_pilot_module()
+    base = m._config_tag(_Args())
+    assert m._config_tag(_Args(model_type="cifar_cnn")) == base, (
+        "an explicit cifar_cnn must not change existing directory names"
+    )
+    assert m._config_tag(_Args(model_type=None)) == base, (
+        "a None model_type must fall back to the default, not crash"
+    )
+    tag = m._config_tag(_Args(model_type="resnet18"))
+    assert tag != base and "model-resnet18" in tag, tag
+    print("✓ model-type: untagged at cifar_cnn, model-resnet18 otherwise")
+    return True
+
+
 def main():
     print("🧪 pilot _config_tag Test Suite")
     print("=" * 60)
@@ -181,6 +225,8 @@ def main():
         test_historical_default_tag_is_preserved,
         test_priority_configurations_get_distinct_tags,
         test_partial_noise_config_raises,
+        test_streak_score_cutoff_tag,
+        test_model_type_tag,
     ]
     for t in tests:
         assert t() is True

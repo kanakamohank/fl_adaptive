@@ -84,6 +84,34 @@ class TavsScheduler:
         # is_stale -- those are a separate hard-expiry mechanism, and
         # ablating them is a different experiment.
         bootstrap_verify_new_clients: bool = True,
+        # Behaviour score at or below which a verification RESETS the clean
+        # streak instead of extending it. Was hardcoded at 0.8.
+        #
+        # WHY IT MATTERS THAT THIS IS A KNOB. With a linear rescale this
+        # value and the rescale window are REDUNDANT: together they define a
+        # single effective threshold on the RAW signal,
+        #
+        #     t* = rescale_lo + (1 - streak_score_cutoff) * (hi - lo)
+        #
+        # At the shipped window (0.6, 1.5) and cutoff 0.8 that is t* = 0.780.
+        # Measured over 2716 verifications, raw < 0.780 keeps 91.2% of clean
+        # client-rounds and 62.8% of noisy ones: +28.4 points of separation.
+        #
+        # ORACLE-TUNING WARNING. Sweeping the same quantity gives a maximum
+        # of +31.9 at t* = 0.60, but that optimum was located by maximising
+        # separation against GROUND-TRUTH noisy-client labels -- information
+        # the scheduler does not have and the thing the experiment is
+        # evaluating. Setting t* = 0.60 on the strength of it is tuning on
+        # the test signal, for 3.5 separation points, on one configuration
+        # (alpha=1.0 Dirichlet, cifar10n-worst, 40% noisy). The shipped
+        # t* = 0.780 was NOT chosen that way and lands within 3.5 points of
+        # the label-optimal value, so it needs no change. If a sweep is run,
+        # the chosen value must be reported as label-tuned.
+        #
+        # The reason to expose this parameter is therefore NOT that 0.8 is
+        # wrong: it is that t* was previously un-settable at all, being split
+        # across a config field and a literal in the source.
+        streak_score_cutoff: float = 0.8,
     ):
         # 1-to-1 Notation Mapping with Paper
         self.gamma_budget = gamma_budget  # \gamma_{budget}: Max unverified influence
@@ -111,6 +139,27 @@ class TavsScheduler:
         self.decay_trust_on_promotion = decay_trust_on_promotion
         self.initial_trust = initial_trust
         self.bootstrap_verify_new_clients = bootstrap_verify_new_clients
+        # Reject a cutoff that silently disables Tier 3. Behaviour scores are
+        # bounded in [0, 1], and the reset test is `score <= cutoff`, so any
+        # cutoff >= 1.0 resets the streak on EVERY verification: a client
+        # scoring a perfect 1.0 every time still never reaches Tier 3, for the
+        # whole run, with nothing in the logs saying so. `--streak-score-cutoff
+        # 8` as a typo for 0.8 is the realistic way in, and it even produces a
+        # plausible-looking config tag (ssc800), so the mistake survives into
+        # the results tree. Fail loudly instead.
+        if not 0.0 <= streak_score_cutoff < 1.0:
+            raise ValueError(
+                f"streak_score_cutoff must be in [0.0, 1.0), got "
+                f"{streak_score_cutoff!r}. Behaviour scores are bounded in "
+                f"[0, 1] and the streak resets on `score <= cutoff`, so a "
+                f"cutoff of 1.0 or above resets on every verification and "
+                f"makes Tier 3 permanently unreachable. Did you mean "
+                f"{streak_score_cutoff / 100:.2f}?"
+                if streak_score_cutoff >= 1.0 else
+                f"streak_score_cutoff must be in [0.0, 1.0), got "
+                f"{streak_score_cutoff!r}."
+            )
+        self.streak_score_cutoff = streak_score_cutoff
 
         # State tracking
         self.trust_scores: Dict[str, float] = {}       # T_i(r)
@@ -285,7 +334,13 @@ class TavsScheduler:
             # threshold (max_z = 1.1 * tau_z) scores 0.9, so a client the
             # detector FLAGGED as Byzantine would still have cleared a 0.8 cutoff
             # and kept accumulating its clean streak towards Tier 3 promotion.
-            if is_outlier or behavior_score <= 0.8:
+            #
+            # The cutoff is self.streak_score_cutoff (default 0.8, the value
+            # this line carried as a literal). See its docstring in __init__:
+            # it and the rescale window jointly set one effective threshold on
+            # the raw signal, so sweeping it in isolation is only half the
+            # knob.
+            if is_outlier or behavior_score <= self.streak_score_cutoff:
                 self.clean_streaks[client_id] = 0
             else:
                 self.clean_streaks[client_id] = self.clean_streaks.get(client_id, 0) + 1
